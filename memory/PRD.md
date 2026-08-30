@@ -22,6 +22,12 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - Client auth + admin panel
 
 ## Implemented (2026-06)
+### Iteration 6 additions
+- Hero now uses an AI-generated image of Sudarshan coaching a leadership team (boardroom, lime-accented); auto-animates (Ken-Burns), play button removed
+- Sector case studies added: Aviation, Metals & Mining, Telecom, Agriculture (appear in Case Studies + Insights)
+- All home-page Service cards are clickable → link to their /services/:slug pages (slugs added to seed SERVICES + /api/meta)
+- Article seeding made idempotent (upsert by slug) so new content lands in existing DBs
+
 ### Iteration 5 additions
 - Fresh, bolder UI: display font switched to Bricolage Grotesque (distinctive contemporary grotesque), Cormorant serif retained for the logo, Outfit body — high-contrast, fresh feel
 - Hero now plays a real coaching VIDEO (boardroom/leadership footage, autoplay muted loop) with a transparent gradient overlay + "Coaching CXOs & senior leadership" caption (stock placeholder for Sudarshan's own coaching film)

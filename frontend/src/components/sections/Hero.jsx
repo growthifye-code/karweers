@@ -1,8 +1,7 @@
 import { motion } from "framer-motion";
-import { ArrowUpRight, Sparkles, Play } from "lucide-react";
+import { ArrowUpRight, Sparkles } from "lucide-react";
 
-const VIDEO = "https://assets.mixkit.co/videos/42644/42644-720.mp4";
-const POSTER = "https://images.unsplash.com/photo-1573166364839-1bfe9196c23e?crop=entropy&cs=srgb&fm=jpg&q=80&w=1000";
+const COACH = "https://static.prod-images.emergentagent.com/jobs/69d54eb7-07e1-4ffd-ad08-8725f9f9829e/images/5b2f94a6fd021cc779249c997e2a7e9f42370d01aeb0897c98fa6f1010e0dcce.jpeg";
 
 export default function Hero() {
   return (
@@ -40,18 +39,13 @@ export default function Hero() {
         <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.8, delay: 0.2 }} className="relative">
           <div className="relative overflow-hidden rounded-[2rem] border border-border bg-[hsl(var(--primary))]/10">
             <div className="aspect-[4/5] overflow-hidden">
-              <video autoPlay muted loop playsInline poster={POSTER} data-testid="hero-video" className="h-full w-full object-cover">
-                <source src={VIDEO} type="video/mp4" />
-              </video>
+              <img src={COACH} alt="Sudarshan Karweer coaching a leadership team" data-testid="hero-video" className="kenburns h-full w-full object-cover" />
             </div>
-            <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-black/10" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
             <div className="absolute right-5 top-5 inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-3 py-1.5 text-xs font-bold text-[hsl(var(--primary-foreground))]">
               <span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-current opacity-60" /><span className="relative inline-flex h-2 w-2 rounded-full bg-current" /></span>
               Coaching, in motion
             </div>
-            <button className="group absolute left-1/2 top-1/2 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white/15 backdrop-blur-md transition-transform hover:scale-110" data-testid="hero-play" aria-label="Brand film">
-              <Play className="h-6 w-6 translate-x-0.5 fill-white text-white" />
-            </button>
             <div className="absolute bottom-5 left-5 right-5">
               <p className="font-logo text-2xl font-bold text-white">Sudarshan Karweer</p>
               <p className="text-sm text-white/80">Coaching CXOs & senior leadership</p>

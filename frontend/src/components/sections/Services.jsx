@@ -1,4 +1,6 @@
 import { motion } from "framer-motion";
+import { Link } from "react-router-dom";
+import { ArrowUpRight } from "lucide-react";
 
 export default function Services({ services = [] }) {
   return (
@@ -28,7 +30,8 @@ export default function Services({ services = [] }) {
                 {featured && (
                   <img src={s.image} alt="" className="absolute inset-0 h-full w-full object-cover opacity-20" />
                 )}
-                <div className="relative">
+                <Link to={`/services/${s.slug}`} data-testid={`service-link-${s.slug}`} aria-label={s.title} className="absolute inset-0 z-10" />
+                <div className="relative pointer-events-none">
                   <p className={`font-display text-sm font-bold ${featured ? "text-[hsl(var(--accent))]" : "text-muted-foreground"}`}>{s.no}</p>
                   <h3 className="mt-4 font-display text-xl font-bold leading-snug">{s.title}</h3>
                   <p className={`mt-3 text-sm leading-relaxed ${featured ? "text-[hsl(var(--primary-foreground))]/80" : "text-muted-foreground"}`}>{s.desc}</p>
@@ -37,6 +40,9 @@ export default function Services({ services = [] }) {
                       <span key={t} className={`rounded-full px-3 py-1 text-xs ${featured ? "bg-white/15 text-white" : "border border-border text-muted-foreground"}`}>{t}</span>
                     ))}
                   </div>
+                  <span className={`mt-5 inline-flex items-center gap-1 text-sm font-semibold ${featured ? "text-white" : "text-[hsl(var(--primary))]"}`}>
+                    Explore <ArrowUpRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                  </span>
                 </div>
               </motion.div>
             );

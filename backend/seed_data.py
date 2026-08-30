@@ -152,6 +152,7 @@ ARTICLES = [
 SERVICES = [
     {
         "no": "01",
+        "slug": "premium-consultation",
         "title": "Premium 1:1 Strategic Consultation",
         "desc": "Direct advisory for business owners in renewable energy and storage — strategy, fundraising, new business development and scaling. High-signal, decision-grade counsel.",
         "tags": ["Strategy", "Fundraising", "Scaling"],
@@ -159,6 +160,7 @@ SERVICES = [
     },
     {
         "no": "02",
+        "slug": "re-storage-hydrogen",
         "title": "RE, Storage & Green Hydrogen Advisory",
         "desc": "End-to-end advisory across renewables, BESS and green hydrogen — feasibility, technology selection, bankability and offtake structuring.",
         "tags": ["Renewables", "BESS", "Hydrogen"],
@@ -166,6 +168,7 @@ SERVICES = [
     },
     {
         "no": "03",
+        "slug": "green-climate-financing",
         "title": "Green & Climate Financing",
         "desc": "Blended finance, sustainability-linked structures and debt syndication that move climate projects from viable to financially closed.",
         "tags": ["Blended Finance", "Debt", "Climate"],
@@ -173,6 +176,7 @@ SERVICES = [
     },
     {
         "no": "04",
+        "slug": "asset-monetisation",
         "title": "Government Asset Monetisation",
         "desc": "Unlocking value from public assets — from MSRTC bus depots to land and infrastructure portfolios — with structures that preserve public interest.",
         "tags": ["Monetisation", "Infrastructure", "PPP"],
@@ -180,6 +184,7 @@ SERVICES = [
     },
     {
         "no": "05",
+        "slug": "business-coaching",
         "title": "Business Coaching for Founders & CXOs",
         "desc": "23+ years distilled into a coaching engagement that turns founder-led hustle into system-led, scalable growth.",
         "tags": ["Coaching", "Leadership", "Growth"],
@@ -220,3 +225,52 @@ TESTIMONIALS = [
         "role": "State Transport Undertaking",
     },
 ]
+
+CASE_STUDIES = [
+    {
+        "slug": "aviation-turnaround-advisory",
+        "category": "casestudy",
+        "title": "Aviation: Restructuring a Regional Carrier for Profitable Growth",
+        "summary": "Advising a regional airline on network rationalisation, fleet strategy and a capital plan that moved it from cash-burn to a fundable growth story.",
+        "tags": ["Aviation", "Turnaround", "Strategy"],
+        "sector": "Aviation",
+        "image": IMG["economy"],
+        "featured": False,
+        "content": "A regional carrier was growing routes faster than its balance sheet could bear. The engagement reframed growth around profitable density — rationalising the network, right-sizing the fleet plan, and rebuilding unit economics route by route.\n\nThe result was a leaner, fundable business: a capital plan tied to load-factor and yield milestones that lenders and investors could underwrite, turning an operating story into a credit story.",
+    },
+    {
+        "slug": "metals-mining-capex-discipline",
+        "category": "casestudy",
+        "title": "Metals & Mining: Bringing Capital Discipline to a Multi-Site Expansion",
+        "summary": "Sequencing a metals producer's expansion CAPEX against commodity cycles and cash flow to protect the balance sheet while scaling capacity.",
+        "tags": ["Metals & Mining", "CAPEX", "Strategy"],
+        "sector": "Metals & Mining",
+        "image": IMG["finance"],
+        "featured": False,
+        "content": "A metals producer's ambition outran its cash conversion cycle. We sequenced the multi-site expansion against commodity cyclicality — staging CAPEX, hedging input exposure and protecting covenants through the trough.\n\nThe disciplined phasing preserved the balance sheet and let the company add capacity without over-leveraging into a down-cycle — capacity that compounded when prices turned.",
+    },
+    {
+        "slug": "telecom-infrastructure-monetisation",
+        "category": "casestudy",
+        "title": "Telecom: Monetising Passive Infrastructure to Fund the Core",
+        "summary": "Unlocking value from a telecom operator's tower and fibre assets to fund network investment without diluting the core business.",
+        "tags": ["Telecom", "Monetisation", "Infrastructure"],
+        "sector": "Telecom",
+        "image": IMG["meeting"],
+        "featured": False,
+        "content": "A telecom operator was capital-starved while sitting on valuable passive infrastructure. We structured a monetisation of towers and fibre — carving out the assets, designing long-tenor anchor contracts and recycling the proceeds into network investment.\n\nThe operator freed up growth capital and sharpened its focus on the core, while retaining the service quality its subscribers depend on.",
+    },
+    {
+        "slug": "agri-value-chain-scaling",
+        "category": "casestudy",
+        "title": "Agriculture: Scaling an Agri Value-Chain Business with Blended Capital",
+        "summary": "Helping an agri-processing venture build a bankable growth plan and a blended capital structure to scale sourcing, processing and distribution.",
+        "tags": ["Agriculture", "Scaling", "Blended Finance"],
+        "sector": "Agriculture",
+        "image": IMG["climate"],
+        "featured": False,
+        "content": "An agri value-chain business had strong demand but a fragile, working-capital-heavy model. We rebuilt the growth plan around resilient sourcing, processing throughput and distribution economics — then structured a blend of development and commercial capital sized to each risk.\n\nThe venture scaled sourcing and processing capacity on a footing that lenders would fund, turning a promising operation into an institutional-grade growth story.",
+    },
+]
+
+ARTICLES.extend(CASE_STUDIES)

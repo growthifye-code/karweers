@@ -611,14 +611,13 @@ async def startup():
     elif not verify_password(admin_password, existing["password_hash"]):
         await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": hash_password(admin_password)}})
     # Seed articles
-    if await db.articles.count_documents({}) == 0:
-        docs = []
-        for a in ARTICLES:
+    # Seed / ensure articles (upsert by slug, non-destructive)
+    for a in ARTICLES:
+        if not await db.articles.find_one({"slug": a["slug"]}):
             d = dict(a)
             d.update({"id": str(uuid.uuid4()), "author": "Sudarshan Karweer", "created_at": now_iso()})
-            docs.append(d)
-        await db.articles.insert_many(docs)
-        logger.info("Articles seeded: %d", len(docs))
+            await db.articles.insert_one(d)
+    logger.info("Articles ensured")
 
 
 @app.on_event("shutdown")

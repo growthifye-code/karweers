@@ -13,7 +13,7 @@ export default function AIChatWidget() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [messages, setMessages] = useState([
-    { role: "ai", text: "Hi, I'm Karweer AI — Sudarshan's advisory engine. Ask me about the energy transition, financing, strategy or scaling." },
+    { role: "ai", text: "Hi, I'm SK — Sudarshan's advisory engine. Ask me about the energy transition, financing, strategy or scaling." },
   ]);
   const sessionId = useRef("web-" + Math.random().toString(36).slice(2));
   const scrollRef = useRef(null);
@@ -83,7 +83,7 @@ export default function AIChatWidget() {
         className="fixed bottom-6 right-6 z-[60] flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-5 py-3.5 font-semibold text-[hsl(var(--primary-foreground))] shadow-2xl transition-transform hover:-translate-y-1"
       >
         {open ? <X className="h-5 w-5" /> : <Sparkles className="h-5 w-5" />}
-        <span className="hidden sm:inline">{open ? "Close" : "Ask Karweer AI"}</span>
+        <span className="hidden sm:inline">{open ? "Close" : "Ask SK"}</span>
       </button>
 
       {open && (
@@ -94,7 +94,7 @@ export default function AIChatWidget() {
           <div className="flex items-center gap-3 border-b border-border bg-[hsl(var(--primary))] px-5 py-4 text-[hsl(var(--primary-foreground))]">
             <Sparkles className="h-5 w-5" />
             <div>
-              <p className="font-display text-lg font-bold leading-none">Karweer AI</p>
+              <p className="font-display text-lg font-bold leading-none">Ask SK</p>
               <p className="text-xs opacity-80">Advisory intelligence engine</p>
             </div>
           </div>

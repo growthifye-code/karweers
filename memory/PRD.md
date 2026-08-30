@@ -22,6 +22,20 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - Client auth + admin panel
 
 ## Implemented (2026-06)
+### Iteration 3 additions
+- Detailed Service pages (/services + /services/:slug) with workflow, approach & key outcomes; each workflow phase has its own sub-page (/services/:slug/:phase)
+- Growthifye-style header: lime top bar (phone/email), Services hover dropdown + links to every page; new SK logo (Playfair wordmark + lime monogram)
+- Impressive About Me page (/about) — journey timeline + philosophy, single processed portrait
+- Lime-green theme across site; AI-processed zoomed portraits (bg removed, lime rim light); max ONE Sudarshan photo per page
+- Animated Ken-Burns hero portrait with play button (brand-film placeholder)
+- hCaptcha (test keys) on login/register/consultation/newsletter/checkout
+- Security: hardened headers (HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy), 30-min inactivity auto-logout, admin locked to sudarshan@karweers.com
+- Live Deals ticker (Google News RSS, renewables M&A/fundraises, 6h refresh)
+- In-app scheduling after paid consultation + emailed .ics invite (Gmail SMTP; no-op until app password set)
+- Legal: Privacy/GDPR, Terms (incl. payment terms), Refund policy pages
+- SEO: per-page titles + OG + JSON-LD, robots.txt, sitemap.xml
+- AI widget renamed to "Ask SK"
+
 ### Iteration 2 additions
 - Real client photos of Sudarshan Karweer across hero, about, login, register (src/lib/assets.js)
 - Uber-style typography (Plus Jakarta Sans) replacing serif headings

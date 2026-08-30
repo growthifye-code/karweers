@@ -54,6 +54,7 @@ module.exports = {
           navy: '#0A2540',
           emerald: '#118D57',
           ochre: '#F2A900',
+          lime: '#B4E01F',
         },
         chart: {
           '1': 'hsl(var(--chart-1))',

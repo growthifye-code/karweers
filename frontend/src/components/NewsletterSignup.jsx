@@ -3,17 +3,20 @@ import { toast } from "sonner";
 import { Mail, ArrowRight } from "lucide-react";
 import api from "@/lib/api";
 import { formatApiErrorDetail } from "@/context/AuthContext";
+import Captcha from "@/components/Captcha";
 
 export default function NewsletterSignup() {
   const [email, setEmail] = useState("");
+  const [captcha, setCaptcha] = useState("");
   const [busy, setBusy] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
     if (!email) { toast.error("Please enter your email."); return; }
+    if (!captcha) { toast.error("Please complete the captcha."); return; }
     setBusy(true);
     try {
-      const { data } = await api.post("/newsletter", { email });
+      const { data } = await api.post("/newsletter", { email, captcha_token: captcha });
       toast.success(data.message);
       setEmail("");
     } catch (err) {
@@ -46,6 +49,7 @@ export default function NewsletterSignup() {
             {busy ? "Subscribing…" : <>Subscribe <ArrowRight className="h-4 w-4" /></>}
           </button>
         </form>
+        <div className="mt-5 flex justify-center"><Captcha onVerify={setCaptcha} onExpire={() => setCaptcha("")} /></div>
         <p className="mt-4 text-xs text-muted-foreground">No spam. Unsubscribe anytime.</p>
       </div>
     </section>

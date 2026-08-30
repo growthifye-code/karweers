@@ -4,20 +4,23 @@ import { toast } from "sonner";
 import { Logo } from "@/components/Navbar";
 import { useAuth, formatApiErrorDetail } from "@/context/AuthContext";
 import { SK_PHOTOS } from "@/lib/assets";
+import Captcha from "@/components/Captcha";
 
 export default function Register() {
   const { register } = useAuth();
   const navigate = useNavigate();
   const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [captcha, setCaptcha] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const submit = async (e) => {
     e.preventDefault();
+    if (!captcha) { setError("Please complete the captcha."); return; }
     setBusy(true);
     setError("");
     try {
-      await register(form.name, form.email, form.password);
+      await register(form.name, form.email, form.password, captcha);
       toast.success("Account created!");
       navigate("/dashboard");
     } catch (err) {
@@ -41,6 +44,7 @@ export default function Register() {
             <input value={form.email} onChange={set("email")} type="email" placeholder="Email" data-testid="register-email" className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]" />
             <input value={form.password} onChange={set("password")} type="password" placeholder="Password" data-testid="register-password" className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]" />
             {error && <p className="text-sm text-[hsl(var(--destructive))]" data-testid="register-error">{error}</p>}
+            <Captcha onVerify={setCaptcha} onExpire={() => setCaptcha("")} />
             <button type="submit" disabled={busy} data-testid="register-submit" className="w-full rounded-full bg-[hsl(var(--accent))] px-6 py-3.5 font-semibold text-[hsl(var(--accent-foreground))] transition-transform hover:-translate-y-0.5 disabled:opacity-60">
               {busy ? "Creating…" : "Create account"}
             </button>

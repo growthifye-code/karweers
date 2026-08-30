@@ -1,11 +1,13 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState, useRef, useCallback } from "react";
 import api from "@/lib/api";
 
 const AuthContext = createContext(null);
+const IDLE_MS = 30 * 60 * 1000; // 30 minutes
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const idleTimer = useRef(null);
 
   useEffect(() => {
     const token = localStorage.getItem("sk_token");
@@ -16,23 +18,40 @@ export function AuthProvider({ children }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const login = async (email, password) => {
-    const { data } = await api.post("/auth/login", { email, password });
-    localStorage.setItem("sk_token", data.token);
-    setUser(data.user);
-    return data.user;
-  };
-
-  const register = async (name, email, password) => {
-    const { data } = await api.post("/auth/register", { name, email, password });
-    localStorage.setItem("sk_token", data.token);
-    setUser(data.user);
-    return data.user;
-  };
-
-  const logout = () => {
+  const logout = useCallback((redirect = false) => {
     localStorage.removeItem("sk_token");
     setUser(null);
+    if (redirect) window.location.href = "/login";
+  }, []);
+
+  // 30-min inactivity auto-logout
+  useEffect(() => {
+    if (!user) return;
+    const reset = () => {
+      if (idleTimer.current) clearTimeout(idleTimer.current);
+      idleTimer.current = setTimeout(() => logout(true), IDLE_MS);
+    };
+    const events = ["mousemove", "keydown", "click", "scroll", "touchstart"];
+    events.forEach((e) => window.addEventListener(e, reset, { passive: true }));
+    reset();
+    return () => {
+      events.forEach((e) => window.removeEventListener(e, reset));
+      if (idleTimer.current) clearTimeout(idleTimer.current);
+    };
+  }, [user, logout]);
+
+  const login = async (email, password, captchaToken) => {
+    const { data } = await api.post("/auth/login", { email, password, captcha_token: captchaToken });
+    localStorage.setItem("sk_token", data.token);
+    setUser(data.user);
+    return data.user;
+  };
+
+  const register = async (name, email, password, captchaToken) => {
+    const { data } = await api.post("/auth/register", { name, email, password, captcha_token: captchaToken });
+    localStorage.setItem("sk_token", data.token);
+    setUser(data.user);
+    return data.user;
   };
 
   return (

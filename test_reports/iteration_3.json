@@ -1,0 +1,30 @@
+{
+  "summary": "Iteration 3 focused testing of NEW features: hCaptcha enforcement on 5 endpoints, /api/services + workflow/phase data, /api/deals RSS ticker, /api/bookings/schedule (paid-gated), security headers, /robots.txt + /sitemap.xml SEO, admin-lock (only sudarshan@karweers.com is admin; new registrations are 'client' and cannot access /admin/*). Added new pytest suite test_iteration3.py — 20/20 pass, 1 skipped (full paid-flow scheduling requires manual Stripe hosted-page automation). Frontend E2E via external URL: top lime bar shows +91 72089 98944 & sudarshan@karweers.com; Growthifye-style navbar with Services hover dropdown listing all 5 services + All-services link; About/Insights/Case Studies/Market/Deals nav links present; About page loads (single portrait); Services index lists 5 cards; /services/business-coaching shows workflow (Baseline/System Design/Coaching), approach and outcomes; phase page /services/business-coaching/baseline renders with prev/next; legal pages /privacy, /terms, /refund all load with proper per-page <title>; SEO titles change per page (verified 6 distinct titles); /robots.txt and /sitemap.xml served 200; hCaptcha widget renders on /login (2 hcaptcha iframes present); Market Pulse LIVE badges rendered; AI chat widget button says 'Ask SK'. Backend captcha enforcement verified: login/register/consultations/newsletter/payments-checkout ALL return 400 without captcha_token and succeed with valid test token. Bookings schedule returns 402 when payment not confirmed and 404 for unknown session — matches spec. No blocking bugs.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration3.py",
+    "/app/backend/tests/test_new_features.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_iteration3.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "PATCH /api/consultations/{cid} still accepts arbitrary status strings via query param (no Pydantic Literal). Add enum validation to prevent bad states (payment_pending/paid/scheduled/new/closed).",
+    "verify_captcha() raises 503 for network failure but 403 for 'success:false'. Consider normalising: hCaptcha error-codes should be logged for ops visibility.",
+    "/api/services/{slug} does a linear scan of SERVICE_PAGES list; fine for 5 items but consider a dict lookup as it grows.",
+    "server.py is now ~627 lines and mixes auth, articles, consultations, AI, market, newsletter, payments, services, deals, bookings — should be split into routers per domain (per the 700-line guideline; approaching the limit).",
+    "CORS still uses '*' with allow_credentials=True — browsers ignore credentials with wildcard origin. Fine today (Bearer auth) but should list explicit origins if cookies are ever used.",
+    "Booking .ics email is best-effort background task without persistence of send-status; if Gmail creds are set later, failures are only in logs. Consider recording send outcome on the consultation doc.",
+    "Deals cache TTL is 6h with no stale-refresh; if Google News is down at first call after boot, users see an empty ticker until next successful fetch. Consider serving last-good cache indefinitely with soft revalidate.",
+    "Frontend /robots.txt & /sitemap.xml are static (served by CRA build); they will not auto-update when new insights/services are added. Consider generating sitemap.xml server-side from DB."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration3.py"],
+  "success_rate": {"backend": "100% (20/20 new + 10/10 iter2 + 25/25 iter1)", "frontend": "100% of tested flows"},
+  "test_credentials": "Admin sudarshan@karweers.com / Sudarshan@2026 (seeded). hCaptcha test sitekey 10000000-ffff-ffff-ffff-000000000001 with any non-empty response passes siteverify against 0x000...0 secret.",
+  "seed_data_creation": "Test-run inserted ~2 consultations (with captcha), 1 newsletter subscriber, 2 payment_pending Stripe sessions, and 1 client user via /auth/register. All identifiable via TEST/tst_ prefixes in email.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "hCaptcha in automation: pass any non-empty string as captcha_token in JSON body — hCaptcha's test secret 0x000...0 returns success=true regardless of response value. This lets you unit-test forms end-to-end without driving the widget iframe. Bookings scheduling success path (paid state) NOT exercised: to test, either (a) drive Stripe hosted page with card 4242 4242 4242 4242 to flip payment_transactions.payment_status='paid' via /payments/status polling, or (b) directly mutate the payment_transactions doc in Mongo. All new page routes (/about, /services, /services/:slug, /services/:slug/:phase, /privacy, /terms, /refund) render and have unique <title>. Deals endpoint may return empty during rate-limits; that's soft/non-blocking per spec.",
+  "rca of the issue": "N/A — no failing tests."
+}

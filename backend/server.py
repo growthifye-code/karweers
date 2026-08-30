@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Request, HTTPException, Depends
+from fastapi import FastAPI, APIRouter, Request, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -21,6 +21,10 @@ load_dotenv(ROOT_DIR / '.env')
 
 from auth import hash_password, verify_password, create_access_token, decode_token
 from seed_data import ARTICLES, SERVICES, STATS, MARKET_PULSE, TESTIMONIALS
+from services_data import SERVICES as SERVICE_PAGES
+from emailer import send_booking_email
+import xml.etree.ElementTree as ET
+from datetime import datetime as _dt
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
 from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
@@ -30,6 +34,23 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
+HCAPTCHA_SECRET = os.environ.get('HCAPTCHA_SECRET', '')
+
+
+def verify_captcha(token, ip=None):
+    if not token:
+        raise HTTPException(status_code=400, detail="Captcha verification required")
+    try:
+        form = {"secret": HCAPTCHA_SECRET, "response": token}
+        if ip:
+            form["remoteip"] = ip
+        r = requests.post("https://api.hcaptcha.com/siteverify", data=form, timeout=10)
+        ok = r.json().get("success", False)
+    except Exception:
+        raise HTTPException(status_code=503, detail="Captcha service unavailable")
+    if not ok:
+        raise HTTPException(status_code=403, detail="Captcha verification failed")
+    return True
 
 app = FastAPI(title="Sudarshan Karweer Advisory")
 api_router = APIRouter(prefix="/api")
@@ -47,11 +68,13 @@ class RegisterIn(BaseModel):
     name: str
     email: EmailStr
     password: str
+    captcha_token: Optional[str] = None
 
 
 class LoginIn(BaseModel):
     email: EmailStr
     password: str
+    captcha_token: Optional[str] = None
 
 
 class ConsultationIn(BaseModel):
@@ -61,6 +84,7 @@ class ConsultationIn(BaseModel):
     company: Optional[str] = ""
     area: str
     message: str
+    captcha_token: Optional[str] = None
 
 
 class ArticleIn(BaseModel):
@@ -111,7 +135,8 @@ async def require_admin(user: dict = Depends(get_current_user)) -> dict:
 
 # ---------------- Auth routes ----------------
 @api_router.post("/auth/register")
-async def register(body: RegisterIn):
+async def register(body: RegisterIn, request: Request):
+    verify_captcha(body.captcha_token, request.client.host if request.client else None)
     email = body.email.lower()
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -127,7 +152,8 @@ async def register(body: RegisterIn):
 
 
 @api_router.post("/auth/login")
-async def login(body: LoginIn):
+async def login(body: LoginIn, request: Request):
+    verify_captcha(body.captcha_token, request.client.host if request.client else None)
     email = body.email.lower()
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(body.password, user["password_hash"]):
@@ -187,8 +213,10 @@ async def meta():
 
 # ---------------- Consultation routes ----------------
 @api_router.post("/consultations")
-async def create_consultation(body: ConsultationIn):
+async def create_consultation(body: ConsultationIn, request: Request):
+    verify_captcha(body.captcha_token, request.client.host if request.client else None)
     doc = body.model_dump()
+    doc.pop("captcha_token", None)
     doc.update({"id": str(uuid.uuid4()), "status": "new", "created_at": now_iso()})
     await db.consultations.insert_one(doc)
     return {"success": True, "message": "Your consultation request has been received. Sudarshan's team will reach out shortly."}
@@ -337,10 +365,12 @@ async def market_live():
 # ---------------- Newsletter ----------------
 class NewsletterIn(BaseModel):
     email: EmailStr
+    captcha_token: Optional[str] = None
 
 
 @api_router.post("/newsletter")
-async def subscribe(body: NewsletterIn):
+async def subscribe(body: NewsletterIn, request: Request):
+    verify_captcha(body.captcha_token, request.client.host if request.client else None)
     email = body.email.lower()
     if await db.subscribers.find_one({"email": email}):
         return {"success": True, "message": "You're already subscribed — thank you!"}
@@ -373,6 +403,7 @@ class CheckoutIn(BaseModel):
     phone: Optional[str] = ""
     area: Optional[str] = ""
     message: Optional[str] = ""
+    captcha_token: Optional[str] = None
 
 
 @api_router.get("/payments/packages")
@@ -382,6 +413,7 @@ async def get_packages():
 
 @api_router.post("/payments/checkout")
 async def create_checkout(body: CheckoutIn, request: Request):
+    verify_captcha(body.captcha_token, request.client.host if request.client else None)
     pkg = PACKAGES.get(body.package_id)
     if not pkg:
         raise HTTPException(status_code=400, detail="Invalid package")
@@ -452,8 +484,95 @@ async def stripe_webhook(request: Request):
     return {"status": "ok"}
 
 
-app.include_router(api_router)
+# ---------------- Services ----------------
+@api_router.get("/services")
+async def list_services():
+    return [{"slug": s["slug"], "title": s["title"], "tagline": s["tagline"],
+             "overview": s["overview"], "portrait": s["portrait"], "hero_image": s["hero_image"]}
+            for s in SERVICE_PAGES]
 
+
+@api_router.get("/services/{slug}")
+async def get_service(slug: str):
+    for s in SERVICE_PAGES:
+        if s["slug"] == slug:
+            return s
+    raise HTTPException(status_code=404, detail="Service not found")
+
+
+# ---------------- Deals ticker (Google News RSS) ----------------
+_deals_cache = {"ts": 0, "data": []}
+DEALS_QUERY = ('("renewable energy" OR solar OR BESS OR "energy storage" OR "green hydrogen") '
+               '(acquisition OR merger OR stake OR "fund raise" OR "raises" OR investment) when:14d')
+
+
+def _fetch_deals():
+    try:
+        url = "https://news.google.com/rss/search"
+        params = {"q": DEALS_QUERY, "hl": "en-IN", "gl": "IN", "ceid": "IN:en"}
+        r = requests.get(url, params=params, headers={"User-Agent": YF_UA}, timeout=8)
+        root = ET.fromstring(r.content)
+        items = []
+        for item in root.iter("item"):
+            title = item.findtext("title") or ""
+            link = item.findtext("link") or ""
+            pub = item.findtext("pubDate") or ""
+            source_el = item.find("source")
+            source = source_el.text if source_el is not None else ""
+            if " - " in title and not source:
+                source = title.rsplit(" - ", 1)[-1]
+                title = title.rsplit(" - ", 1)[0]
+            items.append({"title": title, "link": link, "source": source, "pubDate": pub})
+            if len(items) >= 15:
+                break
+        return items
+    except Exception:
+        return []
+
+
+@api_router.get("/deals")
+async def deals():
+    now = time.time()
+    if now - _deals_cache["ts"] < 21600 and _deals_cache["data"]:
+        return {"data": _deals_cache["data"], "cached": True}
+    loop = asyncio.get_event_loop()
+    data = await loop.run_in_executor(None, _fetch_deals)
+    if data:
+        _deals_cache["ts"] = now
+        _deals_cache["data"] = data
+    return {"data": data or _deals_cache["data"], "cached": False}
+
+
+# ---------------- Booking scheduling + email ----------------
+class ScheduleIn(BaseModel):
+    session_id: str
+    start: str
+    end: str
+
+
+@api_router.post("/bookings/schedule")
+async def schedule_booking(body: ScheduleIn, background_tasks: BackgroundTasks):
+    txn = await db.payment_transactions.find_one({"session_id": body.session_id})
+    if not txn:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if txn.get("payment_status") != "paid":
+        raise HTTPException(status_code=402, detail="Payment not confirmed yet")
+    consult = await db.consultations.find_one({"session_id": body.session_id})
+    try:
+        start_dt = _dt.fromisoformat(body.start.replace("Z", "+00:00"))
+        end_dt = _dt.fromisoformat(body.end.replace("Z", "+00:00"))
+    except Exception:
+        raise HTTPException(status_code=422, detail="Invalid date")
+    await db.consultations.update_one({"session_id": body.session_id},
+                                      {"$set": {"status": "scheduled", "slot_start": body.start, "slot_end": body.end}})
+    name = (consult or {}).get("name", "Client")
+    email = (consult or {}).get("email", txn.get("email", ""))
+    service = (consult or {}).get("package", "Consultation")
+    background_tasks.add_task(send_booking_email, body.session_id, name, email, service, start_dt, end_dt)
+    return {"success": True, "message": "Session scheduled. A calendar invite is on its way."}
+
+
+app.include_router(api_router)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
@@ -461,6 +580,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 
 
 @app.on_event("startup")

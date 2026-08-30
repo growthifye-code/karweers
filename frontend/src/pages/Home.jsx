@@ -10,6 +10,8 @@ import InsightsPreview from "@/components/sections/InsightsPreview";
 import CaseStudies from "@/components/sections/CaseStudies";
 import Consultation from "@/components/sections/Consultation";
 import NewsletterSignup from "@/components/NewsletterSignup";
+import DealsTicker from "@/components/DealsTicker";
+import Seo from "@/components/Seo";
 import api from "@/lib/api";
 
 export default function Home() {
@@ -32,12 +34,16 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-background text-foreground text-left">
+      <Seo title="Sudarshan Karweer — Business Coach & Energy Transition Advisor"
+        description="Premium 1:1 strategic consultation for renewable energy, storage & green hydrogen founders. Fundraising, strategy, scaling, climate finance & government asset monetisation. 23Y+, 60+ projects."
+        jsonLd={{ "@context": "https://schema.org", "@type": "ProfessionalService", name: "Sudarshan Karweer Advisory", description: "Business coaching & strategic advisory across the energy transition.", email: "sudarshan@karweers.com", areaServed: "Global" }} />
       <Navbar />
       <Hero />
       <Stats stats={meta.stats} />
       <About />
       <Services services={meta.services} />
       <MarketPulse pulse={meta.market_pulse} />
+      <DealsTicker />
       <InsightsPreview articles={articles} />
       <CaseStudies cases={cases} />
       <Consultation testimonials={meta.testimonials} />

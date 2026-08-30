@@ -5,6 +5,7 @@ import { Mail, Phone, MessageCircle, Quote, Check, ArrowUpRight } from "lucide-r
 import api from "@/lib/api";
 import { formatApiErrorDetail } from "@/context/AuthContext";
 import { CONTACT } from "@/lib/assets";
+import Captcha from "@/components/Captcha";
 
 const AREAS = [
   "Fundraising", "Strategy", "New Business Development", "Scaling Current Business",
@@ -16,6 +17,7 @@ export default function Consultation({ testimonials = [] }) {
   const [packages, setPackages] = useState([]);
   const [selected, setSelected] = useState(null);
   const [form, setForm] = useState({ name: "", email: "", phone: "", company: "", area: AREAS[0], message: "" });
+  const [captcha, setCaptcha] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -30,18 +32,21 @@ export default function Consultation({ testimonials = [] }) {
       toast.error("Please fill in your name, email and message.");
       return;
     }
+    if (!captcha) { toast.error("Please complete the captcha."); return; }
     setBusy(true);
     try {
       if (selected) {
         const { data } = await api.post("/payments/checkout", {
           package_id: selected, origin_url: window.location.origin,
           name: form.name, email: form.email, phone: form.phone, area: form.area, message: form.message,
+          captcha_token: captcha,
         });
         window.location.href = data.checkout_url;
         return;
       }
       const { data } = await api.post("/consultations", {
         name: form.name, email: form.email, phone: form.phone, company: form.company, area: form.area, message: form.message,
+        captcha_token: captcha,
       });
       toast.success(data.message || "Request received!");
       setForm({ name: "", email: "", phone: "", company: "", area: AREAS[0], message: "" });
@@ -122,6 +127,7 @@ export default function Consultation({ testimonials = [] }) {
               {AREAS.map((a) => <option key={a} value={a}>{a}</option>)}
             </select>
             <textarea value={form.message} onChange={set("message")} data-testid="consult-message" placeholder={selected ? "Anything to share before the session (optional)" : "Tell me about your business and what you'd like to achieve *"} rows={4} className="mt-4 w-full rounded-lg border border-border bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]" />
+            <div className="mt-4"><Captcha onVerify={setCaptcha} onExpire={() => setCaptcha("")} /></div>
             <button type="submit" disabled={busy} data-testid="consult-submit" className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-[hsl(var(--accent))] px-6 py-3.5 font-semibold text-[hsl(var(--accent-foreground))] transition-transform hover:-translate-y-0.5 disabled:opacity-60">
               {busy ? "Please wait…" : selected ? <>Reserve & Pay ${selectedPkg?.amount} <ArrowUpRight className="h-4 w-4" /></> : "Send Enquiry"}
             </button>

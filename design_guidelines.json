@@ -1,112 +1,109 @@
 {
-  "theme": "dark_and_light",
+  "theme": "dark",
+  "project_type": "hybrid_fullstack",
   "typography": {
-    "headings": {
-      "font_family": "Playfair Display",
-      "weights": [
-        "400",
-        "700",
-        "900"
-      ],
-      "description": "Used for all headings. Delivers a classy, premium, and authoritative vibe suitable for a renowned consultant."
-    },
-    "body": {
-      "font_family": "Manrope",
-      "weights": [
-        "300",
-        "400",
-        "600"
-      ],
-      "description": "Clean, highly readable geometric sans-serif to balance the classic serif."
+    "fonts": {
+      "heading": "Cormorant Garamond",
+      "body": "Outfit",
+      "import_url": "@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400&family=Outfit:wght@300;400;500;600&display=swap');"
     },
     "hierarchy": {
-      "h1": "text-4xl sm:text-5xl lg:text-6xl tracking-tight leading-none",
-      "h2": "text-2xl sm:text-3xl lg:text-4xl tracking-tight leading-tight",
-      "h3": "text-xl sm:text-2xl leading-snug",
-      "body": "text-base leading-relaxed"
-    }
+      "H1": {
+        "usage": "STRICTLY ONE per page. Used for the Hero title.",
+        "classes": "text-5xl md:text-6xl lg:text-7xl font-serif text-white tracking-tight leading-none"
+      },
+      "H2": {
+        "usage": "Used for major section titles (About Me, Services, Market Pulse).",
+        "classes": "text-3xl md:text-5xl font-serif text-white tracking-tight"
+      },
+      "H3": {
+        "usage": "Used for card titles, deal tickers, blog post titles, and service items.",
+        "classes": "text-xl md:text-2xl font-sans font-medium text-white/90 tracking-normal"
+      },
+      "body": {
+        "classes": "text-base md:text-lg font-sans font-light text-white/60 leading-relaxed"
+      },
+      "overline": {
+        "classes": "text-xs font-sans font-semibold text-lime-400 uppercase tracking-[0.2em]"
+      }
+    },
+    "rationale": "Cormorant Garamond provides the 'Uber-rich', editorial, and advisory feel aligning with the Playfair logo, while Outfit brings a highly modern, data-rich tech edge to the body copy."
   },
   "colors": {
-    "archetype": "Luxury + Organic (Premium Consulting & Renewable Energy)",
-    "palette": {
-      "primary": "#0A2540",
-      "primary_foreground": "#FFFFFF",
-      "secondary": "#118D57",
-      "secondary_foreground": "#FFFFFF",
-      "accent": "#F2A900",
-      "accent_foreground": "#0A0A0A",
-      "background_light": "#F9FAFB",
-      "background_dark": "#0A0A0A",
-      "surface_light": "#FFFFFF",
-      "surface_dark": "#141414",
-      "text_light": "#1F2937",
-      "text_dark": "#F3F4F6",
-      "border_light": "rgba(0,0,0,0.1)",
-      "border_dark": "rgba(255,255,255,0.1)"
+    "background": {
+      "default": "#050505",
+      "surface": "#111111",
+      "surface_elevated": "#1A1A1A"
     },
-    "guidelines": "Use deep obsidian and midnight blues to ground the design. Inject vibrant emerald and ochre sparingly for CTAs, data visualization, and highlights to match the 'colourful and classy' request. Never use pure black or pure white."
-  },
-  "visual_enhancers": {
-    "borders": "1px solid delicate inner strokes for cards and panels. Max 8px radius (rounded-lg).",
-    "shadows": "Ambient diffuse shadows (shadow-lg) with soft blur in light mode; subtle inner glow in dark mode.",
-    "glassmorphism": "For sticky navigation: backdrop-blur-xl bg-white/70 (light) or bg-black/60 (dark). Include a delicate 1px border at the bottom. Never use fully transparent backgrounds behind text.",
-    "textures": "Subtle grain texture overlay over dark mode hero sections."
-  },
-  "components": {
-    "cards": "Avoid default Shadcn Card for creative bento layouts. Use raw div with p-6 or p-8, rounded-lg, subtle border.",
-    "buttons": "Pill-shaped (rounded-full) or subtle rounded. Dark mode: pure white bg, black text. Light mode: rich midnight blue bg, white text. Primary CTAs use Accent colour (#F2A900). Hover states: -translate-y-1, slight shadow, and lighter hue.",
-    "inputs": "Shadcn standard inputs, refined with luxury spacing. Background matches surface color.",
-    "navigation": "Visible desktop navigation with Logo (Uber style, colourful & classy text or SVG), 3-5 links, and a primary CTA (Premium 1-1 Consultation). Hamburger menu ONLY on mobile."
-  },
-  "layouts": {
-    "hero": "Asymmetric split layout. Image of Sudarshan Karweer (or equivalent professional portrait) on one side with subtle gradient overlay, bold text and CTA on the other. Include '23Y+ Experience, 60+ Projects, CXO Consulting'.",
-    "bento_grid": "Used for 'Thought Leadership / Services', 'Blog', 'Company Analysis' and 'News Feed'. Mode A: The Tetris Grid. Mix col-span-4, col-span-8, row-span-2 to create tension and artful asymmetry.",
-    "spacing": "Generous spacing philosophy. Use p-8 to p-12 inside bordered containers. Use py-24 or py-32 for section vertical padding."
-  },
-  "motion": {
-    "hover": "Hover states must have a transition: transition-transform 0.2s ease, transition-colors 0.2s ease.",
-    "entrance": "Staggered fade-up for bento grid items and lists.",
-    "scroll": "Smooth scrolling effects. Parallax background for hero sections.",
-    "accessibility": "Respect prefers-reduced-motion."
-  },
-  "accessibility": {
-    "contrast": "Ensure APCA standards. Text on images MUST have gradient overlays (bg-gradient-to-r from-black/70 to-transparent).",
-    "focus": "Clear focus rings (ring-2 ring-primary) on all interactive elements.",
-    "attributes": "Add data-testid attribute on all interactive and key informational elements."
-  },
-  "media": {
-    "image_urls": {
-      "hero_portrait": "https://images.unsplash.com/photo-1560250097-0b93528c311a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1ODh8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBidXNpbmVzcyUyMGNvbnN1bHRhbnQlMjBwb3J0cmFpdHxlbnwwfHx8fDE3ODgxMDcxMjR8MA&ixlib=rb-4.1.0&q=85",
-      "consulting_meeting": "https://images.unsplash.com/photo-1542744173-8e7e53415bb0?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNDR8MHwxfHNlYXJjaHwyfHxidXNpbmVzcyUyMGNvYWNoaW5nJTIwY29uc3VsdGluZyUyMG1lZXRpbmd8ZW58MHx8fHwxNzg4MTA3MTI0fDA&ixlib=rb-4.1.0&q=85",
-      "renewable_energy": "https://images.unsplash.com/photo-1509391366360-2e959784a276?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzV8MHwxfHNlYXJjaHwxfHxyZW5ld2FibGUlMjBlbmVyZ3klMjBzb2xhciUyMHBhbmVscyUyMG1vZGVybnxlbnwwfHx8fDE3ODgxMDcxMjR8MA&ixlib=rb-4.1.0&q=85",
-      "green_hydrogen": "https://images.unsplash.com/photo-1587127831640-7423ae037873?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzN8MHwxfHNlYXJjaHwxfHxncmVlbiUyMGh5ZHJvZ2VuJTIwZmFjaWxpdHklMjB0ZWNobm9sb2d5fGVufDB8fHx8MTc4ODEwNzEyNHww&ixlib=rb-4.1.0&q=85"
+    "accent": {
+      "primary": "#C6F135",
+      "primary_hover": "#D4F462",
+      "glow": "rgba(198, 241, 53, 0.15)"
+    },
+    "text": {
+      "primary": "#FFFFFF",
+      "secondary": "rgba(255, 255, 255, 0.6)",
+      "disabled": "rgba(255, 255, 255, 0.3)"
+    },
+    "border": {
+      "default": "rgba(255, 255, 255, 0.08)",
+      "focus": "rgba(198, 241, 53, 0.5)"
     }
   },
-  "libraries": {
-    "animation": "framer-motion",
-    "icons": "lucide-react",
-    "toast": "sonner",
-    "charts": "recharts"
+  "layouts": {
+    "hero": "Full viewport height. Split or asymmetric layout with animated portrait/film on one side, and high-impact H1 with lime-green accent CTA on the other. Include a subtle floating Stats Band overlapping the bottom edge.",
+    "services_grid": "Bento-style grid (cols-1 md:cols-12). Wide gaps (gap-8). Cards span varying columns to avoid rigid symmetry.",
+    "market_pulse": "High-density data row/ticker layout. Dense, crisp typography using Outfit tabular-nums.",
+    "spacing": "Generous. Use py-24 or py-32 for section padding. Container padding px-6 md:px-12."
+  },
+  "visual_enhancers": {
+    "glassmorphism": "Use backdrop-blur-xl bg-black/60 border-b border-white/10 for the floating navigation and sticky elements.",
+    "borders": "1px crisp inner borders (border-white/10) to define structure instead of heavy shadows. Gives the 'Uber' structural tech feel.",
+    "hover_states": "Cards should slightly lift (-translate-y-1) and reveal a subtle lime-green ambient shadow (shadow-[0_8px_32px_rgba(198,241,53,0.1)]).",
+    "favicon": "Use 'SK' initials in Playfair Display, Lime Green on Black background."
+  },
+  "motion": {
+    "page_load": "Fade and slight upward drift (framer-motion initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}).",
+    "scroll": "Use Lenis for smooth momentum scrolling. Stagger grid item entrances.",
+    "ticker": "Continuous marquee for Market Pulse / Deals Ticker using react-fast-marquee. Seamless, slow, horizontal drift."
+  },
+  "image_urls": {
+    "business_consulting": {
+      "url": "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODF8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBidXNpbmVzcyUyMGNvYWNoJTIwY29uc3VsdGFudHxlbnwwfHx8fDE3ODgxMTA4OTh8MA&ixlib=rb-4.1.0&q=85",
+      "category": "Services Grid - Advisory/Consulting",
+      "description": "Professional business meeting context, hands gesturing."
+    },
+    "energy_transition": {
+      "url": "https://images.unsplash.com/photo-1562519990-50eb51e282b2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzZ8MHwxfHNlYXJjaHwxfHxlbmVyZ3klMjB0cmFuc2l0aW9uJTIwcmVuZXdhYmxlJTIwd2luZCUyMHNvbGFyJTIwbW9kZXJufGVufDB8fHx8MTc4ODExMDg5N3ww&ixlib=rb-4.1.0&q=85",
+      "category": "Services Grid - Energy Transition",
+      "description": "Modern white wind turbines against a clear sky."
+    },
+    "sudarshan_portrait": {
+      "url": "https://images.unsplash.com/photo-1620668233692-c83e9563f337?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NjV8MHwxfHNlYXJjaHwxfHxwcmVtaXVtJTIwbWFsZSUyMHBvcnRyYWl0JTIwcHJvZmVzc2lvbmFsJTIwc3VpdCUyMGRhcmslMjBiYWNrZ3JvdW5kfGVufDB8fHx8MTc4ODExMDg5OHww&ixlib=rb-4.1.0&q=85",
+      "category": "1:1 Consultation / About Me / Hero",
+      "description": "Premium male portrait in dark suit against dark background."
+    }
   },
   "instructions_to_main_agent": [
-    "Prioritize HTML+Tailwind for marketing layout (landing page). Avoid using Shadcn Card component for the creative Bento grid sections to allow custom styling and asymmetry.",
-    "Implement a robust Dark/Light theme toggle.",
-    "Do not center-align the main App container (`.App { text-align: center; }` is forbidden).",
-    "Create a dynamic, interactive AI chatbot floating widget (simulating 'AI engine embed across website').",
-    "Build a separate admin panel route (/admin) and client login page (/login).",
-    "Implement the 'News Feed', 'Blog', 'Company Analysis' (Renewable Energy, Storage, Green Hydrogen), and 'Case Studies' (e.g. Asset Monetisation of Govt Assets, MSRTC bus depots) sections.",
-    "Ensure the 'Uber-style logo' is colourful and classy (a sleek typography logo with a vibrant dot or slash)."
+    "Ensure global CSS imports Cormorant Garamond and Outfit from Google Fonts.",
+    "Implement a strictly dark theme. DO NOT use generic Vercel/Stripe templates.",
+    "Header MUST NOT be fully transparent. Use backdrop-blur-xl bg-black/60 with a bottom border.",
+    "Enforce SEO H-tag rules: Wrap the main hero text in <h1>. Section titles like 'About Me' in <h2>. Card titles in <h3>.",
+    "All service pages (except 1:1 consultation) must use the specific industry images (business_consulting, energy_transition) instead of Sudarshan's photo.",
+    "The 1:1 Consultation page and About page should feature the 'sudarshan_portrait'.",
+    "Integrate Shadcn components (buttons, inputs) but style them with the dark/lime-green palette.",
+    "Buttons should be modern pill-shaped or slightly rounded (rounded-md) with Lime Green background and dark text.",
+    "Add 'data-testid' to all interactive elements, links, and forms."
   ],
+  "accessibility": {
+    "contrast": "Lime Green (#C6F135) on Dark Grey (#050505 / #111111) provides excellent contrast. Ensure disabled text remains legible (at least 4.5:1).",
+    "focus": "All interactive elements must have a visible focus ring (focus:ring-2 focus:ring-[#C6F135] focus:outline-none)."
+  },
   "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
-    "Do not converge toward generic outputs.",
-    "Create depth through layered design elements with z-index hierarchy.",
-    "Use glass-morphism effects with backdrop filters (12-24px blur).",
-    "Never apply universal transitions (e.g., transition: all). Add transitions for specific properties.",
-    "Never use placeholder image URLs or AI emoji characters for icons.",
-    "Use 2-3x more spacing than feels comfortable. Cramped designs look cheap.",
-    "All interactive elements must include a data-testid attribute.",
-    "Incorporate subtle grain textures and micro-animations for interactions.",
-    "Always explicitly set text color on hover.",
-    "Prioritize optical alignment over geometric alignment."
+    "Do not apply 'transition: all'. Target specific properties (e.g., transition-colors, transition-transform).",
+    "Avoid generic centered layouts. Use left alignment for readability unless in specific hero/banner contexts.",
+    "Do not add '.App { text-align: center; }'.",
+    "Create depth with layered z-indexes and 1px borders, rather than muddy shadows.",
+    "Never use AI assistant emoji characters (🤖, 💡, 🚀) as icons. Use Lucide icons."
   ]
 }

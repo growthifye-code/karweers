@@ -35,7 +35,7 @@ export default function ServicesIndex() {
                 <span className="mt-5 inline-flex items-center gap-1 text-sm font-semibold text-[hsl(var(--primary))]">Explore <ArrowUpRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" /></span>
               </div>
               <div className="hidden overflow-hidden bg-[hsl(var(--primary))]/10 sm:block">
-                <img src={SK_PORTRAITS[s.portrait] || SK_PORTRAITS.advisory} alt="" className="h-full w-full object-cover object-top opacity-90" />
+                <img src={s.slug === "premium-consultation" ? (SK_PORTRAITS[s.portrait] || SK_PORTRAITS.advisory) : s.hero_image} alt="" className={`h-full w-full object-cover opacity-90 ${s.slug === "premium-consultation" ? "object-top" : "object-center"}`} />
               </div>
             </Link>
           ))}

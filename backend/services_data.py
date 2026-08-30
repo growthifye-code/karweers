@@ -2,10 +2,10 @@
 
 IMG = {
     "solar": "https://images.unsplash.com/photo-1509391366360-2e959784a276?crop=entropy&cs=srgb&fm=jpg&q=85&w=1400",
-    "storage": "https://images.unsplash.com/photo-1620714223084-8fcacc6dfd8d?crop=entropy&cs=srgb&fm=jpg&q=85&w=1400",
-    "finance": "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?crop=entropy&cs=srgb&fm=jpg&q=85&w=1400",
-    "bus": "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?crop=entropy&cs=srgb&fm=jpg&q=85&w=1400",
-    "coaching": "https://images.unsplash.com/photo-1552664730-d307ca884978?crop=entropy&cs=srgb&fm=jpg&q=85&w=1400",
+    "storage": "https://images.unsplash.com/photo-1589276534126-adef63a95e05?crop=entropy&cs=srgb&fm=jpg&q=85&w=1400",
+    "finance": "https://images.unsplash.com/photo-1675116731363-c17d957f3444?crop=entropy&cs=srgb&fm=jpg&q=85&w=1400",
+    "bus": "https://images.unsplash.com/photo-1572675339312-3e8b094a544d?crop=entropy&cs=srgb&fm=jpg&q=85&w=1400",
+    "coaching": "https://images.unsplash.com/photo-1573166364839-1bfe9196c23e?crop=entropy&cs=srgb&fm=jpg&q=85&w=1400",
     "strategy": "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?crop=entropy&cs=srgb&fm=jpg&q=85&w=1400",
 }
 

@@ -25,7 +25,8 @@ export default function ServicePage() {
   );
   if (!svc) return <div className="min-h-screen grid place-items-center bg-background text-foreground animate-pulse font-display text-2xl">Loading…</div>;
 
-  const portrait = SK_PORTRAITS[svc.portrait] || SK_PORTRAITS.advisory;
+  const isConsult = svc.slug === "premium-consultation";
+  const heroImg = isConsult ? (SK_PORTRAITS[svc.portrait] || SK_PORTRAITS.advisory) : svc.hero_image;
   const currentPhase = phase ? svc.workflow.find((w) => w.key === phase) : null;
 
   // Phase detail view
@@ -77,7 +78,7 @@ export default function ServicePage() {
             <a href="/#consult" className="mt-8 inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-7 py-3.5 font-semibold text-[hsl(var(--primary-foreground))] transition-transform hover:-translate-y-1">Book this engagement <ArrowUpRight className="h-5 w-5" /></a>
           </div>
           <div className="relative overflow-hidden rounded-[2rem] border border-border">
-            <div className="aspect-[4/5] overflow-hidden"><img src={portrait} alt={svc.title} className="h-full w-full object-cover object-top" /></div>
+            <div className="aspect-[4/5] overflow-hidden"><img src={heroImg} alt={svc.title} className={`h-full w-full object-cover ${isConsult ? "object-top" : "object-center"}`} /></div>
           </div>
         </div>
       </section>

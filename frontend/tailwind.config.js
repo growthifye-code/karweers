@@ -8,8 +8,8 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
-        display: ['"Plus Jakarta Sans"', 'sans-serif'],
-        sans: ['Manrope', 'sans-serif'],
+        display: ['"Cormorant Garamond"', 'serif'],
+        sans: ['Outfit', 'sans-serif'],
       },
       borderRadius: {
         lg: 'var(--radius)',

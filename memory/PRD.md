@@ -22,6 +22,12 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - Client auth + admin panel
 
 ## Implemented (2026-06)
+### Iteration 4 (redesign) additions
+- New "Uber-rich" editorial UI: unique font pairing — Cormorant Garamond (display) + Outfit (UI); deeper near-black canvas (#050505) with brighter lime accent (#C6F135)
+- SK favicon (lime monogram) wired into index.html
+- SEO heading hierarchy confirmed (one H1 per page, H2 sections, H3 cards) + per-page titles/OG/JSON-LD, robots.txt, sitemap.xml
+- Service pages now use relevant SERVICE photos (battery storage, green finance, bus depot, boardroom); only the Premium 1:1 Consultation page/card keeps Sudarshan's portrait
+
 ### Iteration 3 additions
 - Detailed Service pages (/services + /services/:slug) with workflow, approach & key outcomes; each workflow phase has its own sub-page (/services/:slug/:phase)
 - Growthifye-style header: lime top bar (phone/email), Services hover dropdown + links to every page; new SK logo (Playfair wordmark + lime monogram)

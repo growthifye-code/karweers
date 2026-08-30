@@ -22,6 +22,15 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - Client auth + admin panel
 
 ## Implemented (2026-06)
+### Iteration 2 additions
+- Real client photos of Sudarshan Karweer across hero, about, login, register (src/lib/assets.js)
+- Uber-style typography (Plus Jakarta Sans) replacing serif headings
+- Paid consultation via Stripe (test mode, shared sandbox) — 3 packages ($99/$299/$599), checkout + success/cancel pages, bookings tracked as consultation leads
+- Live Market Pulse — real Yahoo Finance quotes (lithium, solar ETFs, First Solar, Enphase, Tesla, copper, crude), auto-refresh every 2 min, LIVE badge
+- Newsletter signup + admin Subscribers tab
+- Real contact details (email sudarshan@karweers.com, phone +91 72089 98944, WhatsApp 917208998944)
+
+### Iteration 1
 - Landing page: Hero, Stats, About/Thought Leadership, Services (bento), Market Pulse (+ticker), Insights preview, Case Studies, Consultation + testimonials, Footer
 - Insights list page with category filters; Article detail page with related + CTA
 - Consultation lead form → POST /api/consultations (stored, confirmation toast)

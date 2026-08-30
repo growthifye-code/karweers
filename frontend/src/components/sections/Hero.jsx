@@ -1,7 +1,8 @@
 import { motion } from "framer-motion";
 import { ArrowUpRight, Sparkles } from "lucide-react";
+import { SK_PHOTOS } from "@/lib/assets";
 
-const portrait = "https://images.unsplash.com/photo-1560250097-0b93528c311a?crop=entropy&cs=srgb&fm=jpg&q=85&w=1000";
+const portrait = SK_PHOTOS.heroPortrait;
 
 export default function Hero() {
   return (

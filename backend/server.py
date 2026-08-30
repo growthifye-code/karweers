@@ -5,8 +5,12 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import json
+import asyncio
 import logging
 import uuid
+import time
+import requests
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from pydantic import BaseModel, EmailStr, Field
 from typing import List, Optional
@@ -19,6 +23,7 @@ from auth import hash_password, verify_password, create_access_token, decode_tok
 from seed_data import ARTICLES, SERVICES, STATS, MARKET_PULSE, TESTIMONIALS
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
+from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
 
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
@@ -278,6 +283,173 @@ async def ai_generate(body: GenerateIn, admin: dict = Depends(require_admin)):
 @api_router.get("/")
 async def root():
     return {"message": "Sudarshan Karweer Advisory API"}
+
+
+# ---------------- Live Market Data (Yahoo Finance) ----------------
+YF_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+MARKET_SYMBOLS = [
+    ("Albemarle · Lithium", "ALB"),
+    ("Global X Lithium ETF", "LIT"),
+    ("Invesco Solar ETF", "TAN"),
+    ("First Solar", "FSLR"),
+    ("Enphase Energy", "ENPH"),
+    ("Tesla · Energy", "TSLA"),
+    ("Copper Futures", "HG=F"),
+    ("Crude Oil · WTI", "CL=F"),
+]
+_market_cache = {"ts": 0, "data": []}
+
+
+def _fetch_symbol(name, sym):
+    try:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}"
+        r = requests.get(url, params={"range": "1d", "interval": "1d"}, headers={"User-Agent": YF_UA}, timeout=6)
+        m = r.json()["chart"]["result"][0]["meta"]
+        price = m.get("regularMarketPrice")
+        prev = m.get("chartPreviousClose") or m.get("previousClose") or price
+        change = ((price - prev) / prev * 100) if prev else 0
+        cur = m.get("currency", "USD")
+        sign = "$" if cur == "USD" else ""
+        return {"name": name, "value": f"{sign}{price:,.2f}", "change": f"{change:+.2f}%", "up": change >= 0}
+    except Exception:
+        return None
+
+
+def _fetch_all_market():
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        res = list(ex.map(lambda p: _fetch_symbol(*p), MARKET_SYMBOLS))
+    return [r for r in res if r]
+
+
+@api_router.get("/market/live")
+async def market_live():
+    now = time.time()
+    if now - _market_cache["ts"] < 120 and _market_cache["data"]:
+        return {"data": _market_cache["data"], "updated": _market_cache["ts"], "cached": True}
+    loop = asyncio.get_event_loop()
+    data = await loop.run_in_executor(None, _fetch_all_market)
+    if data:
+        _market_cache["ts"] = now
+        _market_cache["data"] = data
+    return {"data": data or _market_cache["data"], "updated": _market_cache["ts"], "cached": False}
+
+
+# ---------------- Newsletter ----------------
+class NewsletterIn(BaseModel):
+    email: EmailStr
+
+
+@api_router.post("/newsletter")
+async def subscribe(body: NewsletterIn):
+    email = body.email.lower()
+    if await db.subscribers.find_one({"email": email}):
+        return {"success": True, "message": "You're already subscribed — thank you!"}
+    await db.subscribers.insert_one({"id": str(uuid.uuid4()), "email": email, "created_at": now_iso()})
+    return {"success": True, "message": "Subscribed! You'll receive Sudarshan's latest insights."}
+
+
+@api_router.get("/newsletter")
+async def list_subscribers(admin: dict = Depends(require_admin)):
+    return await db.subscribers.find({}, {"_id": 0}).sort("created_at", -1).to_list(2000)
+
+
+# ---------------- Paid Consultation (Stripe) ----------------
+STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "sk_test_emergent")
+PACKAGES = {
+    "discovery": {"name": "Discovery Call", "amount": 99.0, "duration": "30 minutes",
+                  "features": ["Focused problem framing", "Direct next-step guidance", "Ideal first touchpoint"]},
+    "strategy": {"name": "1:1 Strategy Session", "amount": 299.0, "duration": "60 minutes",
+                 "features": ["Deep strategy & fundraising review", "Actionable roadmap", "Follow-up notes"]},
+    "deepdive": {"name": "Deep-Dive Advisory", "amount": 599.0, "duration": "90 minutes",
+                 "features": ["Full business / deal deep-dive", "Bankability & scaling plan", "Priority follow-up access"]},
+}
+
+
+class CheckoutIn(BaseModel):
+    package_id: str
+    origin_url: str
+    name: str
+    email: EmailStr
+    phone: Optional[str] = ""
+    area: Optional[str] = ""
+    message: Optional[str] = ""
+
+
+@api_router.get("/payments/packages")
+async def get_packages():
+    return [{"id": k, **v} for k, v in PACKAGES.items()]
+
+
+@api_router.post("/payments/checkout")
+async def create_checkout(body: CheckoutIn, request: Request):
+    pkg = PACKAGES.get(body.package_id)
+    if not pkg:
+        raise HTTPException(status_code=400, detail="Invalid package")
+    webhook_url = f"{str(request.base_url)}api/webhook/stripe"
+    stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
+    success_url = f"{body.origin_url}/payment/success?session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{body.origin_url}/payment/cancel"
+    req = CheckoutSessionRequest(
+        amount=pkg["amount"], currency="usd", success_url=success_url, cancel_url=cancel_url,
+        metadata={"package_id": body.package_id, "name": body.name, "email": body.email,
+                  "phone": body.phone or "", "area": body.area or "", "message": body.message or "",
+                  "type": "consultation"},
+    )
+    session = await stripe_checkout.create_checkout_session(req)
+    await db.payment_transactions.insert_one({
+        "id": str(uuid.uuid4()), "session_id": session.session_id, "package_id": body.package_id,
+        "amount": pkg["amount"], "currency": "usd", "status": "initiated", "payment_status": "pending",
+        "name": body.name, "email": body.email, "created_at": now_iso(), "updated_at": now_iso(),
+    })
+    await db.consultations.insert_one({
+        "id": str(uuid.uuid4()), "name": body.name, "email": body.email, "phone": body.phone or "",
+        "company": "", "area": body.area or pkg["name"], "message": body.message or "",
+        "status": "payment_pending", "package": pkg["name"], "amount": pkg["amount"],
+        "session_id": session.session_id, "created_at": now_iso(),
+    })
+    return {"checkout_url": session.url, "session_id": session.session_id}
+
+
+async def _sync_paid(session_id: str):
+    await db.payment_transactions.update_one(
+        {"session_id": session_id, "payment_status": {"$ne": "paid"}},
+        {"$set": {"status": "completed", "payment_status": "paid", "updated_at": now_iso()}})
+    await db.consultations.update_one({"session_id": session_id}, {"$set": {"status": "paid"}})
+
+
+@api_router.get("/payments/status/{session_id}")
+async def payment_status(session_id: str, request: Request):
+    record = await db.payment_transactions.find_one({"session_id": session_id})
+    if not record:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    if record.get("payment_status") != "paid":
+        try:
+            webhook_url = f"{str(request.base_url)}api/webhook/stripe"
+            stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
+            status = await stripe_checkout.get_checkout_status(session_id)
+            if status.payment_status == "paid":
+                await _sync_paid(session_id)
+                record = await db.payment_transactions.find_one({"session_id": session_id})
+        except Exception:
+            pass
+    return {"session_id": session_id, "status": record["status"], "payment_status": record["payment_status"],
+            "amount": record.get("amount"), "package_id": record.get("package_id")}
+
+
+@api_router.post("/webhook/stripe")
+async def stripe_webhook(request: Request):
+    body = await request.body()
+    sig = request.headers.get("Stripe-Signature")
+    try:
+        webhook_url = f"{str(request.base_url)}api/webhook/stripe"
+        stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
+        resp = await stripe_checkout.handle_webhook(body, sig)
+        if resp.payment_status == "paid":
+            await _sync_paid(resp.session_id)
+    except Exception:
+        logger.exception("Stripe webhook error")
+        return {"status": "error"}
+    return {"status": "ok"}
 
 
 app.include_router(api_router)

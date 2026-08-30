@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useAuth, formatApiErrorDetail } from "@/context/AuthContext";
 import { Logo } from "@/components/Navbar";
 import ThemeToggle from "@/components/ThemeToggle";
-import { Users, FileText, Inbox, Sparkles, Trash2, Wand2 } from "lucide-react";
+import { Users, FileText, Inbox, Sparkles, Trash2, Wand2, Mail } from "lucide-react";
 import api from "@/lib/api";
 
 const CATS = [
@@ -25,6 +25,7 @@ export default function AdminDashboard() {
   const [stats, setStats] = useState({ articles: 0, consultations: 0, new_leads: 0, clients: 0 });
   const [leads, setLeads] = useState([]);
   const [articles, setArticles] = useState([]);
+  const [subscribers, setSubscribers] = useState([]);
 
   const [form, setForm] = useState({ title: "", category: "news", sector: SECTORS[0], summary: "", content: "", tags: "", image: DEFAULT_IMG, featured: false });
   const [aiTopic, setAiTopic] = useState("");
@@ -35,6 +36,7 @@ export default function AdminDashboard() {
     api.get("/admin/stats").then((r) => setStats(r.data)).catch(() => {});
     api.get("/consultations").then((r) => setLeads(r.data)).catch(() => {});
     api.get("/articles").then((r) => setArticles(r.data)).catch(() => {});
+    api.get("/newsletter").then((r) => setSubscribers(r.data)).catch(() => {});
   };
   useEffect(load, []);
 
@@ -103,6 +105,9 @@ export default function AdminDashboard() {
     { icon: Users, label: "Registered Clients", value: stats.clients },
   ];
 
+  const subCard = { icon: Mail, label: "Newsletter Subscribers", value: subscribers.length };
+  statCards.push(subCard);
+
   return (
     <div className="min-h-screen bg-background text-left text-foreground">
       <header className="border-b border-border">
@@ -124,7 +129,7 @@ export default function AdminDashboard() {
         <p className="mt-1 text-sm text-muted-foreground">Signed in as {user?.email}</p>
 
         <div className="mt-8 flex flex-wrap gap-2 border-b border-border pb-4">
-          {["overview", "leads", "articles", "create"].map((t) => (
+          {["overview", "leads", "articles", "create", "subscribers"].map((t) => (
             <button key={t} onClick={() => setTab(t)} data-testid={`admin-tab-${t}`}
               className={`rounded-full px-4 py-2 text-sm font-medium capitalize transition-colors ${tab === t ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]" : "border border-border text-muted-foreground hover:bg-secondary"}`}>
               {t === "create" ? "Create + AI" : t}
@@ -149,7 +154,7 @@ export default function AdminDashboard() {
             <table className="w-full text-left text-sm">
               <thead className="bg-card text-muted-foreground">
                 <tr>
-                  <th className="p-4">Name</th><th className="p-4">Contact</th><th className="p-4">Area</th><th className="p-4">Message</th><th className="p-4">Status</th>
+                  <th className="p-4">Name</th><th className="p-4">Contact</th><th className="p-4">Area / Package</th><th className="p-4">Message</th><th className="p-4">Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -158,11 +163,13 @@ export default function AdminDashboard() {
                   <tr key={l.id} className="border-t border-border align-top">
                     <td className="p-4 font-medium">{l.name}<div className="text-xs text-muted-foreground">{l.company}</div></td>
                     <td className="p-4 text-muted-foreground">{l.email}<div className="text-xs">{l.phone}</div></td>
-                    <td className="p-4 text-muted-foreground">{l.area}</td>
+                    <td className="p-4 text-muted-foreground">{l.area}{l.package && <div className="mt-1 text-xs font-semibold text-[hsl(var(--primary))]">{l.package} · ${l.amount}</div>}</td>
                     <td className="p-4 max-w-xs text-muted-foreground">{l.message}</td>
                     <td className="p-4">
                       <select value={l.status} onChange={(e) => setLeadStatus(l.id, e.target.value)} data-testid={`lead-status-${l.id}`} className="rounded-lg border border-border bg-background px-2 py-1 text-xs">
                         <option value="new">New</option>
+                        <option value="payment_pending">Payment Pending</option>
+                        <option value="paid">Paid</option>
                         <option value="contacted">Contacted</option>
                         <option value="scheduled">Scheduled</option>
                         <option value="closed">Closed</option>
@@ -229,6 +236,22 @@ export default function AdminDashboard() {
                 {saving ? "Publishing…" : "Publish Article"}
               </button>
             </form>
+          </div>
+        )}
+        {tab === "subscribers" && (
+          <div className="mt-8 overflow-x-auto rounded-2xl border border-border" data-testid="admin-subscribers">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-card text-muted-foreground"><tr><th className="p-4">Email</th><th className="p-4">Subscribed</th></tr></thead>
+              <tbody>
+                {subscribers.length === 0 && <tr><td colSpan="2" className="p-8 text-center text-muted-foreground">No subscribers yet.</td></tr>}
+                {subscribers.map((s) => (
+                  <tr key={s.id} className="border-t border-border">
+                    <td className="p-4 font-medium">{s.email}</td>
+                    <td className="p-4 text-muted-foreground">{new Date(s.created_at).toLocaleDateString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

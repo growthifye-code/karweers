@@ -9,6 +9,7 @@ import MarketPulse from "@/components/sections/MarketPulse";
 import InsightsPreview from "@/components/sections/InsightsPreview";
 import CaseStudies from "@/components/sections/CaseStudies";
 import Consultation from "@/components/sections/Consultation";
+import NewsletterSignup from "@/components/NewsletterSignup";
 import api from "@/lib/api";
 
 export default function Home() {
@@ -40,6 +41,7 @@ export default function Home() {
       <InsightsPreview articles={articles} />
       <CaseStudies cases={cases} />
       <Consultation testimonials={meta.testimonials} />
+      <NewsletterSignup />
       <Footer />
     </div>
   );

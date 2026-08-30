@@ -1,4 +1,5 @@
 import { motion } from "framer-motion";
+import { SK_PHOTOS } from "@/lib/assets";
 
 const pillars = [
   "Renewable Energy", "Energy Storage / BESS", "Green Hydrogen", "Climate & Green Financing",
@@ -11,8 +12,8 @@ export default function About() {
       <div className="mx-auto grid max-w-7xl gap-14 px-6 lg:grid-cols-[0.9fr_1.1fr] lg:px-10">
         <div className="relative">
           <img
-            src="https://images.unsplash.com/photo-1542744173-8e7e53415bb0?crop=entropy&cs=srgb&fm=jpg&q=85&w=900"
-            alt="Advisory session"
+            src={SK_PHOTOS.aboutWide}
+            alt="Sudarshan Karweer"
             className="rounded-2xl border border-border object-cover"
             data-testid="about-image"
           />

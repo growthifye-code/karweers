@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Logo } from "@/components/Navbar";
 import { useAuth, formatApiErrorDetail } from "@/context/AuthContext";
+import { SK_PHOTOS } from "@/lib/assets";
 
 export default function Register() {
   const { register } = useAuth();
@@ -51,7 +52,7 @@ export default function Register() {
         </div>
       </div>
       <div className="relative hidden overflow-hidden lg:block">
-        <img src="https://images.unsplash.com/photo-1542744173-8e7e53415bb0?crop=entropy&cs=srgb&fm=jpg&q=85&w=1000" alt="" className="h-full w-full object-cover" />
+        <img src={SK_PHOTOS.armsCrossed} alt="Sudarshan Karweer" className="h-full w-full object-cover" />
         <div className="absolute inset-0 bg-[hsl(var(--primary))]/70" />
         <div className="absolute bottom-12 left-12 right-12 text-[hsl(var(--primary-foreground))]">
           <h2 className="font-display text-4xl font-black leading-tight">23+ years. 60+ projects. One trusted advisor.</h2>

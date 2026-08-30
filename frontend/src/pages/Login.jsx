@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Logo } from "@/components/Navbar";
 import { useAuth, formatApiErrorDetail } from "@/context/AuthContext";
+import { SK_PHOTOS } from "@/lib/assets";
 
 export default function Login() {
   const { login } = useAuth();
@@ -30,7 +31,7 @@ export default function Login() {
   return (
     <div className="grid min-h-screen bg-background text-foreground lg:grid-cols-2">
       <div className="relative hidden overflow-hidden lg:block">
-        <img src="https://images.unsplash.com/photo-1509391366360-2e959784a276?crop=entropy&cs=srgb&fm=jpg&q=85&w=1000" alt="" className="h-full w-full object-cover" />
+        <img src={SK_PHOTOS.walking} alt="Sudarshan Karweer" className="h-full w-full object-cover" />
         <div className="absolute inset-0 bg-[hsl(var(--primary))]/70" />
         <div className="absolute bottom-12 left-12 right-12 text-[hsl(var(--primary-foreground))]">
           <h2 className="font-display text-4xl font-black leading-tight">The energy transition, engineered for growth.</h2>

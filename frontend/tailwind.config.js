@@ -8,7 +8,7 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
-        display: ['"Playfair Display"', 'serif'],
+        display: ['"Plus Jakarta Sans"', 'sans-serif'],
         sans: ['Manrope', 'sans-serif'],
       },
       borderRadius: {

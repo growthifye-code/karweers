@@ -1,0 +1,30 @@
+{
+  "summary": "Iteration 2 focused testing of NEW features: Stripe paid consultation (Flow B sandbox), Yahoo Finance live market data, newsletter subscribe + admin subscribers view, real client photos and contact details, plus light regression on admin & UI. Added new backend suite test_new_features.py (10 tests, all pass). Backend total run: 10/10 pass for new features (existing 25/25 from iteration_1 already verified). Frontend E2E via external REACT_APP_BACKEND_URL: hero-portrait, about-image, login-side image all load (naturalWidth 1333 ≠ broken); contact-email/phone/whatsapp links have correct hrefs (mailto:sudarshan@karweers.com, tel:+917208998944, wa.me/917208998944); Market Pulse shows LIVE badge and 8 real Yahoo Finance tiles; Newsletter signup returns success toast; Consultation packages (discovery/strategy/deepdive) render, selecting Strategy + filling name/email + clicking Reserve & Pay navigates to checkout.stripe.com (verified real Stripe test URL cs_test_...); Admin Dashboard shows Newsletter Subscribers stat (4 rows), subscribers tab lists emails, Leads tab shows package · $amount for paid bookings and status dropdown includes payment_pending + paid options. No blocking bugs.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_new_features.py",
+    "/app/test_reports/pytest/pytest_new_features.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "PATCH /api/consultations/{cid} still accepts arbitrary status strings (query param, no Pydantic Literal). Adding 'paid'/'payment_pending' to the UI is fine, but backend should validate the enum to prevent bad states.",
+    "PaymentSuccess polls max 8 times × 2s = 16s. For slower Stripe confirmations users may hit the 'Still processing' state. Consider raising MAX_TRIES to 15 or exponential backoff.",
+    "/api/payments/checkout uses request.base_url for webhook_url which may not match the public URL in a proxy setup (Kubernetes ingress). This works today but could bite in prod — prefer an explicit PUBLIC_BASE_URL env var.",
+    "MarketPulse falls back silently to static benchmarks when Yahoo is empty (no error surfaced). This is acceptable UX but a small logger.warning on backend when live data is empty would help ops.",
+    "STRIPE_API_KEY is 'sk_test_emergent' (shared sandbox). Fine for now, but claimable sandbox creation failed with 'country not supported: IN' per prior note — will need real key at go-live.",
+    "CORS still uses '*' with allow_credentials=True which browsers reject for cookie-based auth. Non-issue today since frontend uses Bearer, but worth cleaning up.",
+    "Slug generation still lacks retry-on-collision on IntegrityError (very low probability)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_new_features.py"
+  ],
+  "success_rate": {"backend": "100% (10/10 new + 25/25 prior)", "frontend": "100% of tested flows"},
+  "test_credentials": "Admin sudarshan@karweers.com / Sudarshan@2026 (seeded). Stripe test card 4242 4242 4242 4242 (not exercised on Stripe hosted page — verified redirect only).",
+  "seed_data_creation": "Created via UI: 1 newsletter subscriber (test_ui_<ts>@example.com), 1 payment_pending consultation lead 'TEST UI Payer' for Strategy $299 (Stripe test session). Backend tests created ~3 additional TEST_ subscribers and 2 payment_pending consultations (Discovery + Strategy) — status remains payment_pending since Stripe test payment was not completed.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Stripe checkout redirect works end-to-end (verified checkout_url starts with https://checkout.stripe.com and navigation succeeds). Actual Stripe hosted-page payment was NOT automated — /api/payments/status returns payment_status='pending' until the webhook fires or the user completes payment. To fully verify PaymentSuccess UI you'd need to drive the Stripe test page (email → 4242 4242 4242 4242 → any expiry/CVC). Yahoo Finance was up during this run (8/8 symbols returned real prices). LIVE badge and tiles rendered. All data-testids added by main agent match: hero-portrait, about-image, contact-email/phone/whatsapp, live-badge, pulse-*, newsletter-email/submit, package-{discovery,strategy,deepdive}, consult-*, admin-tab-subscribers, admin-subscribers, lead-status-*.",
+  "rca of the issue": "N/A — no failing tests."
+}

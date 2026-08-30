@@ -1,5 +1,6 @@
 import { Logo } from "@/components/Navbar";
 import { Linkedin, Mail, Phone } from "lucide-react";
+import { CONTACT } from "@/lib/assets";
 
 export default function Footer() {
   return (
@@ -25,8 +26,8 @@ export default function Footer() {
           <div>
             <h4 className="text-sm font-semibold text-foreground">Connect</h4>
             <ul className="mt-4 space-y-3 text-sm text-muted-foreground">
-              <li><a href="mailto:sudarshan@karweers.com" className="inline-flex items-center gap-2 transition-colors hover:text-foreground"><Mail className="h-4 w-4" /> sudarshan@karweers.com</a></li>
-              <li><a href="tel:+919999999999" className="inline-flex items-center gap-2 transition-colors hover:text-foreground"><Phone className="h-4 w-4" /> +91 99999 99999</a></li>
+              <li><a href={`mailto:${CONTACT.email}`} className="inline-flex items-center gap-2 transition-colors hover:text-foreground"><Mail className="h-4 w-4" /> {CONTACT.email}</a></li>
+              <li><a href={`tel:${CONTACT.phoneRaw}`} className="inline-flex items-center gap-2 transition-colors hover:text-foreground"><Phone className="h-4 w-4" /> {CONTACT.phone}</a></li>
               <li><a href="https://linkedin.com" target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 transition-colors hover:text-foreground"><Linkedin className="h-4 w-4" /> LinkedIn</a></li>
             </ul>
           </div>

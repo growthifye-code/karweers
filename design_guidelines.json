@@ -1,0 +1,112 @@
+{
+  "theme": "dark_and_light",
+  "typography": {
+    "headings": {
+      "font_family": "Playfair Display",
+      "weights": [
+        "400",
+        "700",
+        "900"
+      ],
+      "description": "Used for all headings. Delivers a classy, premium, and authoritative vibe suitable for a renowned consultant."
+    },
+    "body": {
+      "font_family": "Manrope",
+      "weights": [
+        "300",
+        "400",
+        "600"
+      ],
+      "description": "Clean, highly readable geometric sans-serif to balance the classic serif."
+    },
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl tracking-tight leading-none",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl tracking-tight leading-tight",
+      "h3": "text-xl sm:text-2xl leading-snug",
+      "body": "text-base leading-relaxed"
+    }
+  },
+  "colors": {
+    "archetype": "Luxury + Organic (Premium Consulting & Renewable Energy)",
+    "palette": {
+      "primary": "#0A2540",
+      "primary_foreground": "#FFFFFF",
+      "secondary": "#118D57",
+      "secondary_foreground": "#FFFFFF",
+      "accent": "#F2A900",
+      "accent_foreground": "#0A0A0A",
+      "background_light": "#F9FAFB",
+      "background_dark": "#0A0A0A",
+      "surface_light": "#FFFFFF",
+      "surface_dark": "#141414",
+      "text_light": "#1F2937",
+      "text_dark": "#F3F4F6",
+      "border_light": "rgba(0,0,0,0.1)",
+      "border_dark": "rgba(255,255,255,0.1)"
+    },
+    "guidelines": "Use deep obsidian and midnight blues to ground the design. Inject vibrant emerald and ochre sparingly for CTAs, data visualization, and highlights to match the 'colourful and classy' request. Never use pure black or pure white."
+  },
+  "visual_enhancers": {
+    "borders": "1px solid delicate inner strokes for cards and panels. Max 8px radius (rounded-lg).",
+    "shadows": "Ambient diffuse shadows (shadow-lg) with soft blur in light mode; subtle inner glow in dark mode.",
+    "glassmorphism": "For sticky navigation: backdrop-blur-xl bg-white/70 (light) or bg-black/60 (dark). Include a delicate 1px border at the bottom. Never use fully transparent backgrounds behind text.",
+    "textures": "Subtle grain texture overlay over dark mode hero sections."
+  },
+  "components": {
+    "cards": "Avoid default Shadcn Card for creative bento layouts. Use raw div with p-6 or p-8, rounded-lg, subtle border.",
+    "buttons": "Pill-shaped (rounded-full) or subtle rounded. Dark mode: pure white bg, black text. Light mode: rich midnight blue bg, white text. Primary CTAs use Accent colour (#F2A900). Hover states: -translate-y-1, slight shadow, and lighter hue.",
+    "inputs": "Shadcn standard inputs, refined with luxury spacing. Background matches surface color.",
+    "navigation": "Visible desktop navigation with Logo (Uber style, colourful & classy text or SVG), 3-5 links, and a primary CTA (Premium 1-1 Consultation). Hamburger menu ONLY on mobile."
+  },
+  "layouts": {
+    "hero": "Asymmetric split layout. Image of Sudarshan Karweer (or equivalent professional portrait) on one side with subtle gradient overlay, bold text and CTA on the other. Include '23Y+ Experience, 60+ Projects, CXO Consulting'.",
+    "bento_grid": "Used for 'Thought Leadership / Services', 'Blog', 'Company Analysis' and 'News Feed'. Mode A: The Tetris Grid. Mix col-span-4, col-span-8, row-span-2 to create tension and artful asymmetry.",
+    "spacing": "Generous spacing philosophy. Use p-8 to p-12 inside bordered containers. Use py-24 or py-32 for section vertical padding."
+  },
+  "motion": {
+    "hover": "Hover states must have a transition: transition-transform 0.2s ease, transition-colors 0.2s ease.",
+    "entrance": "Staggered fade-up for bento grid items and lists.",
+    "scroll": "Smooth scrolling effects. Parallax background for hero sections.",
+    "accessibility": "Respect prefers-reduced-motion."
+  },
+  "accessibility": {
+    "contrast": "Ensure APCA standards. Text on images MUST have gradient overlays (bg-gradient-to-r from-black/70 to-transparent).",
+    "focus": "Clear focus rings (ring-2 ring-primary) on all interactive elements.",
+    "attributes": "Add data-testid attribute on all interactive and key informational elements."
+  },
+  "media": {
+    "image_urls": {
+      "hero_portrait": "https://images.unsplash.com/photo-1560250097-0b93528c311a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1ODh8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBidXNpbmVzcyUyMGNvbnN1bHRhbnQlMjBwb3J0cmFpdHxlbnwwfHx8fDE3ODgxMDcxMjR8MA&ixlib=rb-4.1.0&q=85",
+      "consulting_meeting": "https://images.unsplash.com/photo-1542744173-8e7e53415bb0?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNDR8MHwxfHNlYXJjaHwyfHxidXNpbmVzcyUyMGNvYWNoaW5nJTIwY29uc3VsdGluZyUyMG1lZXRpbmd8ZW58MHx8fHwxNzg4MTA3MTI0fDA&ixlib=rb-4.1.0&q=85",
+      "renewable_energy": "https://images.unsplash.com/photo-1509391366360-2e959784a276?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzV8MHwxfHNlYXJjaHwxfHxyZW5ld2FibGUlMjBlbmVyZ3klMjBzb2xhciUyMHBhbmVscyUyMG1vZGVybnxlbnwwfHx8fDE3ODgxMDcxMjR8MA&ixlib=rb-4.1.0&q=85",
+      "green_hydrogen": "https://images.unsplash.com/photo-1587127831640-7423ae037873?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzN8MHwxfHNlYXJjaHwxfHxncmVlbiUyMGh5ZHJvZ2VuJTIwZmFjaWxpdHklMjB0ZWNobm9sb2d5fGVufDB8fHx8MTc4ODEwNzEyNHww&ixlib=rb-4.1.0&q=85"
+    }
+  },
+  "libraries": {
+    "animation": "framer-motion",
+    "icons": "lucide-react",
+    "toast": "sonner",
+    "charts": "recharts"
+  },
+  "instructions_to_main_agent": [
+    "Prioritize HTML+Tailwind for marketing layout (landing page). Avoid using Shadcn Card component for the creative Bento grid sections to allow custom styling and asymmetry.",
+    "Implement a robust Dark/Light theme toggle.",
+    "Do not center-align the main App container (`.App { text-align: center; }` is forbidden).",
+    "Create a dynamic, interactive AI chatbot floating widget (simulating 'AI engine embed across website').",
+    "Build a separate admin panel route (/admin) and client login page (/login).",
+    "Implement the 'News Feed', 'Blog', 'Company Analysis' (Renewable Energy, Storage, Green Hydrogen), and 'Case Studies' (e.g. Asset Monetisation of Govt Assets, MSRTC bus depots) sections.",
+    "Ensure the 'Uber-style logo' is colourful and classy (a sleek typography logo with a vibrant dot or slash)."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Do not converge toward generic outputs.",
+    "Create depth through layered design elements with z-index hierarchy.",
+    "Use glass-morphism effects with backdrop filters (12-24px blur).",
+    "Never apply universal transitions (e.g., transition: all). Add transitions for specific properties.",
+    "Never use placeholder image URLs or AI emoji characters for icons.",
+    "Use 2-3x more spacing than feels comfortable. Cramped designs look cheap.",
+    "All interactive elements must include a data-testid attribute.",
+    "Incorporate subtle grain textures and micro-animations for interactions.",
+    "Always explicitly set text color on hover.",
+    "Prioritize optical alignment over geometric alignment."
+  ]
+}

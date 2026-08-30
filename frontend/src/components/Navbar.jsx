@@ -24,12 +24,12 @@ const NAV = [
 export function Logo({ light = false }) {
   return (
     <Link to="/" data-testid="logo" className="group flex items-center gap-3">
-      <span className="relative inline-flex h-11 w-11 items-center justify-center overflow-hidden rounded-[13px] bg-[hsl(var(--primary))] transition-transform duration-300 group-hover:scale-[1.06]">
-        <span className="font-logo text-[20px] font-black leading-none tracking-[-0.12em] text-[hsl(var(--primary-foreground))]">S</span>
-        <span className="font-logo text-[20px] font-black leading-none tracking-[-0.06em] text-transparent [-webkit-text-stroke:1.6px_hsl(var(--primary-foreground))]">K</span>
+      <span className={`font-logo text-[30px] font-bold leading-none tracking-[-0.02em] transition-opacity group-hover:opacity-80 ${light ? "text-white" : "text-foreground"}`}>
+        SK<span className="text-[hsl(var(--primary))]">.</span>
       </span>
-      <span className="flex flex-col leading-none">
-        <span className={`font-logo text-lg font-bold tracking-tight ${light ? "text-white" : "text-foreground"}`}>Sudarshan Karweer</span>
+      <span className="hidden h-8 w-px bg-border sm:block" />
+      <span className="hidden flex-col leading-none sm:flex">
+        <span className={`text-sm font-semibold tracking-tight ${light ? "text-white/90" : "text-foreground/90"}`}>Sudarshan Karweer</span>
         <span className="mt-1 text-[10px] font-semibold uppercase tracking-[0.28em] text-[hsl(var(--primary))]">Business Coach · Advisor</span>
       </span>
     </Link>

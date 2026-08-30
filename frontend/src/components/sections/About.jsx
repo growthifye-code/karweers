@@ -3,8 +3,8 @@ import { Link } from "react-router-dom";
 import { ArrowUpRight } from "lucide-react";
 
 const pillars = [
-  "Renewable Energy", "Energy Storage / BESS", "Green Hydrogen", "Climate & Green Financing",
-  "Fundraising", "Strategy", "New Business Development", "Scaling", "Asset Monetisation",
+  "M&A", "Aviation", "Metals & Mining", "Industrial & Consumer", "Cement", "Steel", "Telecom",
+  "Agriculture", "Start-up Funding", "Renewable Energy", "Energy Storage", "Green Hydrogen",
 ];
 
 export default function About() {
@@ -26,7 +26,7 @@ export default function About() {
             </Link>
           </div>
           <div className="grid grid-cols-2 gap-4 self-start">
-            {[["23+", "Years of Experience"], ["60+", "Projects Delivered"], ["CXO", "Boardroom Advisory"], ["4", "Sectors of Depth"]].map(([v, l], i) => (
+            {[["23+", "Years of Experience"], ["60+", "Projects Delivered"], ["CXO", "Boardroom Advisory"], ["12+", "Sectors Covered"]].map(([v, l], i) => (
               <motion.div key={l} initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.4, delay: i * 0.06 }}
                 className="rounded-2xl border border-border bg-card p-6">
                 <p className="font-display text-4xl font-black text-[hsl(var(--primary))]">{v}</p>

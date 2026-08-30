@@ -190,8 +190,8 @@ SERVICES = [
 STATS = [
     {"value": "23+", "label": "Years of Experience"},
     {"value": "60+", "label": "Projects Delivered"},
-    {"value": "CXO", "label": "Corporate Advisory"},
-    {"value": "4", "label": "Sectors of Depth"},
+    {"value": "CXO", "label": "Boardroom Advisory"},
+    {"value": "12+", "label": "Sectors Covered"},
 ]
 
 MARKET_PULSE = [

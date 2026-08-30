@@ -3,6 +3,7 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import Hero from "@/components/sections/Hero";
 import Stats from "@/components/sections/Stats";
+import Sectors from "@/components/sections/Sectors";
 import About from "@/components/sections/About";
 import Services from "@/components/sections/Services";
 import MarketPulse from "@/components/sections/MarketPulse";
@@ -40,6 +41,7 @@ export default function Home() {
       <Navbar />
       <Hero />
       <Stats stats={meta.stats} />
+      <Sectors />
       <About />
       <Services services={meta.services} />
       <MarketPulse pulse={meta.market_pulse} />

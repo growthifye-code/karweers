@@ -22,6 +22,11 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - Client auth + admin panel
 
 ## Implemented (2026-06)
+### Iteration 5 additions
+- Fresh, bolder UI: display font switched to Bricolage Grotesque (distinctive contemporary grotesque), Cormorant serif retained for the logo, Outfit body — high-contrast, fresh feel
+- Hero now plays a real coaching VIDEO (boardroom/leadership footage, autoplay muted loop) with a transparent gradient overlay + "Coaching CXOs & senior leadership" caption (stock placeholder for Sudarshan's own coaching film)
+- Multi-sector positioning: new Sectors marquee (M&A, Aviation, Metals & Mining, Industrial & Consumer, Cement, Steel, Telecom, Agriculture, Start-up Funding, RE, Storage, Green Hydrogen, Climate Finance, Asset Monetisation); stat updated to "12+ Sectors Covered"; About page sectors band
+
 ### Iteration 4 (redesign) additions
 - New "Uber-rich" editorial UI: unique font pairing — Cormorant Garamond (display) + Outfit (UI); deeper near-black canvas (#050505) with brighter lime accent (#C6F135)
 - SK favicon (lime monogram) wired into index.html

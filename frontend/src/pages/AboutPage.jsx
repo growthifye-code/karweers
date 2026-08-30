@@ -4,6 +4,7 @@ import { ArrowUpRight, Quote } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import Seo from "@/components/Seo";
+import { SECTORS } from "@/components/sections/Sectors";
 import { SK_PORTRAITS } from "@/lib/assets";
 
 const JOURNEY = [
@@ -36,8 +37,9 @@ export default function AboutPage() {
               I help founders build businesses that <span className="text-[hsl(var(--primary))]">last</span>.
             </h1>
             <p className="mt-6 max-w-xl text-base leading-relaxed text-muted-foreground sm:text-lg">
-              For over 23 years I've sat at the intersection of engineering, capital and leadership — helping ambitious
-              businesses in the energy transition make sharper decisions, raise smarter capital and scale beyond the founder.
+              For over 23 years I've sat at the intersection of engineering, capital and leadership — advising across
+              M&A, aviation, metals &amp; mining, industrial &amp; consumer products, cement, steel, telecom, agriculture,
+              start-up funding and the energy transition. Cross-sector depth that makes the advice sharper.
             </p>
             <div className="mt-8 flex flex-wrap gap-4">
               <Link to="/#consult" className="inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-7 py-3.5 font-semibold text-[hsl(var(--primary-foreground))] transition-transform hover:-translate-y-1">Work with me <ArrowUpRight className="h-5 w-5" /></Link>
@@ -80,6 +82,20 @@ export default function AboutPage() {
                 <h3 className="mt-4 font-display text-lg font-bold">{p.t}</h3>
                 <p className="mt-2 text-sm text-muted-foreground">{p.d}</p>
               </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="border-t border-border py-24">
+        <div className="mx-auto max-w-5xl px-6">
+          <h2 className="font-display text-3xl font-bold tracking-tight sm:text-4xl">Sectors I've worked across</h2>
+          <p className="mt-3 max-w-2xl text-muted-foreground">From heavy industry to high-growth start-ups — a breadth that compounds into sharper, cross-pollinated advice.</p>
+          <div className="mt-8 flex flex-wrap gap-2">
+            {SECTORS.map((s) => (
+              <span key={s} className="inline-flex items-center rounded-full border border-border bg-card px-4 py-2 text-sm font-medium">
+                <span className="mr-2 h-1.5 w-1.5 rounded-full bg-[hsl(var(--primary))]" />{s}
+              </span>
             ))}
           </div>
         </div>

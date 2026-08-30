@@ -25,7 +25,7 @@ export function Logo({ light = false }) {
   return (
     <Link to="/" data-testid="logo" className="group flex items-center gap-3">
       <span className={`font-logo text-[30px] font-bold leading-none tracking-[-0.02em] transition-opacity group-hover:opacity-80 ${light ? "text-white" : "text-foreground"}`}>
-        SK<span className="text-[hsl(var(--primary))]">.</span>
+        S<span className="text-[hsl(var(--primary))]">K.</span>
       </span>
       <span className="hidden h-8 w-px bg-border sm:block" />
       <span className="hidden flex-col leading-none sm:flex">

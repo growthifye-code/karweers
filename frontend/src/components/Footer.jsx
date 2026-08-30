@@ -27,8 +27,9 @@ export default function Footer() {
               <li><Link to="/about" className="hover:text-foreground">About</Link></li>
               <li><Link to="/services" className="hover:text-foreground">Services</Link></li>
               <li><Link to="/insights" className="hover:text-foreground">Insights</Link></li>
-              <li><a href="/#casestudies" className="hover:text-foreground">Case Studies</a></li>
-              <li><a href="/#deals" className="hover:text-foreground">Deals</a></li>
+              <li><Link to="/case-studies" className="hover:text-foreground">Case Studies</Link></li>
+              <li><Link to="/market" className="hover:text-foreground">Market</Link></li>
+              <li><Link to="/deals" className="hover:text-foreground">Deals</Link></li>
             </ul>
           </div>
           <div>

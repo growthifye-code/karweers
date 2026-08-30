@@ -16,16 +16,17 @@ export const SERVICE_LINKS = [
 const NAV = [
   { label: "About", to: "/about" },
   { label: "Insights", to: "/insights" },
-  { label: "Case Studies", to: "/#casestudies" },
-  { label: "Market", to: "/#market" },
-  { label: "Deals", to: "/#deals" },
+  { label: "Case Studies", to: "/case-studies" },
+  { label: "Market", to: "/market" },
+  { label: "Deals", to: "/deals" },
 ];
 
 export function Logo({ light = false }) {
   return (
     <Link to="/" data-testid="logo" className="group flex items-center gap-3">
-      <span className="grid h-11 w-11 place-items-center rounded-xl bg-[hsl(var(--primary))] font-logo text-xl font-black text-[hsl(var(--primary-foreground))] transition-transform group-hover:-rotate-6">
-        SK
+      <span className="relative inline-flex h-11 w-11 items-center justify-center overflow-hidden rounded-[13px] bg-[hsl(var(--primary))] transition-transform duration-300 group-hover:scale-[1.06]">
+        <span className="font-logo text-[20px] font-black leading-none tracking-[-0.12em] text-[hsl(var(--primary-foreground))]">S</span>
+        <span className="font-logo text-[20px] font-black leading-none tracking-[-0.06em] text-transparent [-webkit-text-stroke:1.6px_hsl(var(--primary-foreground))]">K</span>
       </span>
       <span className="flex flex-col leading-none">
         <span className={`font-logo text-lg font-bold tracking-tight ${light ? "text-white" : "text-foreground"}`}>Sudarshan Karweer</span>
@@ -75,7 +76,7 @@ export default function Navbar() {
               )}
             </div>
             {NAV.map((l) => (
-              <a key={l.label} href={l.to} data-testid={`nav-${l.label.toLowerCase().replace(" ", "-")}`} className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">{l.label}</a>
+              <Link key={l.label} to={l.to} data-testid={`nav-${l.label.toLowerCase().replace(" ", "-")}`} className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">{l.label}</Link>
             ))}
           </div>
           <div className="hidden items-center gap-3 lg:flex">
@@ -104,7 +105,7 @@ export default function Navbar() {
               {SERVICE_LINKS.map((s) => (
                 <Link key={s.slug} to={`/services/${s.slug}`} onClick={() => setOpen(false)} className="pl-3 text-sm text-muted-foreground">{s.label}</Link>
               ))}
-              {NAV.map((l) => (<a key={l.label} href={l.to} onClick={() => setOpen(false)} className="text-sm font-medium text-muted-foreground">{l.label}</a>))}
+              {NAV.map((l) => (<Link key={l.label} to={l.to} onClick={() => setOpen(false)} className="text-sm font-medium text-muted-foreground">{l.label}</Link>))}
               <div className="flex items-center gap-3 pt-2">
                 <ThemeToggle />
                 {user ? (

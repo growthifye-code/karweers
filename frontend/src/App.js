@@ -7,6 +7,9 @@ import AboutPage from "@/pages/AboutPage";
 import ServicesIndex from "@/pages/ServicesIndex";
 import ServicePage from "@/pages/ServicePage";
 import LegalPage from "@/pages/LegalPage";
+import CaseStudiesPage from "@/pages/CaseStudiesPage";
+import MarketPage from "@/pages/MarketPage";
+import DealsPage from "@/pages/DealsPage";
 import InsightsPage from "@/pages/InsightsPage";
 import ArticleDetail from "@/pages/ArticleDetail";
 import Login from "@/pages/Login";
@@ -33,6 +36,9 @@ function App() {
             <Route path="/terms" element={<LegalPage doc="terms" />} />
             <Route path="/refund" element={<LegalPage doc="refund" />} />
             <Route path="/insights" element={<InsightsPage />} />
+            <Route path="/case-studies" element={<CaseStudiesPage />} />
+            <Route path="/market" element={<MarketPage />} />
+            <Route path="/deals" element={<DealsPage />} />
             <Route path="/insights/:slug" element={<ArticleDetail />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />

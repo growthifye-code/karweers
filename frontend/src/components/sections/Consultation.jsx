@@ -78,17 +78,17 @@ export default function Consultation({ testimonials = [] }) {
                 key={p.id}
                 onClick={() => setSelected(active ? null : p.id)}
                 data-testid={`package-${p.id}`}
-                className={`group rounded-2xl border p-7 text-left transition-transform hover:-translate-y-1 ${active ? "border-[hsl(var(--accent))] bg-white/15" : "border-white/15 bg-white/5"}`}
+                className={`group rounded-2xl border bg-[hsl(var(--card))] p-7 text-left transition-transform hover:-translate-y-1 ${active ? "border-[hsl(var(--primary))] ring-2 ring-[hsl(var(--primary))]" : "border-border"}`}
               >
                 <div className="flex items-center justify-between">
-                  <h3 className="font-display text-xl font-bold">{p.name}</h3>
-                  {active && <span className="grid h-6 w-6 place-items-center rounded-full bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]"><Check className="h-3.5 w-3.5" /></span>}
+                  <h3 className="font-display text-2xl font-extrabold text-foreground">{p.name}</h3>
+                  {active && <span className="grid h-6 w-6 place-items-center rounded-full bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]"><Check className="h-3.5 w-3.5" /></span>}
                 </div>
-                <p className="mt-1 text-xs uppercase tracking-wide text-white/60">{p.duration}</p>
-                <p className="mt-4 font-display text-3xl font-black text-[hsl(var(--accent))]">${p.amount}</p>
-                <ul className="mt-4 space-y-2 text-sm text-white/80">
+                <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{p.duration}</p>
+                <p className="mt-4 font-display text-4xl font-extrabold text-[hsl(var(--primary))]">${p.amount}</p>
+                <ul className="mt-4 space-y-2 text-sm text-muted-foreground">
                   {p.features.map((f) => (
-                    <li key={f} className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 flex-shrink-0 text-[hsl(var(--accent))]" /> {f}</li>
+                    <li key={f} className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 flex-shrink-0 text-[hsl(var(--primary))]" /> {f}</li>
                   ))}
                 </ul>
               </button>

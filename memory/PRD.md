@@ -158,3 +158,8 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 
 ## Iteration 5.10 (Jun 2026) — Revenue Goal pace badge
 - Revenue Goal card shows a pace badge: "On track" / "Goal reached" (lime, up-trend) vs "Behind pace" (amber, down-trend), computed client-side from day-of-month vs monthly target (expected = goal × dayOfMonth / daysInMonth). Shows "pace target today $X" when behind. testid revenue-goal-pace. Verified via screenshot.
+
+## Iteration 5.11 (Jun 2026) — hCaptcha gate on Google login
+- Google login (both client & admin, /login + /register) is now gated by hCaptcha. The "Continue with Google" button is disabled until the captcha is solved; on click the frontend calls POST /api/auth/captcha-gate {captcha_token} which verifies the captcha and sets a short-lived (10 min) httpOnly `captcha_gate` cookie, then redirects to Emergent Google Auth (redirect URL unchanged).
+- POST /api/auth/session now requires the captcha_gate cookie (403 otherwise) and clears it after a successful exchange. Emergent redirect/session-exchange flow untouched.
+- Verified via curl (session 403 w/o gate, passes w/ valid gate JWT) + screenshot (Google button disabled until captcha, hint shown).

@@ -19,7 +19,8 @@ from datetime import datetime, timezone, timedelta
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-from auth import hash_password, verify_password, create_access_token, decode_token
+from auth import hash_password, verify_password, create_access_token, decode_token, get_jwt_secret
+import jwt as pyjwt
 from seed_data import ARTICLES, SERVICES, STATS, MARKET_PULSE, TESTIMONIALS
 import curator
 from services_data import SERVICES as SERVICE_PAGES
@@ -70,6 +71,27 @@ def verify_captcha(token, ip=None):
         raise HTTPException(status_code=503, detail="Captcha service unavailable")
     if not ok:
         raise HTTPException(status_code=403, detail="Captcha verification failed")
+    return True
+
+
+# Short-lived signed cookie proving a captcha was solved just before a Google OAuth redirect.
+CAPTCHA_GATE_TTL = 600  # 10 minutes
+
+
+def issue_captcha_gate() -> str:
+    payload = {"purpose": "captcha_gate",
+               "exp": datetime.now(timezone.utc) + timedelta(seconds=CAPTCHA_GATE_TTL)}
+    return pyjwt.encode(payload, get_jwt_secret(), algorithm="HS256")
+
+
+def verify_captcha_gate(token) -> bool:
+    if not token:
+        return False
+    try:
+        data = pyjwt.decode(token, get_jwt_secret(), algorithms=["HS256"])
+        return data.get("purpose") == "captcha_gate"
+    except Exception:
+        return False
     return True
 
 app = FastAPI(title="Sudarshan Karweer Advisory")
@@ -235,8 +257,24 @@ class SessionIn(BaseModel):
     session_id: Optional[str] = None
 
 
+class CaptchaGateIn(BaseModel):
+    captcha_token: Optional[str] = None
+
+
+@api_router.post("/auth/captcha-gate")
+async def captcha_gate(body: CaptchaGateIn, request: Request, response: Response):
+    """Verify a solved hCaptcha, then set a short-lived cookie that gates the Google OAuth redirect."""
+    verify_captcha(body.captcha_token, request.client.host if request.client else None)
+    response.set_cookie("captcha_gate", issue_captcha_gate(), httponly=True, secure=True,
+                        samesite="none", path="/", max_age=CAPTCHA_GATE_TTL)
+    return {"ok": True}
+
+
 @api_router.post("/auth/session")
 async def create_session(body: SessionIn, request: Request, response: Response):
+    # hCaptcha must have been solved on the login/register page before the Google redirect.
+    if not verify_captcha_gate(request.cookies.get("captcha_gate")):
+        raise HTTPException(status_code=403, detail="Captcha verification required")
     session_id = body.session_id or request.headers.get("X-Session-ID")
     if not session_id:
         raise HTTPException(status_code=400, detail="Missing session id")
@@ -272,6 +310,7 @@ async def create_session(body: SessionIn, request: Request, response: Response):
         "expires_at": expires.isoformat(), "created_at": now_iso()})
     response.set_cookie("session_token", session_token, httponly=True, secure=True,
                         samesite="none", path="/", max_age=7 * 24 * 3600)
+    response.delete_cookie("captcha_gate", path="/")
     return {"user": {"id": uid, "email": email, "name": data.get("name"), "role": role,
                      "picture": data.get("picture", "")}}
 

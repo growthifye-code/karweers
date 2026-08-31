@@ -42,6 +42,18 @@ export default function Login() {
     }
   };
 
+  const googleLogin = async () => {
+    if (!captcha) { setError("Please complete the captcha before continuing with Google."); return; }
+    setBusy(true);
+    setError("");
+    try {
+      await loginWithGoogle(captcha);
+    } catch (err) {
+      setError(formatApiErrorDetail(err.response?.data?.detail) || "Google sign-in failed");
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="grid min-h-screen bg-background text-foreground lg:grid-cols-2">
       <div className="relative hidden overflow-hidden lg:block">
@@ -72,11 +84,11 @@ export default function Login() {
             <span className="text-xs uppercase tracking-widest text-muted-foreground">or</span>
             <span className="h-px flex-1 bg-border" />
           </div>
-          <button onClick={loginWithGoogle} type="button" data-testid="google-login-btn"
-            className="flex w-full items-center justify-center gap-3 rounded-full border border-border bg-background px-6 py-3.5 text-sm font-semibold transition-colors hover:bg-secondary">
+          <button onClick={googleLogin} type="button" disabled={busy || !captcha} data-testid="google-login-btn"
+            className="flex w-full items-center justify-center gap-3 rounded-full border border-border bg-background px-6 py-3.5 text-sm font-semibold transition-colors hover:bg-secondary disabled:opacity-60 disabled:cursor-not-allowed">
             <GoogleIcon /> Continue with Google
           </button>
-          <p className="mt-3 text-center text-xs text-muted-foreground">Google sign-in unlocks personalised recommendations & your Learning Hub.</p>
+          <p className="mt-3 text-center text-xs text-muted-foreground">{captcha ? "Google sign-in unlocks personalised recommendations & your Learning Hub." : "Complete the captcha above to continue with Google."}</p>
           <p className="mt-6 text-sm text-muted-foreground">
             New client? <Link to="/register" className="font-semibold text-[hsl(var(--primary))]">Create an account</Link>
           </p>

@@ -229,3 +229,77 @@ def send_security_alert_email(to_email: str, alert: dict) -> str:
     except Exception:
         log.exception("Security alert email failed")
         return "failed"
+
+
+def _shell(label: str, inner: str) -> str:
+    return (
+        f'<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;">'
+        f'<div style="background:#0A0A0A;padding:18px 24px;border-radius:12px 12px 0 0;">'
+        f'<span style="color:#fff;font-size:20px;font-weight:700;">S<span style="color:#C6F135;">K.</span></span>'
+        f'<span style="color:#9ca3af;font-size:12px;margin-left:10px;">{label}</span></div>'
+        f'<div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;padding:24px;">{inner}</div></div>'
+    )
+
+
+def _smtp_send(msg) -> str:
+    try:
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as s:
+            s.ehlo(); s.starttls(context=ctx); s.ehlo()
+            s.login(msg["From"], os.environ.get("GMAIL_APP_PASSWORD")); s.send_message(msg)
+        return "sent"
+    except Exception:
+        log.exception("SMTP send failed")
+        return "failed"
+
+
+def send_new_booking_alert_email(to_email: str, booking: dict) -> str:
+    """Alert the advisor the moment a new session booking lands (pending confirmation)."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email:
+        return "skipped"
+    inner = (
+        f'<p style="font-size:15px;color:#111;font-weight:600;">New booking — action needed</p>'
+        f'<p style="font-size:14px;color:#111;margin-top:6px;">{booking.get("package","Consultation")} · '
+        f'<span style="color:#059669;font-weight:600;">{booking.get("slot_date","")} at {booking.get("slot_time","")} IST</span></p>'
+        f'<p style="font-size:13px;color:#6b7280;margin-top:10px;">{booking.get("name","")} · {booking.get("email","")}'
+        f'{(" · " + booking.get("phone")) if booking.get("phone") else ""}</p>'
+        f'<p style="font-size:13px;color:#6b7280;">Focus: {booking.get("area","")}</p>'
+        f'{("<p style=font-size:14px;color:#374151;margin-top:12px;white-space:pre-wrap;>" + booking.get("message","") + "</p>") if booking.get("message") else ""}'
+        f'<p style="font-size:13px;color:#b45309;margin-top:12px;font-weight:600;">Status: pending confirmation — please confirm the slot.</p>'
+        f'<a href="https://www.sudarshankarweer.com/admin" style="display:inline-block;margin-top:16px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Review &amp; confirm</a>'
+    )
+    msg = EmailMessage()
+    msg["Subject"] = f"New booking (pending): {booking.get('package','')} — {booking.get('slot_date','')} {booking.get('slot_time','')}"
+    msg["From"] = user
+    msg["To"] = to_email
+    if booking.get("email"):
+        msg["Reply-To"] = booking["email"]
+    msg.set_content(f"New booking from {booking.get('name','')} for {booking.get('package','')} on "
+                    f"{booking.get('slot_date','')} at {booking.get('slot_time','')} IST. Pending confirmation.")
+    msg.add_alternative(_shell("New session booking", inner), subtype="html")
+    return _smtp_send(msg)
+
+
+def send_session_reminder_email(to_email: str, client_name: str, package: str, slot_date: str, slot_time: str) -> str:
+    """Remind the client ~24h before their confirmed session."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email:
+        return "skipped"
+    inner = (
+        f'<p style="font-size:15px;color:#111;">Hi {client_name},</p>'
+        f'<p style="font-size:14px;color:#374151;">This is a friendly reminder of your upcoming session with Sudarshan Karweer.</p>'
+        f'<p style="font-size:15px;color:#111;margin-top:10px;font-weight:600;">{package}</p>'
+        f'<p style="font-size:14px;color:#059669;font-weight:600;">{slot_date} at {slot_time} IST</p>'
+        f'<p style="font-size:13px;color:#6b7280;margin-top:12px;">A video link will follow before the session. If you need to reschedule, just reply to this email.</p>'
+        f'<p style="font-size:13px;color:#374151;margin-top:16px;">— Team Sudarshan Karweer</p>'
+    )
+    msg = EmailMessage()
+    msg["Subject"] = f"Reminder: your {package} is tomorrow at {slot_time} IST"
+    msg["From"] = user
+    msg["To"] = to_email
+    msg.set_content(f"Reminder: your {package} with Sudarshan Karweer is on {slot_date} at {slot_time} IST.")
+    msg.add_alternative(_shell("Session reminder", inner), subtype="html")
+    return _smtp_send(msg)

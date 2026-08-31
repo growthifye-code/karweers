@@ -15,6 +15,7 @@ from pathlib import Path
 from pydantic import BaseModel, EmailStr, Field
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta, date
+from zoneinfo import ZoneInfo
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -27,6 +28,7 @@ import curator
 from services_data import SERVICES as SERVICE_PAGES
 from emailer import send_booking_email
 from emailer import send_security_alert_email
+from emailer import send_new_booking_alert_email, send_session_reminder_email
 import xml.etree.ElementTree as ET
 from datetime import datetime as _dt
 
@@ -1831,6 +1833,8 @@ async def _digest_scheduler():
                     await db.app_meta.update_one({"_id": "availability"}, {"$set": {
                         "published_week_start": next_monday.isoformat(),
                         "last_published_on": today.isoformat()}}, upsert=True)
+            if os.environ.get("GMAIL_APP_PASSWORD"):
+                await _send_session_reminders()
             if now.weekday() == 0 and os.environ.get("GMAIL_APP_PASSWORD"):  # Monday
                 meta = await db.app_meta.find_one({"_id": "digest"})
                 last = (meta or {}).get("last_run", "")
@@ -2113,18 +2117,25 @@ async def _get_availability_meta():
     if not meta.get("published_week_start"):
         meta["published_week_start"] = _monday_of(datetime.now(timezone.utc).date()).isoformat()
     meta.setdefault("blocked", {})
+    meta.setdefault("buffer_minutes", 0)
     return meta
 
 
-async def _booked_slots_for(dates: list):
+async def _booked_slots_for(dates: list, buffer_min: int = 0):
     out = {d: set() for d in dates}
     cur = db.consultations.find(
         {"slot_date": {"$in": dates}, "status": {"$in": ACTIVE_BOOKING_STATUSES}},
-        {"_id": 0, "slot_date": 1, "occupied": 1, "slot_time": 1})
+        {"_id": 0, "slot_date": 1, "occupied": 1, "slot_time": 1, "minutes": 1})
     async for b in cur:
         d = b.get("slot_date")
-        occ = b.get("occupied") or ([b["slot_time"]] if b.get("slot_time") else [])
-        out.setdefault(d, set()).update(occ)
+        if buffer_min > 0 and b.get("slot_time") and b.get("minutes"):
+            s = int(b["slot_time"][:2]) * 60 + int(b["slot_time"][3:])
+            lo, hi = s - buffer_min, s + b["minutes"] + buffer_min
+            blocked = [t for t in _slot_times()
+                       if not ((int(t[:2]) * 60 + int(t[3:])) + SLOT_MIN <= lo or (int(t[:2]) * 60 + int(t[3:])) >= hi)]
+        else:
+            blocked = b.get("occupied") or ([b["slot_time"]] if b.get("slot_time") else [])
+        out.setdefault(d, set()).update(blocked)
     return out
 
 
@@ -2143,9 +2154,10 @@ async def public_availability():
     meta = await _get_availability_meta()
     ws = date.fromisoformat(meta["published_week_start"])
     blocked = meta.get("blocked", {})
+    buffer_min = int(meta.get("buffer_minutes", 0) or 0)
     days = _week_days(ws)
     date_strs = [d.isoformat() for d in days]
-    booked = await _booked_slots_for(date_strs)
+    booked = await _booked_slots_for(date_strs, buffer_min)
     now = datetime.now(timezone.utc)
     all_slots = _slot_times()
     out_days = []
@@ -2181,7 +2193,7 @@ class BookIn(BaseModel):
 
 
 @api_router.post("/consultation/book")
-async def book_consultation(body: BookIn, request: Request):
+async def book_consultation(body: BookIn, request: Request, background_tasks: BackgroundTasks):
     verify_captcha(body.captcha_token, _client_ip(request))
     pkg = PACKAGES.get(body.package_id)
     if not pkg:
@@ -2202,7 +2214,8 @@ async def book_consultation(body: BookIn, request: Request):
         raise HTTPException(status_code=400, detail="That time has passed.")
     occupied = _occupied_slots(body.time, pkg["minutes"])
     blocked = set(meta.get("blocked", {}).get(body.date, []))
-    booked = await _booked_slots_for([body.date])
+    buffer_min = int(meta.get("buffer_minutes", 0) or 0)
+    booked = await _booked_slots_for([body.date], buffer_min)
     if blocked & set(occupied) or booked.get(body.date, set()) & set(occupied):
         raise HTTPException(status_code=409, detail="Sorry, that slot was just taken. Please choose another.")
     doc = {
@@ -2214,6 +2227,9 @@ async def book_consultation(body: BookIn, request: Request):
         "occupied": occupied, "source": "booking-form", "created_at": now_iso(),
     }
     await db.consultations.insert_one(doc)
+    admin_to = os.environ.get("BOOKING_ADMIN_EMAIL") or os.environ.get("ADMIN_EMAIL")
+    if admin_to:
+        background_tasks.add_task(send_new_booking_alert_email, admin_to, doc)
     return {"success": True, "status": "pending_confirmation",
             "message": "Thanks! Your slot is reserved and pending confirmation \u2014 we'll confirm your session shortly."}
 
@@ -2227,7 +2243,8 @@ async def admin_availability(week_start: Optional[str] = None, admin: dict = Dep
     days = _week_days(ws)
     date_strs = [d.isoformat() for d in days]
     blocked = meta.get("blocked", {})
-    booked = await _booked_slots_for(date_strs)
+    buffer_min = int(meta.get("buffer_minutes", 0) or 0)
+    booked = await _booked_slots_for(date_strs, buffer_min)
     all_slots = _slot_times()
     out_days = []
     for d in days:
@@ -2242,7 +2259,22 @@ async def admin_availability(week_start: Optional[str] = None, admin: dict = Dep
             slots.append({"time": t, "state": state})
         out_days.append({"date": ds, "label": d.strftime("%a, %d %b"), "slots": slots})
     return {"week_start": ws.isoformat(), "published_week_start": published,
-            "is_published": ws.isoformat() == published, "days": out_days, "slot_times": all_slots}
+            "is_published": ws.isoformat() == published, "days": out_days,
+            "slot_times": all_slots, "buffer_minutes": buffer_min}
+
+
+class BufferIn(BaseModel):
+    minutes: int
+
+
+@api_router.post("/admin/availability/buffer")
+async def set_buffer(body: BufferIn, admin: dict = Depends(require_admin)):
+    mins = max(0, min(120, body.minutes))
+    meta = await _get_availability_meta()
+    await db.app_meta.update_one({"_id": "availability"}, {"$set": {
+        "buffer_minutes": mins, "published_week_start": meta["published_week_start"],
+        "blocked": meta.get("blocked", {})}}, upsert=True)
+    return {"success": True, "buffer_minutes": mins}
 
 
 class SlotToggleIn(BaseModel):
@@ -2359,7 +2391,8 @@ async def reschedule_booking(bid: str, body: BookingActionIn, request: Request, 
         raise HTTPException(status_code=400, detail="Provide a valid new date and time.")
     occupied = _occupied_slots(body.time, b.get("minutes", 60))
     await db.consultations.update_one({"id": bid}, {"$set": {
-        "slot_date": body.date, "slot_time": body.time, "occupied": occupied, "status": "confirmed"}})
+        "slot_date": body.date, "slot_time": body.time, "occupied": occupied,
+        "status": "confirmed", "reminder_sent": False}})
     b.update({"slot_date": body.date, "slot_time": body.time})
     _schedule_booking_email(b, background_tasks)
     event_id = await sync_booking_to_calendar(b, "update" if b.get("gcal_event_id") else "create")
@@ -2426,6 +2459,30 @@ async def deals():
         _deals_cache["ts"] = now
         _deals_cache["data"] = data
     return {"data": data or _deals_cache["data"], "cached": False}
+
+
+IST_TZ = ZoneInfo("Asia/Kolkata")
+
+
+async def _send_session_reminders():
+    """Email confirmed clients ~24h before their session (INERT until SMTP configured)."""
+    now = datetime.now(timezone.utc)
+    cur = db.consultations.find({"status": "confirmed", "slot_date": {"$exists": True},
+                                 "reminder_sent": {"$ne": True}},
+                                {"_id": 0, "id": 1, "name": 1, "email": 1, "package": 1,
+                                 "slot_date": 1, "slot_time": 1})
+    loop = asyncio.get_event_loop()
+    async for b in cur:
+        try:
+            dt = datetime.fromisoformat(f"{b['slot_date']}T{b['slot_time']}:00").replace(tzinfo=IST_TZ)
+            delta = (dt.astimezone(timezone.utc) - now).total_seconds()
+            if 23 * 3600 <= delta <= 25 * 3600 and b.get("email"):
+                await loop.run_in_executor(None, send_session_reminder_email, b["email"],
+                                           b.get("name", "there"), b.get("package", "session"),
+                                           b["slot_date"], b["slot_time"])
+                await db.consultations.update_one({"id": b["id"]}, {"$set": {"reminder_sent": True}})
+        except Exception:
+            logger.exception("reminder failed for %s", b.get("id"))
 
 
 # ---------------- Google Calendar sync (admin's own calendar) ----------------

@@ -54,6 +54,7 @@ export default function AdminDashboard() {
   const [calStatus, setCalStatus] = useState(null);
   const [availWeek, setAvailWeek] = useState(null);
   const [reschedule, setReschedule] = useState(null);
+  const [bufferInput, setBufferInput] = useState("0");
 
   const [form, setForm] = useState({ title: "", category: "news", sector: SECTORS[0], summary: "", content: "", tags: "", image: DEFAULT_IMG, featured: false });
   const [aiTopic, setAiTopic] = useState("");
@@ -100,9 +101,14 @@ export default function AdminDashboard() {
 
   const loadAvailability = (ws) => {
     api.get("/admin/availability", { params: ws ? { week_start: ws } : {} })
-      .then((r) => setAvailWeek(r.data)).catch(() => {});
+      .then((r) => { setAvailWeek(r.data); setBufferInput(String(r.data.buffer_minutes ?? 0)); }).catch(() => {});
   };
   useEffect(() => { loadAvailability(); }, []);
+
+  const saveBuffer = async (mins) => {
+    try { await api.post("/admin/availability/buffer", { minutes: Number(mins) }); toast.success(Number(mins) > 0 ? `Buffer set to ${mins} min between sessions.` : "Buffer removed."); loadAvailability(availWeek?.week_start); }
+    catch { toast.error("Could not save buffer."); }
+  };
 
   const shiftWeek = (deltaDays) => {
     if (!availWeek) return;
@@ -1189,6 +1195,13 @@ export default function AdminDashboard() {
                 ? <span className="rounded-full bg-[hsl(var(--primary))]/15 px-3 py-1 text-xs font-semibold text-[hsl(var(--primary))]" data-testid="avail-published-badge">Published to visitors</span>
                 : <button onClick={publishWeek} data-testid="publish-week" className="rounded-full bg-[hsl(var(--accent))] px-4 py-1.5 text-sm font-semibold text-[hsl(var(--accent-foreground))]">Publish this week</button>}
               <span className="ml-auto text-xs text-muted-foreground">Mon–Fri · 09:30–19:00 · 30-min slots. Click a slot to block/open it.</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card p-4" data-testid="buffer-control">
+              <span className="text-sm font-semibold">Buffer between sessions</span>
+              <select value={bufferInput} onChange={(e) => { setBufferInput(e.target.value); saveBuffer(e.target.value); }} data-testid="buffer-select" className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm">
+                {[0, 15, 30, 45, 60].map((m) => <option key={m} value={m}>{m === 0 ? "No buffer" : `${m} min`}</option>)}
+              </select>
+              <span className="text-xs text-muted-foreground">Automatically keeps a gap after each booked session so slots never sit back-to-back.</span>
             </div>
             <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
               <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded border border-border bg-background" /> Available</span>

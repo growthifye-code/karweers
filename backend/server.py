@@ -47,6 +47,10 @@ def role_for(email: str) -> str:
     return "admin" if (email or "").lower() in ADMIN_ALLOWLIST else "client"
 
 
+def gen_client_code() -> str:
+    return "SK-" + uuid.uuid4().hex[:6].upper()
+
+
 def verify_captcha(token, ip=None):
     if not token:
         raise HTTPException(status_code=400, detail="Captcha verification required")
@@ -196,14 +200,15 @@ async def register(body: RegisterIn, request: Request):
         raise HTTPException(status_code=400, detail="Email already registered")
     uid = str(uuid.uuid4())
     role = role_for(email)
+    cc = gen_client_code()
     doc = {
-        "id": uid, "email": email, "name": body.name,
+        "id": uid, "email": email, "name": body.name, "client_code": cc,
         "password_hash": hash_password(body.password), "role": role,
         "created_at": now_iso(),
     }
     await db.users.insert_one(doc)
     token = create_access_token(uid, email, role)
-    return {"token": token, "user": {"id": uid, "email": email, "name": body.name, "role": role}}
+    return {"token": token, "user": {"id": uid, "email": email, "name": body.name, "role": role, "client_code": cc}}
 
 
 @api_router.post("/auth/login")
@@ -249,14 +254,17 @@ async def create_session(body: SessionIn, request: Request, response: Response):
     role = role_for(email)  # allowlist decides admin; everyone else is a client
     if existing:
         uid = existing["id"]
+        cc = existing.get("client_code") or gen_client_code()
         await db.users.update_one({"id": uid}, {"$set": {
             "name": data.get("name") or existing.get("name"),
-            "picture": data.get("picture", ""), "auth": "google", "role": role}})
+            "picture": data.get("picture", ""), "auth": "google", "role": role, "client_code": cc}})
     else:
         uid = str(uuid.uuid4())
+        cc = gen_client_code()
         await db.users.insert_one({
             "id": uid, "email": email, "name": data.get("name") or email.split("@")[0],
-            "picture": data.get("picture", ""), "role": role, "auth": "google", "created_at": now_iso()})
+            "picture": data.get("picture", ""), "role": role, "auth": "google",
+            "client_code": cc, "created_at": now_iso()})
     session_token = data["session_token"]
     expires = datetime.now(timezone.utc) + timedelta(days=7)
     await db.user_sessions.insert_one({
@@ -281,6 +289,7 @@ async def logout_route(request: Request, response: Response):
 class TrackIn(BaseModel):
     kind: str
     ref: Optional[str] = ""
+    label: Optional[str] = ""
 
 
 @api_router.get("/learning/topics")
@@ -309,13 +318,17 @@ async def track_activity(body: TrackIn, user: Optional[dict] = Depends(get_optio
     topics = curator.derive_topics(body.kind, body.ref)
     await db.activity_events.insert_one({
         "user_id": user["id"], "kind": body.kind, "ref": body.ref or "",
-        "topics": topics, "created_at": now_iso()})
+        "label": body.label or "", "topics": topics, "created_at": now_iso()})
     return {"tracked": True, "topics": topics}
 
 
 async def _topic_weights(user_id: str) -> dict:
-    events = await db.activity_events.find({"user_id": user_id}).sort("created_at", -1).to_list(300)
     weights = {}
+    # Seed from explicitly declared interests (captured at login).
+    u = await db.users.find_one({"id": user_id}, {"_id": 0, "interests": 1})
+    for t in (u or {}).get("interests", []) or []:
+        weights[t] = weights.get(t, 0) + 3.0
+    events = await db.activity_events.find({"user_id": user_id}).sort("created_at", -1).to_list(300)
     now = datetime.now(timezone.utc)
     for ev in events:
         try:
@@ -329,6 +342,212 @@ async def _topic_weights(user_id: str) -> dict:
         for t in ev.get("topics", []):
             weights[t] = weights.get(t, 0) + recency
     return weights
+
+
+# ---------------- Client interests + relevant blogs ----------------
+TOPIC_SECTORS = {
+    "energy": ["Renewable Energy", "Energy Storage", "Green Hydrogen"],
+    "climate-finance": ["Green Financing", "Sustainability"],
+    "global-macro": ["Economy"],
+    "india-economy": ["Economy"],
+    "leadership": ["Business Strategy"],
+    "fundraising": ["Business Strategy"],
+    "technology": ["Renewable Energy", "Sustainability"],
+    "ai": ["Sustainability"],
+    "geopolitics": ["Economy"],
+}
+
+
+class InterestsIn(BaseModel):
+    interests: List[str] = []
+
+
+@api_router.post("/me/interests")
+async def set_interests(body: InterestsIn, user: dict = Depends(get_current_user)):
+    valid = [t for t in body.interests if t in curator.TOPIC_IDS]
+    await db.users.update_one({"id": user["id"]}, {"$set": {"interests": valid}})
+    return {"interests": valid}
+
+
+@api_router.get("/me/blogs")
+async def my_blogs(limit: int = 6, user: dict = Depends(get_current_user)):
+    weights = await _topic_weights(user["id"])
+    top = [t for t, _ in sorted(weights.items(), key=lambda kv: kv[1], reverse=True)[:3]]
+    sectors = []
+    for t in top:
+        sectors.extend(TOPIC_SECTORS.get(t, []))
+    q = {"sector": {"$in": sectors}} if sectors else {}
+    items = await db.articles.find(q, {"_id": 0}).sort("created_at", -1).to_list(limit)
+    if len(items) < limit:  # backfill with latest
+        extra = await db.articles.find({}, {"_id": 0}).sort("created_at", -1).to_list(limit)
+        seen = {a["slug"] for a in items}
+        for a in extra:
+            if a["slug"] not in seen:
+                items.append(a)
+            if len(items) >= limit:
+                break
+    return {"articles": items[:limit], "based_on": top}
+
+
+# ---------------- CRM (admin) ----------------
+@api_router.get("/admin/clients")
+async def admin_clients(admin: dict = Depends(require_admin)):
+    users = await db.users.find({"role": "client"}, {"_id": 0, "password_hash": 0}).sort("created_at", -1).to_list(2000)
+    out = []
+    for u in users:
+        acts = await db.activity_events.count_documents({"user_id": u["id"]})
+        last = await db.activity_events.find_one({"user_id": u["id"]}, {"_id": 0, "created_at": 1}, sort=[("created_at", -1)])
+        bookings = await db.consultations.count_documents({"email": u["email"]})
+        tickets = await db.support_tickets.count_documents({"user_id": u["id"]})
+        weights = await _topic_weights(u["id"])
+        top = [t for t, _ in sorted(weights.items(), key=lambda kv: kv[1], reverse=True)[:3]]
+        out.append({**u, "activity_count": acts, "last_activity": last["created_at"] if last else None,
+                    "booking_count": bookings, "ticket_count": tickets, "interests_computed": top})
+    return out
+
+
+@api_router.get("/admin/clients/{cid}")
+async def admin_client_detail(cid: str, admin: dict = Depends(require_admin)):
+    u = await db.users.find_one({"id": cid}, {"_id": 0, "password_hash": 0})
+    if not u:
+        raise HTTPException(status_code=404, detail="Client not found")
+    timeline = await db.activity_events.find({"user_id": cid}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    bookings = await db.consultations.find({"email": u["email"]}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    tickets = await db.support_tickets.find({"user_id": cid}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    weights = await _topic_weights(cid)
+    interests = [{"topic": t, "score": round(s, 2)} for t, s in sorted(weights.items(), key=lambda kv: kv[1], reverse=True)]
+    return {"user": u, "timeline": timeline, "bookings": bookings, "tickets": tickets, "interests": interests}
+
+
+# ---------------- Service Desk (tickets) ----------------
+class TicketIn(BaseModel):
+    subject: str
+    message: str
+    category: Optional[str] = "General"
+    priority: Optional[str] = "medium"
+
+
+class TicketReplyIn(BaseModel):
+    message: str
+
+
+class TicketUpdateIn(BaseModel):
+    status: Optional[str] = None
+    priority: Optional[str] = None
+
+
+@api_router.post("/tickets")
+async def create_ticket(body: TicketIn, user: dict = Depends(get_current_user)):
+    tid = str(uuid.uuid4())
+    doc = {"id": tid, "ticket_code": "TK-" + uuid.uuid4().hex[:6].upper(), "user_id": user["id"],
+           "client_code": user.get("client_code", ""), "name": user.get("name"), "email": user["email"],
+           "subject": body.subject, "message": body.message, "category": body.category,
+           "priority": body.priority, "status": "open", "replies": [],
+           "created_at": now_iso(), "updated_at": now_iso()}
+    await db.support_tickets.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.get("/tickets")
+async def my_tickets(user: dict = Depends(get_current_user)):
+    return await db.support_tickets.find({"user_id": user["id"]}, {"_id": 0}).sort("updated_at", -1).to_list(200)
+
+
+@api_router.post("/tickets/{tid}/reply")
+async def reply_ticket(tid: str, body: TicketReplyIn, user: dict = Depends(get_current_user)):
+    t = await db.support_tickets.find_one({"id": tid})
+    if not t or (t["user_id"] != user["id"] and user.get("role") != "admin"):
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    is_admin = user.get("role") == "admin"
+    reply = {"by": user.get("name") or user["email"], "role": "admin" if is_admin else "client",
+             "message": body.message, "at": now_iso()}
+    new_status = "in-progress" if is_admin else "open"
+    await db.support_tickets.update_one({"id": tid}, {"$push": {"replies": reply},
+                                                      "$set": {"updated_at": now_iso(), "status": new_status}})
+    return {"success": True, "reply": reply}
+
+
+@api_router.get("/admin/tickets")
+async def admin_tickets(status: Optional[str] = None, admin: dict = Depends(require_admin)):
+    q = {"status": status} if status else {}
+    return await db.support_tickets.find(q, {"_id": 0}).sort("updated_at", -1).to_list(500)
+
+
+@api_router.patch("/admin/tickets/{tid}")
+async def admin_update_ticket(tid: str, body: TicketUpdateIn, admin: dict = Depends(require_admin)):
+    upd = {"updated_at": now_iso()}
+    if body.status:
+        upd["status"] = body.status
+    if body.priority:
+        upd["priority"] = body.priority
+    res = await db.support_tickets.update_one({"id": tid}, {"$set": upd})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return {"success": True}
+
+
+# ---------------- GDPR data rights ----------------
+@api_router.get("/me/data")
+async def export_my_data(user: dict = Depends(get_current_user)):
+    acts = await db.activity_events.find({"user_id": user["id"]}, {"_id": 0}).to_list(3000)
+    bookings = await db.consultations.find({"email": user["email"]}, {"_id": 0}).to_list(500)
+    tickets = await db.support_tickets.find({"user_id": user["id"]}, {"_id": 0}).to_list(500)
+    return {"profile": user, "activity": acts, "bookings": bookings, "tickets": tickets, "exported_at": now_iso()}
+
+
+@api_router.delete("/me")
+async def delete_my_account(response: Response, user: dict = Depends(get_current_user)):
+    if user.get("role") == "admin":
+        raise HTTPException(status_code=400, detail="Admin accounts cannot be self-deleted")
+    uid, email = user["id"], user["email"]
+    await db.activity_events.delete_many({"user_id": uid})
+    await db.support_tickets.delete_many({"user_id": uid})
+    await db.user_sessions.delete_many({"user_id": uid})
+    await db.consultations.delete_many({"email": email})
+    await db.subscribers.delete_many({"email": email})
+    await db.users.delete_one({"id": uid})
+    response.delete_cookie("session_token", path="/")
+    return {"deleted": True}
+
+
+# ---------------- Weekly digest ----------------
+async def _send_weekly_digest():
+    if not os.environ.get("GMAIL_APP_PASSWORD"):
+        return {"sent": 0, "skipped": "email_not_configured"}
+    from emailer import send_digest_email
+    clients = await db.users.find({"role": "client"}, {"_id": 0, "password_hash": 0}).to_list(5000)
+    loop = asyncio.get_event_loop()
+    sent = 0
+    for c in clients:
+        weights = await _topic_weights(c["id"])
+        vids = await loop.run_in_executor(None, lambda w=weights: curator.recommended(w, 5))
+        if not vids:
+            continue
+        res = await loop.run_in_executor(None, lambda cc=c, vv=vids: send_digest_email(cc["email"], cc.get("name", "there"), vv))
+        if res == "sent":
+            sent += 1
+    await db.app_meta.update_one({"_id": "digest"}, {"$set": {"last_run": now_iso()}}, upsert=True)
+    return {"sent": sent, "total": len(clients)}
+
+
+@api_router.post("/admin/digest/run")
+async def admin_run_digest(admin: dict = Depends(require_admin)):
+    return await _send_weekly_digest()
+
+
+async def _digest_scheduler():
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            if now.weekday() == 0 and os.environ.get("GMAIL_APP_PASSWORD"):  # Monday
+                meta = await db.app_meta.find_one({"_id": "digest"})
+                last = (meta or {}).get("last_run", "")
+                if not last or last[:10] != now.strftime("%Y-%m-%d"):
+                    await _send_weekly_digest()
+        except Exception:
+            logger.exception("digest scheduler error")
+        await asyncio.sleep(3600)
 
 
 @api_router.get("/learning/recommended")
@@ -772,6 +991,8 @@ async def startup():
     await db.users.create_index("id")
     await db.user_sessions.create_index("session_token")
     await db.activity_events.create_index("user_id")
+    await db.support_tickets.create_index("user_id")
+    await db.support_tickets.create_index("status")
     await db.articles.create_index("slug", unique=True)
     # Seed admin
     admin_email = os.environ["ADMIN_EMAIL"].lower()
@@ -792,6 +1013,9 @@ async def startup():
         await db.users.update_many(
             {"role": "admin", "email": {"$nin": list(ADMIN_ALLOWLIST)}}, {"$set": {"role": "client"}})
         logger.info("Admin allowlist enforced: %s", ", ".join(sorted(ADMIN_ALLOWLIST)))
+    # Backfill unique client codes for any users missing one
+    async for u in db.users.find({"client_code": {"$exists": False}}, {"_id": 0, "id": 1}):
+        await db.users.update_one({"id": u["id"]}, {"$set": {"client_code": gen_client_code()}})
     # Seed articles
     # Seed / ensure articles (upsert by slug, non-destructive)
     for a in ARTICLES:
@@ -800,6 +1024,7 @@ async def startup():
             d.update({"id": str(uuid.uuid4()), "author": "Sudarshan Karweer", "created_at": now_iso()})
             await db.articles.insert_one(d)
     logger.info("Articles ensured")
+    asyncio.create_task(_digest_scheduler())
 
 
 @app.on_event("shutdown")

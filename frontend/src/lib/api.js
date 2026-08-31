@@ -11,7 +11,10 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Fire-and-forget browsing tracker for the recommendation engine.
-export const track = (kind, ref = "") => api.post("/track", { kind, ref }).catch(() => {});
+// Fire-and-forget browsing tracker for the recommendation engine (consent-gated).
+export const track = (kind, ref = "", label = "") => {
+  try { if (localStorage.getItem("sk_consent") !== "accepted") return Promise.resolve(); } catch { return Promise.resolve(); }
+  return api.post("/track", { kind, ref, label }).catch(() => {});
+};
 
 export default api;

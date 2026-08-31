@@ -97,7 +97,19 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - Verified: backend 20/20 new tests pass (iteration_4.json); frontend 14/15 (1 flaky non-bug). Admin allowlist self-verified.
 
 ## Backlog / Remaining (updated)
-- **P1**: Go-live Stripe keys + Gmail App Password (real payments & booking emails) — still test/dummy, awaiting user credentials
-- **P2**: Advisory hardening from iteration_4 review — split server.py into routers (~790 lines), tighten CORS to explicit origin, TTL/retention on activity_events, thread-safe curator pool warm, channel-health check
+- **P1**: Go-live Stripe keys + Gmail App Password (real payments & booking emails + weekly digest) — awaiting user. NOTE: Gmail needs a 16-char App Password (2FA), normal password is rejected.
+- **P2**: Advisory hardening — split server.py (~1033 lines) into routers; set explicit CORS origins; remove dead hCaptcha lenient branch
 - **P2**: Replace AI coaching hero with real transparent video when user provides asset
 - **P2**: Object storage for admin image uploads
+
+---
+
+## Iteration 5 (Aug 31, 2026) — CRM, Service Desk, Personalisation, GDPR, SEO, Branding
+- **Admin CRM**: `/admin/clients` + client drawer with interest profile, activity timeline, bookings, tickets. Every client has a unique `client_code` (SK-XXXXXX), auto-assigned + backfilled.
+- **Service Desk**: clients raise tickets from dashboard (TK-XXXXXX); admin queue with status (open/in-progress/resolved/closed) + priority + threaded replies. Leads pipeline stages: new→contacted→qualified→paid→scheduled→won/lost/closed.
+- **Personalisation**: interest capture at login (`/me/interests`), recommended videos + relevant blogs (`/me/blogs`) driven by declared interests × activity recency. Expanded tracking (`/track` with label incl. page views).
+- **GDPR**: consent banner gates tracking; Privacy Policy rewritten (tracking/personalisation/rights); client data export (`/me/data`) + self-delete (`DELETE /me`); admins cannot self-delete.
+- **Weekly digest**: `/admin/digest/run` + hourly Monday scheduler — INERT until GMAIL_APP_PASSWORD is set (send_digest_email ready).
+- **Branding/Copy**: logo = elegant white **S** + lime **K.**; "Ask SK" AI widget global (client & admin dashboards); About Me + Ex-EY badge; hero/about credibility (EY Big-4 Advisory, $2B+ debt syndication across Maharashtra authorities, 60+ projects, strategy/supply chain/transformation/financial mgmt/scaling for corporates in India & globally).
+- **SEO**: Seo component (canonical/OG/Twitter/JSON-LD), index.html favicons (svg+png+apple-touch) + og-cover.png, sitemap incl. /learning.
+- Verified: backend 17/17, frontend 100% on 27 flows (iteration_5.json). Email/SMTP intentionally OFF.

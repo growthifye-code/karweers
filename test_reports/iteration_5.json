@@ -1,0 +1,32 @@
+{
+  "summary": "Iteration 5 covers CRM, Service Desk, client codes (SK-XXXXXX), interests + personalised recommendations, relevant blogs, GDPR (export + self-delete + admin-cannot-self-delete), expanded tracking (with label), admin allowlist enforcement, and inert weekly digest. Backend suite /app/backend/tests/test_iteration5.py — 17/17 pass in ~5s. Frontend E2E via Playwright (session-cookie injection per /app/auth_testing.md) — all critical testids and flows confirmed: About page (ex-ey-badge, EY + $2B narrative, About Me heading), Home (business coach + EY mentions, consent-banner with accept/decline, ex-ey-badge in About section), Client Dashboard (client-code, interest-picker → my-interests, dashboard-recommended, dashboard-blogs, service-desk with ticket creation flowing into ticket-list, privacy-controls with download-data + delete-account, Ask SK widget), Admin Dashboard (admin-tab-crm with SK-XXXXXX clients, view-client-<id> opens client-drawer with activity timeline + interest profile, admin-tab-tickets shows tickets with per-ticket priority/status selects and admin reply box, Ask SK widget).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration5.py",
+    "/app/test_reports/pytest/iteration5.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now 1033 lines — well above the 700-line guideline. Split into routers (auth, learning, crm, tickets, gdpr, payments, market/deals, content) for maintainability; a single file this size makes ownership + hot-reload feedback slow.",
+    "CORS_ORIGINS is still '*' in backend/.env with allow_credentials=True. Browsers ignore credentials with wildcard origins — this WILL break the Google session cookie flow in browsers that enforce it. Set an explicit origin list (preview host + prod host).",
+    "verify_captcha() still contains the dead 'lenient mode' branch keyed on the hCaptcha test secret 0x000…0 (line 59-60). With the real secret configured this is unreachable, but should be removed or gated behind an explicit DEV flag so it can't be re-enabled by env fat-fingering.",
+    "activity_events has no TTL index — will grow unbounded. Consider a Mongo TTL on created_at (e.g. 180d) or a cap on _topic_weights() lookback so recommendations stay fresh and storage stays bounded.",
+    "/api/auth/session upserts by session_token but always inserts a new user_sessions row per exchange, even for the same user — unbounded growth. Upsert on session_token unique index.",
+    "DELETE /api/me does not invalidate JWT access_tokens issued from the email/password path (only cookies + session rows are cleared). For a user who logged in via /auth/login, their old JWT remains valid until natural expiry after account deletion. Add a token-version / issued-at check or a revoked-jti collection.",
+    "_topic_weights() dereferences user['id'] but users deleted concurrently would raise AttributeError inside _send_weekly_digest — wrap in try/except per-client so a single bad row doesn't kill the whole digest run.",
+    "curator._pool() cold-cache re-entry is still not synchronised — concurrent /learning/videos on cold cache can trigger 10× parallel RSS storms. Wrap refresh in threading.Lock().",
+    "TrackIn.kind is a free-form string; unknown kinds land in activity_events with topics=[] (junk analytics). Constrain via Pydantic Literal[...] to the known set.",
+    "The digest scheduler runs every hour via asyncio.create_task inside @app.on_event('startup'). Under multi-worker deployment this fires N times/hour and could send digest N times. Guard with a leader-election style upsert on app_meta.last_run (already partly done — the date check helps but is not atomic under concurrency).",
+    "Missing input length validation on TicketIn.subject/message and ArticleIn.content — a client can POST megabytes and bloat Mongo. Add pydantic Field(max_length=...) constraints.",
+    "/api/admin/clients does a per-user round-trip (activity_count, last_activity, bookings, tickets, _topic_weights) inside a Python for-loop — O(N) DB calls. Will get slow past a few hundred clients. Use $lookup + $group aggregation."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration5.py"],
+  "success_rate": {"backend": "100% (17/17)", "frontend": "100% on the 27 tested testids/flows"},
+  "test_credentials": "Backend tests inject their own tst5_* users/sessions and clean up. Frontend uses cookie injection per /app/auth_testing.md — no OAuth automation. Admin: existing seeded sudarshan@karweers.com allowlisted.",
+  "seed_data_creation": "Ephemeral tst5_* users, sessions, activity_events, and support_tickets — all deleted in fixtures / manual cleanup step. Existing SK-TEST01 client left untouched.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iteration5.py is the current regression suite (17 tests, ~5s). It uses direct Mongo injection to bypass hCaptcha for authed endpoints — the standard pattern in this repo. Frontend tests use cookie injection with domain=energy-strategy-hub.preview.emergentagent.com, sameSite=None, secure=True, httpOnly=True. Ask SK widget test-id is not standardised — I fell back to text selector 'button:has-text(\"Ask SK\")' which worked on /dashboard and /admin. If E1 adds a data-testid=ask-sk it will simplify future tests. GMAIL_APP_PASSWORD intentionally empty → /api/admin/digest/run returns {skipped:'email_not_configured'} — this is by design, do not treat as a bug.",
+  "rca of the issue": "N/A — all tests pass. Initial admin_tickets flakiness was a race between the drawer close and the tab click (Escape → click happened <300ms apart) — retest with 2s settle passed cleanly."
+}

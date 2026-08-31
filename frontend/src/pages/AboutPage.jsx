@@ -4,14 +4,15 @@ import { ArrowUpRight, Quote } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import Seo from "@/components/Seo";
+import EYBadge from "@/components/EYBadge";
 import { SECTORS } from "@/components/sections/Sectors";
 import { SK_PORTRAITS } from "@/lib/assets";
 
 const JOURNEY = [
-  { year: "Foundations", title: "Consulting & Corporate", text: "Cut his teeth across 60+ projects with corporates and CXOs — learning how strategy, capital and execution actually connect inside large organisations." },
-  { year: "Energy Transition", title: "RE, Storage & Hydrogen", text: "Moved to the frontier of the energy transition — advising on renewables, battery storage and green hydrogen from feasibility through to financial close." },
-  { year: "Public Value", title: "Asset Monetisation", text: "Architected blueprints to unlock dormant public assets, including the landmark monetisation of MSRTC's bus depot portfolio." },
-  { year: "Today", title: "Coach & Advisor", text: "Works 1:1 with founders and CXOs — turning founder-led hustle into system-led, scalable, bankable businesses." },
+  { year: "EY · Big 4", title: "Management Consultant, EY Advisory", text: "Began at the sharpest end of consulting as a Management Consultant with Ernst & Young (EY) Advisory — learning how strategy, capital and execution connect inside large, complex organisations, and delivering for leading corporates in India and globally." },
+  { year: "Corporate & Public", title: "Consulting, Fintech & Fundraising", text: "Led public-sector consulting, fintech and large-scale fundraising initiatives — including debt syndication programmes exceeding $2B across key development authorities in Maharashtra, and asset-monetisation mandates." },
+  { year: "Energy Transition", title: "RE, Storage & Hydrogen", text: "Moved to the frontier of the energy transition — advising on renewables, battery storage (BESS) and green hydrogen from feasibility through to financial close and green & climate financing." },
+  { year: "Today", title: "Coach & Advisor", text: "Works 1:1 with founders and CXOs across strategy, supply chain & cost optimisation, business & digital transformation, financial management and scaling — turning founder-led hustle into system-led, bankable businesses." },
 ];
 
 const PHILOSOPHY = [
@@ -32,14 +33,19 @@ export default function AboutPage() {
         <div className="pointer-events-none absolute -right-40 top-24 h-[28rem] w-[28rem] rounded-full bg-[hsl(var(--primary))] opacity-20 blur-[140px]" />
         <div className="relative mx-auto grid max-w-7xl items-center gap-12 px-6 pb-16 lg:grid-cols-[1.05fr_0.95fr] lg:px-10">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[hsl(var(--primary))]">About Me</p>
+            <div className="flex flex-wrap items-center gap-3">
+              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[hsl(var(--primary))]">About Me</p>
+              <EYBadge />
+            </div>
             <h1 className="mt-4 font-display text-4xl font-black leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl">
               I help founders build businesses that <span className="text-[hsl(var(--primary))]">last</span>.
             </h1>
             <p className="mt-6 max-w-xl text-base leading-relaxed text-muted-foreground sm:text-lg">
-              For over 23 years I've sat at the intersection of engineering, capital and leadership — advising across
-              M&A, aviation, metals &amp; mining, industrial &amp; consumer products, cement, steel, telecom, agriculture,
-              start-up funding and the energy transition. Cross-sector depth that makes the advice sharper.
+              For over 23 years I've sat at the intersection of engineering, capital and leadership — starting as a
+              Management Consultant with <span className="font-semibold text-foreground">EY (Ernst &amp; Young, Big 4)</span> Advisory,
+              then leading debt syndication programmes exceeding <span className="font-semibold text-foreground">$2B</span> across key
+              development authorities in Maharashtra. My work spans strategy, supply chain &amp; cost optimisation, business &amp; digital
+              transformation, financial management, business scaling and the energy transition — for leading corporates in India and globally.
             </p>
             <div className="mt-8 flex flex-wrap gap-4">
               <Link to="/#consult" className="inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-7 py-3.5 font-semibold text-[hsl(var(--primary-foreground))] transition-transform hover:-translate-y-1">Work with me <ArrowUpRight className="h-5 w-5" /></Link>

@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
 import { ArrowUpRight, Sparkles } from "lucide-react";
+import EYBadge from "@/components/EYBadge";
 
 const COACH = "https://static.prod-images.emergentagent.com/jobs/69d54eb7-07e1-4ffd-ad08-8725f9f9829e/images/5b2f94a6fd021cc779249c997e2a7e9f42370d01aeb0897c98fa6f1010e0dcce.jpeg";
 
@@ -11,9 +12,12 @@ export default function Hero() {
       <div className="relative mx-auto grid max-w-7xl items-center gap-12 px-6 pb-24 lg:grid-cols-[1.1fr_0.9fr] lg:px-10">
         <div>
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}
-            className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-1.5 text-xs font-medium text-muted-foreground">
-            <Sparkles className="h-3.5 w-3.5 text-[hsl(var(--primary))]" />
-            23Y+ Experience · 60+ Projects · 12+ Sectors · CXOs
+            className="flex flex-wrap items-center gap-3">
+            <span className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-1.5 text-xs font-medium text-muted-foreground">
+              <Sparkles className="h-3.5 w-3.5 text-[hsl(var(--primary))]" />
+              23Y+ · 60+ Projects · $2B+ Syndicated · CXOs
+            </span>
+            <EYBadge />
           </motion.div>
           <motion.h1 initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.1 }}
             className="mt-6 font-display text-4xl font-extrabold leading-[1.02] tracking-tight sm:text-5xl lg:text-[4.2rem]">
@@ -21,8 +25,9 @@ export default function Hero() {
           </motion.h1>
           <motion.p initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.2 }}
             className="mt-6 max-w-xl text-base leading-relaxed text-muted-foreground sm:text-lg">
-            I'm Sudarshan Karweer — a renowned business coach and strategic advisor. Across 60+ projects and 12+ sectors,
-            I help founders and CXOs sharpen strategy, raise capital, and scale.
+            I'm Sudarshan Karweer — a business coach and strategic advisor, and a former EY (Big 4) management consultant.
+            Across 60+ projects with leading corporates in India and globally, I help founders and CXOs win at strategy,
+            supply chain &amp; cost optimisation, business &amp; digital transformation, financial management and scaling.
           </motion.p>
           <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.3 }}
             className="mt-9 flex flex-wrap items-center gap-4">

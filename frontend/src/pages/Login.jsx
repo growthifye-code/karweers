@@ -48,8 +48,8 @@ export default function Login() {
         <img src={SK_PHOTOS.walking} alt="Sudarshan Karweer" className="h-full w-full object-cover" />
         <div className="absolute inset-0 bg-[hsl(var(--primary))]/70" />
         <div className="absolute bottom-12 left-12 right-12 text-[hsl(var(--primary-foreground))]">
-          <h2 className="font-display text-4xl font-black leading-tight">The energy transition, engineered for growth.</h2>
-          <p className="mt-4 opacity-80">Client & advisor portal · Sudarshan Karweer</p>
+          <h2 className="font-display text-4xl font-black leading-tight">Sudarshan Karweer — coaching founders & CXOs to grow.</h2>
+          <p className="mt-4 opacity-80">Business coach & strategic advisor · Client & admin portal</p>
         </div>
       </div>
       <div className="flex items-center justify-center px-6 py-16">

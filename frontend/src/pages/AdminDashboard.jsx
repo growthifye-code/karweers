@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useAuth, formatApiErrorDetail } from "@/context/AuthContext";
 import { Logo } from "@/components/Navbar";
 import ThemeToggle from "@/components/ThemeToggle";
-import { Users, FileText, Inbox, Sparkles, Trash2, Wand2, Mail } from "lucide-react";
+import { Users, FileText, Inbox, Sparkles, Trash2, Wand2, Mail, LifeBuoy, UserCircle, ChevronDown } from "lucide-react";
 import api from "@/lib/api";
 
 const CATS = [
@@ -26,6 +26,10 @@ export default function AdminDashboard() {
   const [leads, setLeads] = useState([]);
   const [articles, setArticles] = useState([]);
   const [subscribers, setSubscribers] = useState([]);
+  const [clients, setClients] = useState([]);
+  const [tickets, setTickets] = useState([]);
+  const [activeClient, setActiveClient] = useState(null);
+  const [ticketReplies, setTicketReplies] = useState({});
 
   const [form, setForm] = useState({ title: "", category: "news", sector: SECTORS[0], summary: "", content: "", tags: "", image: DEFAULT_IMG, featured: false });
   const [aiTopic, setAiTopic] = useState("");
@@ -37,8 +41,29 @@ export default function AdminDashboard() {
     api.get("/consultations").then((r) => setLeads(r.data)).catch(() => {});
     api.get("/articles").then((r) => setArticles(r.data)).catch(() => {});
     api.get("/newsletter").then((r) => setSubscribers(r.data)).catch(() => {});
+    api.get("/admin/clients").then((r) => setClients(r.data)).catch(() => {});
+    api.get("/admin/tickets").then((r) => setTickets(r.data)).catch(() => {});
   };
   useEffect(load, []);
+
+  const openClient = async (id) => {
+    try { const { data } = await api.get(`/admin/clients/${id}`); setActiveClient(data); }
+    catch { toast.error("Could not load client."); }
+  };
+  const ticketStatus = async (id, status) => {
+    try { await api.patch(`/admin/tickets/${id}`, { status }); setTickets((t) => t.map((x) => x.id === id ? { ...x, status } : x)); }
+    catch { toast.error("Update failed"); }
+  };
+  const ticketPriority = async (id, priority) => {
+    try { await api.patch(`/admin/tickets/${id}`, { priority }); setTickets((t) => t.map((x) => x.id === id ? { ...x, priority } : x)); }
+    catch { toast.error("Update failed"); }
+  };
+  const adminReply = async (id) => {
+    const msg = ticketReplies[id];
+    if (!msg?.trim()) return;
+    try { await api.post(`/tickets/${id}/reply`, { message: msg }); setTicketReplies((r) => ({ ...r, [id]: "" })); load(); toast.success("Reply sent"); }
+    catch { toast.error("Reply failed"); }
+  };
 
   const generate = async () => {
     if (!aiTopic.trim()) { toast.error("Enter a topic for the AI to write about."); return; }
@@ -129,10 +154,10 @@ export default function AdminDashboard() {
         <p className="mt-1 text-sm text-muted-foreground">Signed in as {user?.email}</p>
 
         <div className="mt-8 flex flex-wrap gap-2 border-b border-border pb-4">
-          {["overview", "leads", "articles", "create", "subscribers"].map((t) => (
+          {["overview", "crm", "leads", "tickets", "articles", "create", "subscribers"].map((t) => (
             <button key={t} onClick={() => setTab(t)} data-testid={`admin-tab-${t}`}
               className={`rounded-full px-4 py-2 text-sm font-medium capitalize transition-colors ${tab === t ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]" : "border border-border text-muted-foreground hover:bg-secondary"}`}>
-              {t === "create" ? "Create + AI" : t}
+              {t === "create" ? "Create + AI" : t === "crm" ? "CRM" : t === "tickets" ? "Service Desk" : t}
             </button>
           ))}
         </div>
@@ -144,6 +169,72 @@ export default function AdminDashboard() {
                 <s.icon className="h-7 w-7 text-[hsl(var(--accent))]" />
                 <p className="mt-4 font-display text-4xl font-black">{s.value}</p>
                 <p className="mt-1 text-sm text-muted-foreground">{s.label}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {tab === "crm" && (
+          <div className="mt-8 overflow-x-auto rounded-2xl border border-border" data-testid="admin-crm">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-card text-muted-foreground">
+                <tr>
+                  <th className="p-4">Client ID</th><th className="p-4">Name</th><th className="p-4">Source</th><th className="p-4">Interests</th><th className="p-4">Activity</th><th className="p-4">Bookings</th><th className="p-4">Joined</th><th className="p-4"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {clients.length === 0 && <tr><td colSpan="8" className="p-8 text-center text-muted-foreground">No registered clients yet.</td></tr>}
+                {clients.map((c) => (
+                  <tr key={c.id} className="border-t border-border align-top">
+                    <td className="p-4 font-mono text-xs font-semibold text-[hsl(var(--primary))]">{c.client_code || "—"}</td>
+                    <td className="p-4 font-medium">{c.name}<div className="text-xs text-muted-foreground">{c.email}</div></td>
+                    <td className="p-4 text-muted-foreground capitalize">{c.auth || "email"}</td>
+                    <td className="p-4 text-xs text-muted-foreground">{(c.interests_computed || []).join(", ") || "—"}</td>
+                    <td className="p-4 text-muted-foreground">{c.activity_count}</td>
+                    <td className="p-4 text-muted-foreground">{c.booking_count}</td>
+                    <td className="p-4 text-muted-foreground">{c.created_at ? new Date(c.created_at).toLocaleDateString() : "—"}</td>
+                    <td className="p-4"><button onClick={() => openClient(c.id)} data-testid={`view-client-${c.id}`} className="rounded-full border border-border px-3 py-1.5 text-xs font-medium hover:bg-secondary">View</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {tab === "tickets" && (
+          <div className="mt-8 space-y-4" data-testid="admin-tickets">
+            {tickets.length === 0 && <div className="rounded-2xl border border-dashed border-border p-10 text-center text-muted-foreground">No support tickets yet.</div>}
+            {tickets.map((t) => (
+              <div key={t.id} className="rounded-2xl border border-border bg-card p-5" data-testid={`admin-ticket-${t.id}`}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold">{t.subject}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{t.ticket_code} · {t.name} ({t.client_code || t.email}) · {t.category}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <select value={t.priority} onChange={(e) => ticketPriority(t.id, e.target.value)} data-testid={`ticket-priority-${t.id}`} className="rounded-lg border border-border bg-background px-2 py-1 text-xs capitalize">
+                      {["low", "medium", "high"].map((p) => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                    <select value={t.status} onChange={(e) => ticketStatus(t.id, e.target.value)} data-testid={`ticket-status-${t.id}`} className="rounded-lg border border-border bg-background px-2 py-1 text-xs capitalize">
+                      {["open", "in-progress", "resolved", "closed"].map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <p className="mt-3 text-sm text-muted-foreground">{t.message}</p>
+                {t.replies?.length > 0 && (
+                  <div className="mt-4 space-y-2 border-t border-border pt-4">
+                    {t.replies.map((r, i) => (
+                      <div key={i} className={`rounded-lg p-3 text-sm ${r.role === "admin" ? "bg-[hsl(var(--primary))]/10" : "bg-secondary"}`}>
+                        <span className="text-xs font-semibold">{r.role === "admin" ? "Team SK" : t.name}</span>
+                        <p className="mt-1 text-muted-foreground">{r.message}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="mt-3 flex gap-2">
+                  <input value={ticketReplies[t.id] || ""} onChange={(e) => setTicketReplies({ ...ticketReplies, [t.id]: e.target.value })} placeholder="Reply to client…" data-testid={`admin-reply-input-${t.id}`} className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none" />
+                  <button onClick={() => adminReply(t.id)} data-testid={`admin-reply-send-${t.id}`} className="rounded-lg bg-[hsl(var(--accent))] px-4 py-2 text-sm font-medium text-[hsl(var(--accent-foreground))]">Reply</button>
+                </div>
               </div>
             ))}
           </div>
@@ -168,10 +259,13 @@ export default function AdminDashboard() {
                     <td className="p-4">
                       <select value={l.status} onChange={(e) => setLeadStatus(l.id, e.target.value)} data-testid={`lead-status-${l.id}`} className="rounded-lg border border-border bg-background px-2 py-1 text-xs">
                         <option value="new">New</option>
+                        <option value="contacted">Contacted</option>
+                        <option value="qualified">Qualified</option>
                         <option value="payment_pending">Payment Pending</option>
                         <option value="paid">Paid</option>
-                        <option value="contacted">Contacted</option>
                         <option value="scheduled">Scheduled</option>
+                        <option value="won">Won</option>
+                        <option value="lost">Lost</option>
                         <option value="closed">Closed</option>
                       </select>
                     </td>
@@ -252,6 +346,53 @@ export default function AdminDashboard() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {activeClient && (
+          <div className="fixed inset-0 z-50 flex justify-end bg-black/50" onClick={() => setActiveClient(null)} data-testid="client-drawer">
+            <div className="h-full w-full max-w-lg overflow-y-auto bg-background p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  {activeClient.user.picture ? <img src={activeClient.user.picture} alt="" className="h-12 w-12 rounded-full object-cover" /> : <UserCircle className="h-12 w-12 text-muted-foreground" />}
+                  <div>
+                    <p className="font-display text-xl font-bold">{activeClient.user.name}</p>
+                    <p className="text-xs text-muted-foreground">{activeClient.user.email}</p>
+                    <p className="mt-1 font-mono text-xs font-semibold text-[hsl(var(--primary))]">{activeClient.user.client_code}</p>
+                  </div>
+                </div>
+                <button onClick={() => setActiveClient(null)} className="text-2xl leading-none text-muted-foreground">×</button>
+              </div>
+
+              {activeClient.interests?.length > 0 && (
+                <div className="mt-6">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Interest profile</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {activeClient.interests.map((it) => <span key={it.topic} className="rounded-full border border-[hsl(var(--primary))]/40 bg-[hsl(var(--primary))]/10 px-3 py-1 text-xs text-[hsl(var(--primary))]">{it.topic} · {it.score}</span>)}
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-6">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Bookings ({activeClient.bookings.length})</p>
+                <div className="mt-2 space-y-2">
+                  {activeClient.bookings.length === 0 && <p className="text-sm text-muted-foreground">None yet.</p>}
+                  {activeClient.bookings.map((b) => <div key={b.id} className="rounded-lg border border-border p-3 text-sm">{b.area || b.package || "Consultation"} <span className="text-xs text-muted-foreground">· {b.status}</span></div>)}
+                </div>
+              </div>
+
+              <div className="mt-6">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Activity timeline ({activeClient.timeline.length})</p>
+                <div className="mt-2 space-y-1.5">
+                  {activeClient.timeline.length === 0 && <p className="text-sm text-muted-foreground">No tracked activity yet.</p>}
+                  {activeClient.timeline.slice(0, 60).map((ev, i) => (
+                    <div key={i} className="flex items-center justify-between gap-3 border-l-2 border-[hsl(var(--primary))]/40 pl-3 text-sm">
+                      <span className="text-muted-foreground"><span className="font-medium capitalize text-foreground">{ev.kind}</span> {ev.label || ev.ref}</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">{new Date(ev.created_at).toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>

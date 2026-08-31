@@ -70,3 +70,48 @@ def send_booking_email(booking_id: str, client_name: str, client_email: str, ser
     except Exception:
         log.exception("Booking email failed for %s", booking_id)
         return "failed"
+
+
+def send_digest_email(client_email: str, client_name: str, videos: list) -> str:
+    """Weekly personalised top-5 videos digest."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd:
+        return "skipped"
+    rows = ""
+    for v in videos[:5]:
+        url = f"https://www.youtube.com/watch?v={v['video_id']}"
+        rows += (
+            f'<tr><td style="padding:10px 0;">'
+            f'<a href="{url}" style="color:#0A0A0A;text-decoration:none;font-weight:600;font-size:15px;">{v.get("title","")}</a>'
+            f'<div style="color:#6b7280;font-size:12px;margin-top:4px;">Source: {v.get("source","")}</div>'
+            f'</td></tr>'
+        )
+    html = (
+        f'<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;">'
+        f'<div style="background:#0A0A0A;padding:20px 24px;border-radius:12px 12px 0 0;">'
+        f'<span style="color:#fff;font-size:22px;font-weight:700;">S<span style="color:#C6F135;">K.</span></span>'
+        f'<span style="color:#9ca3af;font-size:12px;margin-left:10px;">Your weekly Learning Hub</span></div>'
+        f'<div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;padding:24px;">'
+        f'<p style="font-size:15px;color:#111;">Hi {client_name},</p>'
+        f'<p style="font-size:14px;color:#374151;">Your 5 hand-picked videos for the week, tuned to your interests:</p>'
+        f'<table style="width:100%;border-collapse:collapse;">{rows}</table>'
+        f'<a href="https://www.sudarshankarweer.com/learning" style="display:inline-block;margin-top:18px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Open Learning Hub</a>'
+        f'<p style="font-size:11px;color:#9ca3af;margin-top:20px;">You receive this because you have an account with Sudarshan Karweer. Manage preferences in your dashboard.</p>'
+        f'</div></div>'
+    )
+    msg = EmailMessage()
+    msg["Subject"] = "Your weekly watchlist — 5 fresh picks"
+    msg["From"] = user
+    msg["To"] = client_email
+    msg.set_content("Your weekly personalised videos. View them at https://www.sudarshankarweer.com/learning")
+    msg.add_alternative(html, subtype="html")
+    try:
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as s:
+            s.ehlo(); s.starttls(context=ctx); s.ehlo()
+            s.login(user, pwd); s.send_message(msg)
+        return "sent"
+    except Exception:
+        log.exception("Digest email failed for %s", client_email)
+        return "failed"

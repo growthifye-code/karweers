@@ -22,6 +22,8 @@ import PaymentSuccess from "@/pages/PaymentSuccess";
 import PaymentCancel from "@/pages/PaymentCancel";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AIChatWidget from "@/components/AIChatWidget";
+import ConsentBanner from "@/components/ConsentBanner";
+import PageTracker from "@/components/PageTracker";
 
 function AppRoutes() {
   const location = useLocation();
@@ -58,8 +60,10 @@ function App() {
     <div className="App">
       <AuthProvider>
         <BrowserRouter>
+          <PageTracker />
           <AppRoutes />
           <AIChatWidget />
+          <ConsentBanner />
           <Toaster position="top-center" richColors />
         </BrowserRouter>
       </AuthProvider>

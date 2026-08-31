@@ -367,3 +367,42 @@ def send_session_reminder_email(to_email: str, client_name: str, package: str, s
                     + (f" Join: {meeting_link}" if meeting_link else ""))
     msg.add_alternative(_shell("Session reminder", inner), subtype="html")
     return _smtp_send(msg)
+
+
+
+def send_consent_receipt_email(to_email: str, name: str, action: str, version: str,
+                               at: str = "", admin_bcc: str = "") -> str:
+    """Send the user a copy of the Terms & Privacy agreement they just accepted (INERT until SMTP configured)."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email:
+        return "skipped"
+    action_label = {"register": "creating your account", "login": "signing in",
+                    "google": "signing in with Google"}.get(action, "signing in")
+    site = "https://www.sudarshankarweer.com"
+    inner = (
+        f'<p style="font-size:15px;color:#111;">Hi {name or "there"},</p>'
+        f'<p style="font-size:14px;color:#374151;">Thanks for {action_label}. This is your record that you read and agreed to '
+        f'our Terms &amp; Conditions and Privacy Policy.</p>'
+        f'<table style="width:100%;border-collapse:collapse;margin-top:14px;font-size:13px;color:#374151;">'
+        f'<tr><td style="padding:6px 0;color:#6b7280;">Agreed on</td><td style="padding:6px 0;text-align:right;font-weight:600;color:#111;">{at or "just now"}</td></tr>'
+        f'<tr><td style="padding:6px 0;color:#6b7280;">Policy version</td><td style="padding:6px 0;text-align:right;font-weight:600;color:#111;">{version}</td></tr>'
+        f'<tr><td style="padding:6px 0;color:#6b7280;">Method</td><td style="padding:6px 0;text-align:right;font-weight:600;color:#111;text-transform:capitalize;">{action}</td></tr>'
+        f'</table>'
+        f'<p style="font-size:14px;color:#374151;margin-top:16px;">Read them anytime:</p>'
+        f'<p style="font-size:14px;margin-top:4px;">'
+        f'<a href="{site}/terms" style="color:#059669;font-weight:600;">Terms &amp; Conditions</a> &nbsp;·&nbsp; '
+        f'<a href="{site}/privacy" style="color:#059669;font-weight:600;">Privacy Policy</a></p>'
+        f'<p style="font-size:13px;color:#374151;margin-top:16px;">— Team Sudarshan Karweer</p>'
+    )
+    msg = EmailMessage()
+    msg["Subject"] = "Your agreement to our Terms & Privacy Policy"
+    msg["From"] = user
+    msg["To"] = to_email
+    if admin_bcc:
+        msg["Bcc"] = admin_bcc
+    msg.set_content(f"Hi {name or 'there'}, this confirms you agreed to our Terms & Conditions and Privacy Policy "
+                    f"(version {version}) on {at or 'just now'} via {action}. "
+                    f"Read them: {site}/terms and {site}/privacy. — Team Sudarshan Karweer")
+    msg.add_alternative(_shell("Consent receipt", inner), subtype="html")
+    return _smtp_send(msg)

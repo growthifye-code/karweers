@@ -29,6 +29,7 @@ from services_data import SERVICES as SERVICE_PAGES
 from emailer import send_booking_email
 from emailer import send_security_alert_email
 from emailer import send_new_booking_alert_email, send_session_reminder_email, send_weekly_agenda_email, send_waitlist_opening_email
+from emailer import send_consent_receipt_email
 import xml.etree.ElementTree as ET
 from datetime import datetime as _dt
 
@@ -104,6 +105,14 @@ async def record_consent(request: Request, email: str, name: str, action: str, u
     if user_id:
         await db.users.update_one({"id": user_id}, {"$set": {
             "consent": {"agreed": True, "version": CONSENT_POLICY_VERSION, "at": ts, "action": action}}})
+    # Email the user a copy of what they agreed to (BCC admin for the compliance trail). INERT until SMTP is set.
+    if doc["email"]:
+        admin_bcc = os.environ.get("BOOKING_ADMIN_EMAIL") or os.environ.get("ADMIN_EMAIL", "")
+        try:
+            asyncio.create_task(asyncio.to_thread(
+                send_consent_receipt_email, doc["email"], name, action, CONSENT_POLICY_VERSION, ts, admin_bcc))
+        except Exception:
+            pass
 
 
 def issue_captcha_gate(consent: bool = False) -> str:
@@ -2181,6 +2190,16 @@ async def _refresh_home_content(force: bool = False) -> Optional[dict]:
         data["_id"] = "home_content"
         data["generated_at"] = now_iso()
         await db.app_meta.replace_one({"_id": "home_content"}, data, upsert=True)
+        # Archive a dated snapshot so visitors can browse past daily reads (one per calendar day).
+        day = datetime.now(timezone.utc).date().isoformat()
+        await db.signals_archive.update_one({"date": day}, {"$set": {
+            "date": day,
+            "hero_headline": data.get("hero_headline", ""),
+            "hero_subtext": data.get("hero_subtext", ""),
+            "insights": data.get("insights", []),
+            "feed": data.get("feed", []),
+            "generated_at": data["generated_at"],
+        }}, upsert=True)
         logger.info("home content regenerated")
         return data
 
@@ -2191,6 +2210,21 @@ async def home_content():
     if _home_is_stale(doc):
         asyncio.create_task(_refresh_home_content())  # refresh in background; serve current instantly
     return doc or {}
+
+
+@api_router.get("/signals/archive")
+async def signals_archive(limit: int = 30):
+    """Past daily 'Market Signals' reads, newest first, so visitors can browse history."""
+    items = await db.signals_archive.find({}, {"_id": 0}).sort("date", -1).to_list(min(limit, 90))
+    return {"signals": items}
+
+
+@api_router.get("/signals/archive/{day}")
+async def signals_archive_day(day: str):
+    item = await db.signals_archive.find_one({"date": day}, {"_id": 0})
+    if not item:
+        raise HTTPException(status_code=404, detail="No signals for that date")
+    return item
 
 
 @api_router.post("/admin/home/regenerate")
@@ -3233,6 +3267,7 @@ async def startup():
     await db.security_alerts.create_index("created_at")
     await db.consent_logs.create_index("created_at")
     await db.consent_logs.create_index("email")
+    await db.signals_archive.create_index("date", unique=True)
     await db.audit_log.create_index("at")
     await db.audit_log.create_index("expire_at", expireAfterSeconds=0)
     _meta = await db.app_meta.find_one({"_id": "audit_retention"})
@@ -3285,7 +3320,16 @@ async def startup():
             d.update({"id": str(uuid.uuid4()), "author": "Sudarshan Karweer", "created_at": now_iso()})
             await db.articles.insert_one(d)
     logger.info("Articles ensured")
-    asyncio.create_task(_refresh_home_content())  # warm the AI homepage cache
+    # Backfill today's Signals Archive from the current cached content (if any).
+    _hc = await db.app_meta.find_one({"_id": "home_content"})
+    if _hc and _hc.get("generated_at"):
+        _day = datetime.now(timezone.utc).date().isoformat()
+        if not await db.signals_archive.find_one({"date": _day}):
+            await db.signals_archive.update_one({"date": _day}, {"$set": {
+                "date": _day, "hero_headline": _hc.get("hero_headline", ""),
+                "hero_subtext": _hc.get("hero_subtext", ""), "insights": _hc.get("insights", []),
+                "feed": _hc.get("feed", []), "generated_at": _hc.get("generated_at")}}, upsert=True)
+    asyncio.create_task(_refresh_home_content())  # warm the content cache
     asyncio.create_task(_digest_scheduler())
 
 

@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
-import { Sparkles, TrendingUp } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Sparkles, TrendingUp, ArrowUpRight } from "lucide-react";
 
 const TAG_STYLES = {
   "Energy Transition": "border-[hsl(var(--primary))]/40 text-[hsl(var(--primary))]",
@@ -64,8 +65,11 @@ export default function AIInsights({ content }) {
           ))}
         </div>
 
-        <p className="mt-8 text-xs text-muted-foreground">
-          Refreshed daily and grounded in Sudarshan's advisory expertise. For decision-grade advice, book a 1:1 consultation.
+        <p className="mt-8 flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+          <span>Refreshed daily and grounded in Sudarshan's advisory expertise. For decision-grade advice, book a 1:1 consultation.</span>
+          <Link to="/signals" data-testid="signals-archive-link" className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border px-4 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-secondary">
+            Browse past signals <ArrowUpRight className="h-3.5 w-3.5" />
+          </Link>
         </p>
       </div>
     </section>

@@ -2367,13 +2367,32 @@ class BookingActionIn(BaseModel):
     meeting_link: Optional[str] = None
 
 
+def _booking_token(bid: str) -> str:
+    return pyjwt.encode({"purpose": "booking_manage", "bid": bid,
+                         "exp": datetime.now(timezone.utc) + timedelta(days=60)},
+                        get_jwt_secret(), algorithm="HS256")
+
+
+def _read_booking_token(tok: str) -> Optional[str]:
+    try:
+        d = pyjwt.decode(tok, get_jwt_secret(), algorithms=["HS256"])
+        return d.get("bid") if d.get("purpose") == "booking_manage" else None
+    except Exception:
+        return None
+
+
+def _booking_manage_url(bid: str) -> str:
+    front = os.environ.get("WEBAUTHN_ORIGIN", "")
+    return f"{front}/booking/manage?token={_booking_token(bid)}" if front else ""
+
+
 def _schedule_booking_email(booking, background_tasks):
     try:
         start = _dt.fromisoformat(f"{booking['slot_date']}T{booking['slot_time']}:00+00:00")
         end = start + timedelta(minutes=booking.get("minutes", 60))
         background_tasks.add_task(send_booking_email, booking["id"], booking.get("name", "Client"),
                                   booking.get("email", ""), booking.get("package", "Consultation"),
-                                  start, end, booking.get("meeting_link", ""))
+                                  start, end, booking.get("meeting_link", ""), _booking_manage_url(booking["id"]))
     except Exception:
         logger.exception("booking email schedule failed")
 
@@ -2425,6 +2444,64 @@ async def reschedule_booking(bid: str, body: BookingActionIn, request: Request, 
     await _apply_calendar_sync(bid, b, "update" if b.get("gcal_event_id") else "create")
     _schedule_booking_email(b, background_tasks)
     await audit(request, admin.get("email"), "booking_rescheduled", bid, meta=f"{body.date} {body.time}")
+    return {"success": True}
+
+
+# ---------------- Client self-service (cancel / request reschedule via email link) ----------------
+class TokenIn(BaseModel):
+    token: str
+    message: Optional[str] = ""
+
+
+@api_router.get("/booking/manage")
+async def booking_manage(token: str):
+    bid = _read_booking_token(token)
+    if not bid:
+        raise HTTPException(status_code=400, detail="This link is invalid or has expired.")
+    b = await db.consultations.find_one({"id": bid},
+        {"_id": 0, "name": 1, "package": 1, "slot_date": 1, "slot_time": 1, "status": 1,
+         "meeting_link": 1, "reschedule_requested": 1})
+    if not b:
+        raise HTTPException(status_code=404, detail="Booking not found.")
+    return b
+
+
+@api_router.post("/booking/cancel")
+async def booking_cancel(body: TokenIn, background_tasks: BackgroundTasks):
+    bid = _read_booking_token(body.token)
+    if not bid:
+        raise HTTPException(status_code=400, detail="This link is invalid or has expired.")
+    b = await db.consultations.find_one({"id": bid})
+    if not b:
+        raise HTTPException(status_code=404, detail="Booking not found.")
+    if b.get("status") == "cancelled":
+        return {"success": True, "status": "cancelled"}
+    await db.consultations.update_one({"id": bid}, {"$set": {"status": "cancelled"}})
+    if b.get("gcal_event_id"):
+        b["status"] = "cancelled"
+        await sync_booking_to_calendar(b, "delete")
+        await db.consultations.update_one({"id": bid}, {"$unset": {"gcal_event_id": ""}})
+    admin_to = os.environ.get("BOOKING_ADMIN_EMAIL") or os.environ.get("ADMIN_EMAIL")
+    if admin_to:
+        note = dict(b); note["message"] = f"CLIENT CANCELLED this session ({b.get('slot_date')} {b.get('slot_time')} IST)."
+        background_tasks.add_task(send_new_booking_alert_email, admin_to, note)
+    return {"success": True, "status": "cancelled"}
+
+
+@api_router.post("/booking/reschedule-request")
+async def booking_reschedule_request(body: TokenIn, background_tasks: BackgroundTasks):
+    bid = _read_booking_token(body.token)
+    if not bid:
+        raise HTTPException(status_code=400, detail="This link is invalid or has expired.")
+    b = await db.consultations.find_one({"id": bid})
+    if not b:
+        raise HTTPException(status_code=404, detail="Booking not found.")
+    await db.consultations.update_one({"id": bid}, {"$set": {
+        "reschedule_requested": True, "reschedule_note": (body.message or "")[:500]}})
+    admin_to = os.environ.get("BOOKING_ADMIN_EMAIL") or os.environ.get("ADMIN_EMAIL")
+    if admin_to:
+        note = dict(b); note["message"] = f"CLIENT REQUESTED A RESCHEDULE. Note: {body.message or '(none)'}"
+        background_tasks.add_task(send_new_booking_alert_email, admin_to, note)
     return {"success": True}
 
 

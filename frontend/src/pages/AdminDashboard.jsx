@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth, formatApiErrorDetail } from "@/context/AuthContext";
@@ -91,6 +91,15 @@ export default function AdminDashboard() {
     if (p === "connected") { toast.success("Google Calendar connected — confirmed sessions will sync automatically."); window.history.replaceState({}, "", "/admin"); }
     else if (p === "error") { toast.error("Could not connect Google Calendar. Please try again."); window.history.replaceState({}, "", "/admin"); }
   }, []);
+
+  const calWarnedRef = useRef(false);
+  useEffect(() => {
+    if (calStatus?.connected && calStatus.healthy === false && !calWarnedRef.current) {
+      calWarnedRef.current = true;
+      toast.warning("Google Calendar needs reconnecting — session syncing is paused. Open the Bookings tab to reconnect.", { duration: 9000 });
+    }
+  }, [calStatus?.healthy, calStatus?.connected]);
+
 
   const connectCalendar = async () => {
     try { const { data } = await api.get("/admin/calendar/oauth/start"); window.location.href = data.authorization_url; }
@@ -1199,7 +1208,7 @@ export default function AdminDashboard() {
                 <tbody>
                   {bookings.length === 0 && <tr><td colSpan="5" className="p-8 text-center text-muted-foreground">No session bookings yet.</td></tr>}
                   {bookings.map((b) => {
-                    const badge = b.status === "confirmed" ? "bg-[hsl(var(--primary))]/15 text-[hsl(var(--primary))]" : b.status === "declined" ? "bg-red-500/15 text-red-500" : "bg-amber-500/15 text-amber-500";
+                    const badge = b.status === "confirmed" ? "bg-[hsl(var(--primary))]/15 text-[hsl(var(--primary))]" : (b.status === "declined" || b.status === "cancelled") ? "bg-red-500/15 text-red-500" : "bg-amber-500/15 text-amber-500";
                     return (
                       <tr key={b.id} className="border-t border-border align-top">
                         <td className="p-4 font-medium">{b.name}<div className="text-xs text-muted-foreground">{b.email}</div><div className="text-xs text-muted-foreground">{b.phone}</div></td>
@@ -1210,7 +1219,9 @@ export default function AdminDashboard() {
                           {b.meeting_link && <a href={b.meeting_link} target="_blank" rel="noreferrer" data-testid={`booking-link-${b.id}`} className="mt-1 block text-xs font-medium text-[hsl(var(--primary))] underline truncate max-w-[180px]">🔗 Meeting link</a>}
                           {b.area && <div className="mt-1 text-xs">{b.area}</div>}
                         </td>
-                        <td className="p-4"><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold capitalize ${badge}`} data-testid={`booking-status-${b.id}`}>{(b.status || "").replace(/_/g, " ")}</span></td>
+                        <td className="p-4"><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold capitalize ${badge}`} data-testid={`booking-status-${b.id}`}>{(b.status || "").replace(/_/g, " ")}</span>
+                          {b.reschedule_requested && b.status !== "cancelled" && <span data-testid={`reschedule-flag-${b.id}`} className="mt-1.5 block rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-500" title={b.reschedule_note || ""}>↻ Reschedule requested</span>}
+                        </td>
                         <td className="p-4">
                           {reschedule?.id === b.id ? (
                             <div className="flex flex-col gap-2" data-testid={`reschedule-form-${b.id}`}>

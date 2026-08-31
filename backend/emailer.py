@@ -40,7 +40,7 @@ def build_ics(booking_id: str, summary: str, start: datetime, end: datetime, cli
 
 
 def send_booking_email(booking_id: str, client_name: str, client_email: str, service: str,
-                       start: datetime, end: datetime, meeting_link: str = "") -> str:
+                       start: datetime, end: datetime, meeting_link: str = "", manage_url: str = "") -> str:
     user = os.environ.get("GMAIL_USER")
     pwd = os.environ.get("GMAIL_APP_PASSWORD")
     admin = os.environ.get("BOOKING_ADMIN_EMAIL", user or "")
@@ -49,6 +49,7 @@ def send_booking_email(booking_id: str, client_name: str, client_email: str, ser
         return "skipped"
 
     join_line = f"Join here: {meeting_link}\n" if meeting_link else "A video link will follow before the session.\n"
+    manage_line = f"\nNeed to change it? Cancel or request a reschedule here: {manage_url}\n" if manage_url else ""
     msg = EmailMessage(policy=SMTP)
     msg["Subject"] = f"Confirmed: {service} with Sudarshan Karweer"
     msg["From"] = user
@@ -58,7 +59,8 @@ def send_booking_email(booking_id: str, client_name: str, client_email: str, ser
         f"Hello {client_name},\n\n"
         f"Your {service} is confirmed.\n"
         f"When: {start.strftime('%A, %d %b %Y at %H:%M UTC')}\n"
-        f"{join_line}\n"
+        f"{join_line}"
+        f"{manage_line}\n"
         "A calendar invite is attached.\n\n"
         "— Team Sudarshan Karweer\n"
     )

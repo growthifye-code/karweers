@@ -18,6 +18,7 @@ import Register from "@/pages/Register";
 import AuthCallback from "@/pages/AuthCallback";
 import AdminDashboard from "@/pages/AdminDashboard";
 import ClientDashboard from "@/pages/ClientDashboard";
+import BookingManage from "@/pages/BookingManage";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AIChatWidget from "@/components/AIChatWidget";
 import ConsentBanner from "@/components/ConsentBanner";
@@ -48,6 +49,7 @@ function AppRoutes() {
       <Route path="/register" element={<Register />} />
       <Route path="/dashboard" element={<ProtectedRoute><ClientDashboard /></ProtectedRoute>} />
       <Route path="/admin" element={<ProtectedRoute admin><AdminDashboard /></ProtectedRoute>} />
+      <Route path="/booking/manage" element={<BookingManage />} />
     </Routes>
   );
 }

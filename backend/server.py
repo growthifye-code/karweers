@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from pydantic import BaseModel, EmailStr, Field
 from typing import List, Optional
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -31,7 +31,6 @@ import xml.etree.ElementTree as ET
 from datetime import datetime as _dt
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
-from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
 
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
@@ -1760,6 +1759,15 @@ async def _digest_scheduler():
         try:
             await _auto_escalate_tickets()  # hourly SLA escalation pass
             now = datetime.now(timezone.utc)
+            # Every Saturday, publish (roll forward) availability to the coming week.
+            if now.weekday() == 5:  # Saturday
+                ameta = await db.app_meta.find_one({"_id": "availability"}) or {}
+                today = now.date()
+                if ameta.get("last_published_on") != today.isoformat():
+                    next_monday = today + timedelta(days=(7 - today.weekday()) % 7 or 7)
+                    await db.app_meta.update_one({"_id": "availability"}, {"$set": {
+                        "published_week_start": next_monday.isoformat(),
+                        "last_published_on": today.isoformat()}}, upsert=True)
             if now.weekday() == 0 and os.environ.get("GMAIL_APP_PASSWORD"):  # Monday
                 meta = await db.app_meta.find_one({"_id": "digest"})
                 last = (meta or {}).get("last_run", "")
@@ -2000,105 +2008,292 @@ async def list_subscribers(admin: dict = Depends(require_admin)):
     return await db.subscribers.find({}, {"_id": 0}).sort("created_at", -1).to_list(2000)
 
 
-# ---------------- Paid Consultation (Stripe) ----------------
-STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "sk_test_emergent")
+# ---------------- Consultation packages, availability & booking ----------------
 PACKAGES = {
-    "discovery": {"name": "Discovery Call", "amount": 99.0, "duration": "30 minutes",
+    "discovery": {"name": "Discovery Call", "amount": 99.0, "minutes": 30, "duration": "30 minutes",
                   "features": ["Focused problem framing", "Direct next-step guidance", "Ideal first touchpoint"]},
-    "strategy": {"name": "1:1 Strategy Session", "amount": 299.0, "duration": "60 minutes",
+    "strategy": {"name": "1:1 Strategy Session", "amount": 299.0, "minutes": 60, "duration": "60 minutes",
                  "features": ["Deep strategy & fundraising review", "Actionable roadmap", "Follow-up notes"]},
-    "deepdive": {"name": "Deep-Dive Advisory", "amount": 599.0, "duration": "90 minutes",
+    "deepdive": {"name": "Deep-Dive Advisory", "amount": 599.0, "minutes": 90, "duration": "90 minutes",
                  "features": ["Full business / deal deep-dive", "Bankability & scaling plan", "Priority follow-up access"]},
 }
 
+# Booking window: Mon–Fri, 09:30–19:00, 30-minute start slots.
+WORK_START_MIN = 9 * 60 + 30
+WORK_END_MIN = 19 * 60
+SLOT_MIN = 30
+WORK_DAYS = {0, 1, 2, 3, 4}
+ACTIVE_BOOKING_STATUSES = ["pending_confirmation", "confirmed"]
 
-class CheckoutIn(BaseModel):
+
+def _slot_times():
+    out, t = [], WORK_START_MIN
+    while t + SLOT_MIN <= WORK_END_MIN:
+        out.append(f"{t // 60:02d}:{t % 60:02d}")
+        t += SLOT_MIN
+    return out
+
+
+def _occupied_slots(start_hhmm: str, minutes: int):
+    h, m = map(int, start_hhmm.split(":"))
+    s = h * 60 + m
+    return [b for b in _slot_times()
+            if s <= (int(b[:2]) * 60 + int(b[3:])) < s + minutes]
+
+
+def _monday_of(d: date) -> date:
+    return d - timedelta(days=d.weekday())
+
+
+async def _get_availability_meta():
+    meta = await db.app_meta.find_one({"_id": "availability"}) or {}
+    if not meta.get("published_week_start"):
+        meta["published_week_start"] = _monday_of(datetime.now(timezone.utc).date()).isoformat()
+    meta.setdefault("blocked", {})
+    return meta
+
+
+async def _booked_slots_for(dates: list):
+    out = {d: set() for d in dates}
+    cur = db.consultations.find(
+        {"slot_date": {"$in": dates}, "status": {"$in": ACTIVE_BOOKING_STATUSES}},
+        {"_id": 0, "slot_date": 1, "occupied": 1, "slot_time": 1})
+    async for b in cur:
+        d = b.get("slot_date")
+        occ = b.get("occupied") or ([b["slot_time"]] if b.get("slot_time") else [])
+        out.setdefault(d, set()).update(occ)
+    return out
+
+
+def _week_days(week_start: date):
+    return [week_start + timedelta(days=i) for i in range(7)
+            if (week_start + timedelta(days=i)).weekday() in WORK_DAYS]
+
+
+@api_router.get("/consultation/packages")
+async def get_packages():
+    return [{"id": k, **v} for k, v in PACKAGES.items()]
+
+
+@api_router.get("/consultation/availability")
+async def public_availability():
+    meta = await _get_availability_meta()
+    ws = date.fromisoformat(meta["published_week_start"])
+    blocked = meta.get("blocked", {})
+    days = _week_days(ws)
+    date_strs = [d.isoformat() for d in days]
+    booked = await _booked_slots_for(date_strs)
+    now = datetime.now(timezone.utc)
+    all_slots = _slot_times()
+    out_days = []
+    for d in days:
+        ds = d.isoformat()
+        avail = []
+        for t in all_slots:
+            if t in (blocked.get(ds) or []):
+                continue
+            if t in booked.get(ds, set()):
+                continue
+            h, m = map(int, t.split(":"))
+            if datetime(d.year, d.month, d.day, h, m, tzinfo=timezone.utc) <= now:
+                continue
+            avail.append(t)
+        if avail:
+            out_days.append({"date": ds, "weekday": d.strftime("%A"),
+                             "label": d.strftime("%a, %d %b"), "slots": avail})
+    return {"week_start": ws.isoformat(), "days": out_days,
+            "hours": "09:30\u201319:00", "days_label": "Mon\u2013Fri"}
+
+
+class BookIn(BaseModel):
     package_id: str
-    origin_url: str
     name: str
     email: EmailStr
     phone: Optional[str] = ""
     area: Optional[str] = ""
     message: Optional[str] = ""
+    date: str
+    time: str
     captcha_token: Optional[str] = None
 
 
-@api_router.get("/payments/packages")
-async def get_packages():
-    return [{"id": k, **v} for k, v in PACKAGES.items()]
-
-
-@api_router.post("/payments/checkout")
-async def create_checkout(body: CheckoutIn, request: Request):
+@api_router.post("/consultation/book")
+async def book_consultation(body: BookIn, request: Request):
     verify_captcha(body.captcha_token, _client_ip(request))
     pkg = PACKAGES.get(body.package_id)
     if not pkg:
         raise HTTPException(status_code=400, detail="Invalid package")
-    webhook_url = f"{str(request.base_url)}api/webhook/stripe"
-    stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
-    success_url = f"{body.origin_url}/payment/success?session_id={{CHECKOUT_SESSION_ID}}"
-    cancel_url = f"{body.origin_url}/payment/cancel"
-    req = CheckoutSessionRequest(
-        amount=pkg["amount"], currency="usd", success_url=success_url, cancel_url=cancel_url,
-        metadata={"package_id": body.package_id, "name": body.name, "email": body.email,
-                  "phone": body.phone or "", "area": body.area or "", "message": body.message or "",
-                  "type": "consultation"},
-    )
-    session = await stripe_checkout.create_checkout_session(req)
-    await db.payment_transactions.insert_one({
-        "id": str(uuid.uuid4()), "session_id": session.session_id, "package_id": body.package_id,
-        "amount": pkg["amount"], "currency": "usd", "status": "initiated", "payment_status": "pending",
-        "name": body.name, "email": body.email, "created_at": now_iso(), "updated_at": now_iso(),
-    })
-    await db.consultations.insert_one({
-        "id": str(uuid.uuid4()), "name": body.name, "email": body.email, "phone": body.phone or "",
-        "company": "", "area": body.area or pkg["name"], "message": body.message or "",
-        "status": "payment_pending", "package": pkg["name"], "amount": pkg["amount"],
-        "source": "consultation-checkout", "session_id": session.session_id, "created_at": now_iso(),
-    })
-    return {"checkout_url": session.url, "session_id": session.session_id}
-
-
-async def _sync_paid(session_id: str):
-    await db.payment_transactions.update_one(
-        {"session_id": session_id, "payment_status": {"$ne": "paid"}},
-        {"$set": {"status": "completed", "payment_status": "paid", "updated_at": now_iso()}})
-    await db.consultations.update_one({"session_id": session_id}, {"$set": {"status": "paid"}})
-
-
-@api_router.get("/payments/status/{session_id}")
-async def payment_status(session_id: str, request: Request):
-    record = await db.payment_transactions.find_one({"session_id": session_id})
-    if not record:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-    if record.get("payment_status") != "paid":
-        try:
-            webhook_url = f"{str(request.base_url)}api/webhook/stripe"
-            stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
-            status = await stripe_checkout.get_checkout_status(session_id)
-            if status.payment_status == "paid":
-                await _sync_paid(session_id)
-                record = await db.payment_transactions.find_one({"session_id": session_id})
-        except Exception:
-            pass
-    return {"session_id": session_id, "status": record["status"], "payment_status": record["payment_status"],
-            "amount": record.get("amount"), "package_id": record.get("package_id")}
-
-
-@api_router.post("/webhook/stripe")
-async def stripe_webhook(request: Request):
-    body = await request.body()
-    sig = request.headers.get("Stripe-Signature")
     try:
-        webhook_url = f"{str(request.base_url)}api/webhook/stripe"
-        stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
-        resp = await stripe_checkout.handle_webhook(body, sig)
-        if resp.payment_status == "paid":
-            await _sync_paid(resp.session_id)
+        d = date.fromisoformat(body.date)
     except Exception:
-        logger.exception("Stripe webhook error")
-        return {"status": "error"}
-    return {"status": "ok"}
+        raise HTTPException(status_code=422, detail="Invalid date")
+    if d.weekday() not in WORK_DAYS or body.time not in _slot_times():
+        raise HTTPException(status_code=400, detail="Slot is outside available hours.")
+    meta = await _get_availability_meta()
+    ws = date.fromisoformat(meta["published_week_start"])
+    if not (ws <= d < ws + timedelta(days=7)):
+        raise HTTPException(status_code=400, detail="Please pick a slot within the published week.")
+    now = datetime.now(timezone.utc)
+    h, m = map(int, body.time.split(":"))
+    if datetime(d.year, d.month, d.day, h, m, tzinfo=timezone.utc) <= now:
+        raise HTTPException(status_code=400, detail="That time has passed.")
+    occupied = _occupied_slots(body.time, pkg["minutes"])
+    blocked = set(meta.get("blocked", {}).get(body.date, []))
+    booked = await _booked_slots_for([body.date])
+    if blocked & set(occupied) or booked.get(body.date, set()) & set(occupied):
+        raise HTTPException(status_code=409, detail="Sorry, that slot was just taken. Please choose another.")
+    doc = {
+        "id": str(uuid.uuid4()), "name": body.name, "email": body.email.lower(),
+        "phone": body.phone or "", "company": "", "area": body.area or pkg["name"],
+        "message": body.message or "", "status": "pending_confirmation",
+        "package": pkg["name"], "package_id": body.package_id, "amount": pkg["amount"],
+        "minutes": pkg["minutes"], "slot_date": body.date, "slot_time": body.time,
+        "occupied": occupied, "source": "booking-form", "created_at": now_iso(),
+    }
+    await db.consultations.insert_one(doc)
+    return {"success": True, "status": "pending_confirmation",
+            "message": "Thanks! Your slot is reserved and pending confirmation \u2014 we'll confirm your session shortly."}
+
+
+# ---------------- Admin availability management ----------------
+@api_router.get("/admin/availability")
+async def admin_availability(week_start: Optional[str] = None, admin: dict = Depends(require_admin)):
+    meta = await _get_availability_meta()
+    published = meta["published_week_start"]
+    ws = _monday_of(date.fromisoformat(week_start) if week_start else date.fromisoformat(published))
+    days = _week_days(ws)
+    date_strs = [d.isoformat() for d in days]
+    blocked = meta.get("blocked", {})
+    booked = await _booked_slots_for(date_strs)
+    all_slots = _slot_times()
+    out_days = []
+    for d in days:
+        ds = d.isoformat()
+        slots = []
+        for t in all_slots:
+            state = "available"
+            if t in booked.get(ds, set()):
+                state = "booked"
+            elif t in (blocked.get(ds) or []):
+                state = "blocked"
+            slots.append({"time": t, "state": state})
+        out_days.append({"date": ds, "label": d.strftime("%a, %d %b"), "slots": slots})
+    return {"week_start": ws.isoformat(), "published_week_start": published,
+            "is_published": ws.isoformat() == published, "days": out_days, "slot_times": all_slots}
+
+
+class SlotToggleIn(BaseModel):
+    date: str
+    time: str
+    blocked: bool
+
+
+@api_router.post("/admin/availability/toggle")
+async def toggle_slot(body: SlotToggleIn, admin: dict = Depends(require_admin)):
+    meta = await _get_availability_meta()
+    blocked = meta.get("blocked", {})
+    day = set(blocked.get(body.date, []))
+    day.add(body.time) if body.blocked else day.discard(body.time)
+    if day:
+        blocked[body.date] = sorted(day)
+    else:
+        blocked.pop(body.date, None)
+    await db.app_meta.update_one({"_id": "availability"},
+                                 {"$set": {"blocked": blocked, "published_week_start": meta["published_week_start"]}}, upsert=True)
+    return {"success": True, "date": body.date, "time": body.time, "blocked": body.blocked}
+
+
+class DayBlockIn(BaseModel):
+    date: str
+    blocked: bool
+
+
+@api_router.post("/admin/availability/block-day")
+async def block_day(body: DayBlockIn, admin: dict = Depends(require_admin)):
+    meta = await _get_availability_meta()
+    blocked = meta.get("blocked", {})
+    if body.blocked:
+        blocked[body.date] = _slot_times()
+    else:
+        blocked.pop(body.date, None)
+    await db.app_meta.update_one({"_id": "availability"},
+                                 {"$set": {"blocked": blocked, "published_week_start": meta["published_week_start"]}}, upsert=True)
+    return {"success": True}
+
+
+class PublishIn(BaseModel):
+    week_start: str
+
+
+@api_router.post("/admin/availability/publish")
+async def publish_week(body: PublishIn, request: Request, admin: dict = Depends(require_admin)):
+    ws = _monday_of(date.fromisoformat(body.week_start)).isoformat()
+    meta = await _get_availability_meta()
+    await db.app_meta.update_one({"_id": "availability"},
+                                 {"$set": {"published_week_start": ws, "blocked": meta.get("blocked", {})}}, upsert=True)
+    await audit(request, admin.get("email"), "availability_published", ws)
+    return {"success": True, "published_week_start": ws}
+
+
+# ---------------- Admin bookings queue ----------------
+@api_router.get("/admin/bookings")
+async def admin_bookings(admin: dict = Depends(require_admin)):
+    return await db.consultations.find(
+        {"slot_date": {"$exists": True}}, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+
+class BookingActionIn(BaseModel):
+    date: Optional[str] = None
+    time: Optional[str] = None
+    reason: Optional[str] = ""
+
+
+def _schedule_booking_email(booking, background_tasks):
+    try:
+        start = _dt.fromisoformat(f"{booking['slot_date']}T{booking['slot_time']}:00+00:00")
+        end = start + timedelta(minutes=booking.get("minutes", 60))
+        background_tasks.add_task(send_booking_email, booking["id"], booking.get("name", "Client"),
+                                  booking.get("email", ""), booking.get("package", "Consultation"), start, end)
+    except Exception:
+        logger.exception("booking email schedule failed")
+
+
+@api_router.post("/admin/bookings/{bid}/confirm")
+async def confirm_booking(bid: str, request: Request, background_tasks: BackgroundTasks, admin: dict = Depends(require_admin)):
+    b = await db.consultations.find_one({"id": bid})
+    if not b:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    await db.consultations.update_one({"id": bid}, {"$set": {"status": "confirmed"}})
+    b["status"] = "confirmed"
+    _schedule_booking_email(b, background_tasks)
+    await audit(request, admin.get("email"), "booking_confirmed", bid)
+    return {"success": True}
+
+
+@api_router.post("/admin/bookings/{bid}/decline")
+async def decline_booking(bid: str, body: BookingActionIn, request: Request, admin: dict = Depends(require_admin)):
+    res = await db.consultations.update_one(
+        {"id": bid}, {"$set": {"status": "declined", "decline_reason": body.reason or ""}})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    await audit(request, admin.get("email"), "booking_declined", bid)
+    return {"success": True}
+
+
+@api_router.post("/admin/bookings/{bid}/reschedule")
+async def reschedule_booking(bid: str, body: BookingActionIn, request: Request, background_tasks: BackgroundTasks, admin: dict = Depends(require_admin)):
+    b = await db.consultations.find_one({"id": bid})
+    if not b:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if not body.date or not body.time or body.time not in _slot_times():
+        raise HTTPException(status_code=400, detail="Provide a valid new date and time.")
+    occupied = _occupied_slots(body.time, b.get("minutes", 60))
+    await db.consultations.update_one({"id": bid}, {"$set": {
+        "slot_date": body.date, "slot_time": body.time, "occupied": occupied, "status": "confirmed"}})
+    b.update({"slot_date": body.date, "slot_time": body.time})
+    _schedule_booking_email(b, background_tasks)
+    await audit(request, admin.get("email"), "booking_rescheduled", bid, meta=f"{body.date} {body.time}")
+    return {"success": True}
 
 
 # ---------------- Services ----------------
@@ -2161,34 +2356,6 @@ async def deals():
 
 
 # ---------------- Booking scheduling + email ----------------
-class ScheduleIn(BaseModel):
-    session_id: str
-    start: str
-    end: str
-
-
-@api_router.post("/bookings/schedule")
-async def schedule_booking(body: ScheduleIn, background_tasks: BackgroundTasks):
-    txn = await db.payment_transactions.find_one({"session_id": body.session_id})
-    if not txn:
-        raise HTTPException(status_code=404, detail="Booking not found")
-    if txn.get("payment_status") != "paid":
-        raise HTTPException(status_code=402, detail="Payment not confirmed yet")
-    consult = await db.consultations.find_one({"session_id": body.session_id})
-    try:
-        start_dt = _dt.fromisoformat(body.start.replace("Z", "+00:00"))
-        end_dt = _dt.fromisoformat(body.end.replace("Z", "+00:00"))
-    except Exception:
-        raise HTTPException(status_code=422, detail="Invalid date")
-    await db.consultations.update_one({"session_id": body.session_id},
-                                      {"$set": {"status": "scheduled", "slot_start": body.start, "slot_end": body.end}})
-    name = (consult or {}).get("name", "Client")
-    email = (consult or {}).get("email", txn.get("email", ""))
-    service = (consult or {}).get("package", "Consultation")
-    background_tasks.add_task(send_booking_email, body.session_id, name, email, service, start_dt, end_dt)
-    return {"success": True, "message": "Session scheduled. A calendar invite is on its way."}
-
-
 app.include_router(api_router)
 app.add_middleware(
     CORSMiddleware,
@@ -2300,6 +2467,7 @@ async def startup():
         global _audit_retention_days
         _audit_retention_days = int(_meta["days"])
     await db.articles.create_index("slug", unique=True)
+    await db.consultations.create_index("slot_date")
     # Warm the in-memory ban cache with any still-active bans.
     now = datetime.now(timezone.utc)
     async for b in db.blocked_ips.find({}, {"_id": 0, "ip": 1, "banned_until": 1, "scope": 1}):

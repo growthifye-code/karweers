@@ -50,6 +50,9 @@ export default function AdminDashboard() {
   const [tokenLabel, setTokenLabel] = useState("");
   const [provisioned, setProvisioned] = useState(null);
   const [auditLog, setAuditLog] = useState([]);
+  const [bookings, setBookings] = useState([]);
+  const [availWeek, setAvailWeek] = useState(null);
+  const [reschedule, setReschedule] = useState(null);
 
   const [form, setForm] = useState({ title: "", category: "news", sector: SECTORS[0], summary: "", content: "", tags: "", image: DEFAULT_IMG, featured: false });
   const [aiTopic, setAiTopic] = useState("");
@@ -74,8 +77,50 @@ export default function AdminDashboard() {
     }).catch(() => {});
     api.get("/admin/vpn-guard").then((r) => { setVpnGuard(r.data); setAllowlistText((r.data.allowlist || []).join("\n")); }).catch(() => {});
     api.get("/admin/audit-log").then((r) => setAuditLog(r.data.logs || [])).catch(() => {});
+    api.get("/admin/bookings").then((r) => setBookings(r.data)).catch(() => {});
   };
   useEffect(load, []);
+
+  const loadAvailability = (ws) => {
+    api.get("/admin/availability", { params: ws ? { week_start: ws } : {} })
+      .then((r) => setAvailWeek(r.data)).catch(() => {});
+  };
+  useEffect(() => { loadAvailability(); }, []);
+
+  const shiftWeek = (deltaDays) => {
+    if (!availWeek) return;
+    const d = new Date(availWeek.week_start + "T00:00:00");
+    d.setDate(d.getDate() + deltaDays);
+    loadAvailability(d.toISOString().slice(0, 10));
+  };
+  const toggleSlot = async (date, time, state) => {
+    if (state === "booked") { toast.info("This slot is already booked."); return; }
+    try {
+      await api.post("/admin/availability/toggle", { date, time, blocked: state !== "blocked" });
+      loadAvailability(availWeek?.week_start);
+    } catch { toast.error("Could not update slot."); }
+  };
+  const blockDay = async (date, blocked) => {
+    try { await api.post("/admin/availability/block-day", { date, blocked }); loadAvailability(availWeek?.week_start); }
+    catch { toast.error("Could not update day."); }
+  };
+  const publishWeek = async () => {
+    if (!availWeek) return;
+    try {
+      await api.post("/admin/availability/publish", { week_start: availWeek.week_start });
+      toast.success("Week published — visitors can now book these slots.");
+      loadAvailability(availWeek.week_start);
+    } catch { toast.error("Publish failed."); }
+  };
+  const bookingAction = async (id, action, payload) => {
+    try {
+      await api.post(`/admin/bookings/${id}/${action}`, payload || {});
+      toast.success(action === "confirm" ? "Booking confirmed — client notified." : action === "decline" ? "Booking declined." : "Rescheduled — client notified.");
+      setReschedule(null);
+      api.get("/admin/bookings").then((r) => setBookings(r.data)).catch(() => {});
+      loadAvailability(availWeek?.week_start);
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Action failed."); }
+  };
 
   useEffect(() => {
     api.get("/admin/lead-analytics", { params: { period: chartPeriod } }).then((r) => setAnalytics(r.data)).catch(() => {});
@@ -342,7 +387,7 @@ export default function AdminDashboard() {
         <p className="mt-1 text-sm text-muted-foreground">Signed in as {user?.email}</p>
 
         <div className="mt-8 flex flex-wrap gap-2 border-b border-border pb-4">
-          {["overview", "crm", "leads", "tickets", "articles", "create", "subscribers", "vault"].map((t) => (
+          {["overview", "crm", "leads", "bookings", "availability", "tickets", "articles", "create", "subscribers", "vault"].map((t) => (
             <button key={t} onClick={() => setTab(t)} data-testid={`admin-tab-${t}`}
               className={`rounded-full px-4 py-2 text-sm font-medium capitalize transition-colors ${tab === t ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]" : "border border-border text-muted-foreground hover:bg-secondary"}`}>
               {t === "create" ? "Create + AI" : t === "crm" ? "CRM" : t === "tickets" ? "Service Desk" : t}
@@ -1051,6 +1096,96 @@ export default function AdminDashboard() {
             </table>
           </div>
         )}
+        {tab === "bookings" && (
+          <div className="mt-8" data-testid="admin-bookings">
+            <div className="overflow-x-auto rounded-2xl border border-border">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-card text-muted-foreground">
+                  <tr><th className="p-4">Client</th><th className="p-4">Package</th><th className="p-4">Requested slot</th><th className="p-4">Status</th><th className="p-4">Actions</th></tr>
+                </thead>
+                <tbody>
+                  {bookings.length === 0 && <tr><td colSpan="5" className="p-8 text-center text-muted-foreground">No session bookings yet.</td></tr>}
+                  {bookings.map((b) => {
+                    const badge = b.status === "confirmed" ? "bg-[hsl(var(--primary))]/15 text-[hsl(var(--primary))]" : b.status === "declined" ? "bg-red-500/15 text-red-500" : "bg-amber-500/15 text-amber-500";
+                    return (
+                      <tr key={b.id} className="border-t border-border align-top">
+                        <td className="p-4 font-medium">{b.name}<div className="text-xs text-muted-foreground">{b.email}</div><div className="text-xs text-muted-foreground">{b.phone}</div></td>
+                        <td className="p-4 text-muted-foreground">{b.package}<div className="text-xs">{b.minutes} min · ${b.amount}</div></td>
+                        <td className="p-4 text-muted-foreground">
+                          <div className="font-medium text-foreground">{b.slot_date}</div>
+                          <div className="text-xs">{b.slot_time} IST</div>
+                          {b.area && <div className="mt-1 text-xs">{b.area}</div>}
+                        </td>
+                        <td className="p-4"><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold capitalize ${badge}`} data-testid={`booking-status-${b.id}`}>{(b.status || "").replace(/_/g, " ")}</span></td>
+                        <td className="p-4">
+                          {reschedule?.id === b.id ? (
+                            <div className="flex flex-col gap-2" data-testid={`reschedule-form-${b.id}`}>
+                              <input type="date" value={reschedule.date} onChange={(e) => setReschedule({ ...reschedule, date: e.target.value })} data-testid={`reschedule-date-${b.id}`} className="rounded-lg border border-border bg-background px-2 py-1 text-xs" />
+                              <select value={reschedule.time} onChange={(e) => setReschedule({ ...reschedule, time: e.target.value })} data-testid={`reschedule-time-${b.id}`} className="rounded-lg border border-border bg-background px-2 py-1 text-xs">
+                                {(availWeek?.slot_times || []).map((t) => <option key={t} value={t}>{t}</option>)}
+                              </select>
+                              <div className="flex gap-2">
+                                <button onClick={() => bookingAction(b.id, "reschedule", { date: reschedule.date, time: reschedule.time })} data-testid={`reschedule-save-${b.id}`} className="rounded-full bg-[hsl(var(--primary))] px-3 py-1 text-xs font-semibold text-[hsl(var(--primary-foreground))]">Save</button>
+                                <button onClick={() => setReschedule(null)} className="rounded-full border border-border px-3 py-1 text-xs">Cancel</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex flex-wrap gap-2">
+                              {b.status !== "confirmed" && <button onClick={() => bookingAction(b.id, "confirm")} data-testid={`confirm-booking-${b.id}`} className="rounded-full bg-[hsl(var(--primary))] px-3 py-1 text-xs font-semibold text-[hsl(var(--primary-foreground))]">Confirm</button>}
+                              <button onClick={() => setReschedule({ id: b.id, date: b.slot_date, time: b.slot_time })} data-testid={`reschedule-booking-${b.id}`} className="rounded-full border border-border px-3 py-1 text-xs font-medium hover:bg-secondary">Reschedule</button>
+                              {b.status !== "declined" && <button onClick={() => bookingAction(b.id, "decline", { reason: "" })} data-testid={`decline-booking-${b.id}`} className="rounded-full border border-border px-3 py-1 text-xs font-medium text-red-500 hover:bg-secondary">Decline</button>}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {tab === "availability" && availWeek && (
+          <div className="mt-8 space-y-5" data-testid="admin-availability">
+            <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-border bg-card p-4">
+              <button onClick={() => shiftWeek(-7)} data-testid="avail-prev-week" className="rounded-full border border-border px-3 py-1.5 text-sm hover:bg-secondary">← Prev</button>
+              <div className="font-display text-lg font-bold">Week of {availWeek.week_start}</div>
+              <button onClick={() => shiftWeek(7)} data-testid="avail-next-week" className="rounded-full border border-border px-3 py-1.5 text-sm hover:bg-secondary">Next →</button>
+              {availWeek.is_published
+                ? <span className="rounded-full bg-[hsl(var(--primary))]/15 px-3 py-1 text-xs font-semibold text-[hsl(var(--primary))]" data-testid="avail-published-badge">Published to visitors</span>
+                : <button onClick={publishWeek} data-testid="publish-week" className="rounded-full bg-[hsl(var(--accent))] px-4 py-1.5 text-sm font-semibold text-[hsl(var(--accent-foreground))]">Publish this week</button>}
+              <span className="ml-auto text-xs text-muted-foreground">Mon–Fri · 09:30–19:00 · 30-min slots. Click a slot to block/open it.</span>
+            </div>
+            <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded border border-border bg-background" /> Available</span>
+              <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-muted-foreground/30" /> Blocked</span>
+              <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-[hsl(var(--primary))]" /> Booked</span>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {availWeek.days.map((d) => {
+                const allBlocked = d.slots.every((s) => s.state !== "available");
+                return (
+                  <div key={d.date} className="rounded-2xl border border-border bg-card p-4" data-testid={`avail-day-${d.date}`}>
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold">{d.label}</p>
+                      <button onClick={() => blockDay(d.date, !allBlocked)} data-testid={`avail-blockday-${d.date}`} className="rounded-full border border-border px-2.5 py-1 text-[11px] font-medium hover:bg-secondary">{allBlocked ? "Open day" : "Block day"}</button>
+                    </div>
+                    <div className="mt-3 grid grid-cols-4 gap-1.5">
+                      {d.slots.map((s) => {
+                        const cls = s.state === "booked" ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] cursor-not-allowed" : s.state === "blocked" ? "bg-muted-foreground/25 text-muted-foreground line-through" : "border border-border hover:bg-secondary";
+                        return (
+                          <button key={s.time} onClick={() => toggleSlot(d.date, s.time, s.state)} data-testid={`avail-slot-${d.date}-${s.time}`} className={`rounded-md px-1 py-1 text-[11px] ${cls}`}>{s.time}</button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {tab === "vault" && <VaultPanel />}
         {activeClient && (
           <div className="fixed inset-0 z-50 flex justify-end bg-black/50" onClick={() => setActiveClient(null)} data-testid="client-drawer">

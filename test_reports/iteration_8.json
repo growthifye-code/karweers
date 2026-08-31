@@ -1,0 +1,27 @@
+{
+  "summary": "Iteration 8: Verified legal-page refresh (Terms, Refund→Booking & Cancellation Policy, Privacy — no Stripe/'paid in advance' anywhere), Vault Lockout (direct-function test still passes; /api/admin/vault/status now returns lock_frozen/lock_seconds_left/fails/max_fails), and Google Calendar sync no-op path + endpoint shapes. Booking Confirm/Reschedule/Decline all succeed via HTTP AND via admin UI even with calendar disconnected. New pytest file /app/backend/tests/test_iteration8.py — 13/13 passing.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration8.py",
+    "/app/backend/tests/test_vault_lockout.py",
+    "/app/test_reports/pytest/iter8.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "sync_booking_to_calendar swallows all exceptions silently (correct for no-op path) but logs at info — a real Google API failure would be hard to spot in production. Consider logger.exception for non-404 GCal errors.",
+    "GCAL_REDIRECT_URI is read at module load; if the preview domain rotates, OAuth callback URL will mismatch and connect will silently fail. Same caveat as WEBAUTHN_RP_ID/ORIGIN.",
+    "calendar_oauth_callback only accepts admin-allowlisted emails for state — good. But state JWT TTL is not explicit; verify _gcal_state_token sets a short exp (didn't inspect deeply).",
+    "server.py now ~2757 lines — split into routers (calendar/, vault/, bookings/) recommended.",
+    "publish-week testid only renders when current week != published week; UI shows the 'Published to visitors' badge instead (verified). Both branches are covered by tests."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration8.py (new)"
+  ],
+  "success_rate": {"backend": "100% (13/13 new + 1 vault_lockout script)", "frontend": "100% (legal pages + admin bookings/availability)"},
+  "test_credentials": "Admin JWT minted via /app/backend/auth.create_access_token using admin user id f38ee7e0-033c-4c43-8a69-3bf31490e8e3 (sudarshan@karweers.com). Injected into localStorage 'sk_token' for UI bypass of hCaptcha.",
+  "seed_data_creation": "One consultation doc (email prefix test-booking-ui-*) inserted directly to Mongo and cleaned up. app_meta 'google_calendar' deleted (was already absent). vault_lockouts entry for vaulttest@example.com created + cleaned by the vault_lockout script. app_meta 'availability' had one test block ('2026-08-31':['09:30']) added by UI toggle — cleaned up.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iteration8.py + test_booking_flow.py + test_vault_lockout.py together cover: Stripe removal, booking lifecycle, availability, vault lockout, calendar sync no-op, legal pages. Google Calendar full OAuth cannot be automated (real Google consent). Admin JWT injection via localStorage 'sk_token' remains the reliable UI-auth bypass."
+}

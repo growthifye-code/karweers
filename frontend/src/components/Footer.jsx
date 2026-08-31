@@ -43,7 +43,7 @@ export default function Footer() {
             <ul className="mt-4 space-y-3 text-sm text-muted-foreground">
               <li><Link to="/privacy" className="hover:text-foreground">Privacy & GDPR</Link></li>
               <li><Link to="/terms" className="hover:text-foreground">Terms & Conditions</Link></li>
-              <li><Link to="/refund" className="hover:text-foreground">Refund Policy</Link></li>
+              <li><Link to="/refund" className="hover:text-foreground">Booking & Cancellation</Link></li>
             </ul>
           </div>
           <div>

@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, Depends, BackgroundTasks
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, RedirectResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -1110,6 +1110,59 @@ def _vault_seconds_left(token) -> int:
     return 0
 
 
+# ---------------- Vault unlock lockout (anti-brute-force on MFA) ----------------
+VAULT_MAX_FAILS = 5
+VAULT_LOCK_MINUTES = 15
+
+
+async def _vault_lock_state(email: str):
+    """Return (locked, seconds_left, fails) for this super-admin's vault unlocking."""
+    doc = await db.vault_lockouts.find_one({"email": email})
+    if not doc:
+        return (False, 0, 0)
+    lu = doc.get("locked_until")
+    if lu:
+        try:
+            t = datetime.fromisoformat(lu)
+            if t.tzinfo is None:
+                t = t.replace(tzinfo=timezone.utc)
+            secs = int((t - datetime.now(timezone.utc)).total_seconds())
+            if secs > 0:
+                return (True, secs, doc.get("fails", 0))
+        except Exception:
+            pass
+    return (False, 0, doc.get("fails", 0))
+
+
+async def check_vault_lockout(email: str):
+    locked, secs, _ = await _vault_lock_state(email)
+    if locked:
+        raise HTTPException(status_code=429,
+                            detail=f"Too many failed attempts. Vault unlocking is frozen — try again in {max(1, secs // 60)} minute(s).",
+                            headers={"Retry-After": str(secs)})
+
+
+async def register_vault_fail(email: str, request: Request, kind: str):
+    doc = await db.vault_lockouts.find_one({"email": email})
+    fails = (doc or {}).get("fails", 0) + 1
+    update = {"email": email, "fails": fails, "updated_at": now_iso()}
+    frozen = False
+    if fails >= VAULT_MAX_FAILS:
+        update["locked_until"] = (datetime.now(timezone.utc) + timedelta(minutes=VAULT_LOCK_MINUTES)).isoformat()
+        update["fails"] = 0
+        frozen = True
+    await db.vault_lockouts.update_one({"email": email}, {"$set": update}, upsert=True)
+    if frozen:
+        await audit(request, email, "vault_lockout_frozen", email, meta=f"{VAULT_LOCK_MINUTES}m after {VAULT_MAX_FAILS} fails")
+        await raise_security_alert("high", "vault_lockout", _client_ip(request),
+                                   "Vault unlocking frozen after repeated failed attempts",
+                                   f"{email} frozen for {VAULT_LOCK_MINUTES} min ({kind})", email=email)
+
+
+async def clear_vault_fails(email: str):
+    await db.vault_lockouts.delete_one({"email": email})
+
+
 @api_router.get("/admin/vault/status")
 async def vault_status(request: Request, admin: dict = Depends(require_admin)):
     email = admin.get("email")
@@ -1117,11 +1170,16 @@ async def vault_status(request: Request, admin: dict = Depends(require_admin)):
     pk = await db.webauthn_credentials.count_documents({"user_id": email})
     left = _vault_seconds_left(request.cookies.get("vault_unlock")) if _read_vault_jwt(request.cookies.get("vault_unlock"), "unlocked") == email else 0
     last = await db.audit_log.find_one({"action": "vault_unlocked"}, sort=[("at", -1)], projection={"_id": 0, "actor": 1, "ip": 1, "at": 1})
+    lock_frozen, lock_secs, lock_fails = await _vault_lock_state(email)
     return {"totp_enrolled": bool(mfa and mfa.get("totp_enrolled")),
             "passkey_enrolled": pk > 0,
             "unlocked": left > 0,
             "unlock_seconds_left": left,
             "last_unlock": last,
+            "lock_frozen": lock_frozen,
+            "lock_seconds_left": lock_secs,
+            "fails": lock_fails,
+            "max_fails": VAULT_MAX_FAILS,
             "ready": bool(_fernet and WEBAUTHN_RP_ID),
             "key_count": await db.vault_secrets.count_documents({})}
 
@@ -1156,10 +1214,12 @@ async def vault_enroll_totp_verify(body: VaultCodeIn, admin: dict = Depends(requ
 @api_router.post("/admin/vault/unlock/totp")
 async def vault_unlock_totp(body: VaultCodeIn, request: Request, response: Response, admin: dict = Depends(require_admin)):
     email = admin.get("email")
+    await check_vault_lockout(email)
     mfa = await db.superadmin_mfa.find_one({"email": email})
     if not mfa or not mfa.get("totp_enrolled"):
         raise HTTPException(status_code=400, detail="Enroll authenticator first")
     if not pyotp.TOTP(_dec(mfa["totp_secret_enc"])).verify(body.code, valid_window=1):
+        await register_vault_fail(email, request, "wrong authenticator code")
         await audit(request, email, "vault_totp_fail")
         await raise_security_alert("high", "vault_unlock_failed", _client_ip(request),
                                    "Failed vault unlock (wrong authenticator code)", email, email=email)
@@ -1236,6 +1296,7 @@ async def vault_wa_auth_options(request: Request, admin: dict = Depends(require_
 @api_router.post("/admin/vault/webauthn/auth/verify")
 async def vault_wa_auth_verify(payload: WACredIn, request: Request, response: Response, admin: dict = Depends(require_admin)):
     email = admin.get("email")
+    await check_vault_lockout(email)
     if _read_vault_jwt(request.cookies.get("vault_totp"), "totp") != email:
         raise HTTPException(status_code=403, detail="Enter authenticator code first")
     cer = await db.webauthn_ceremonies.find_one_and_delete({"email": email, "kind": "auth"})
@@ -1251,11 +1312,13 @@ async def vault_wa_auth_verify(payload: WACredIn, request: Request, response: Re
             credential_public_key=base64url_to_bytes(row["public_key"]),
             credential_current_sign_count=row["sign_count"], require_user_verification=True)
     except Exception as e:
+        await register_vault_fail(email, request, "passkey rejected")
         await audit(request, email, "vault_passkey_fail")
         await raise_security_alert("high", "vault_unlock_failed", _client_ip(request),
                                    "Failed vault unlock (passkey rejected)", email, email=email)
         raise HTTPException(status_code=400, detail=f"Passkey authentication failed: {e}")
     await db.webauthn_credentials.update_one({"_id": row["_id"]}, {"$set": {"sign_count": v.new_sign_count}})
+    await clear_vault_fails(email)
     response.set_cookie("vault_unlock", _issue_vault_jwt(email, "unlocked"), httponly=True, secure=True,
                         samesite="none", path="/", max_age=VAULT_TTL)
     response.delete_cookie("vault_totp", path="/")
@@ -2266,6 +2329,9 @@ async def confirm_booking(bid: str, request: Request, background_tasks: Backgrou
     await db.consultations.update_one({"id": bid}, {"$set": {"status": "confirmed"}})
     b["status"] = "confirmed"
     _schedule_booking_email(b, background_tasks)
+    event_id = await sync_booking_to_calendar(b, "create")
+    if event_id and not b.get("gcal_event_id"):
+        await db.consultations.update_one({"id": bid}, {"$set": {"gcal_event_id": event_id}})
     await audit(request, admin.get("email"), "booking_confirmed", bid)
     return {"success": True}
 
@@ -2276,6 +2342,10 @@ async def decline_booking(bid: str, body: BookingActionIn, request: Request, adm
         {"id": bid}, {"$set": {"status": "declined", "decline_reason": body.reason or ""}})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Booking not found")
+    b = await db.consultations.find_one({"id": bid})
+    if b and b.get("gcal_event_id"):
+        await sync_booking_to_calendar(b, "delete")
+        await db.consultations.update_one({"id": bid}, {"$unset": {"gcal_event_id": ""}})
     await audit(request, admin.get("email"), "booking_declined", bid)
     return {"success": True}
 
@@ -2292,6 +2362,9 @@ async def reschedule_booking(bid: str, body: BookingActionIn, request: Request, 
         "slot_date": body.date, "slot_time": body.time, "occupied": occupied, "status": "confirmed"}})
     b.update({"slot_date": body.date, "slot_time": body.time})
     _schedule_booking_email(b, background_tasks)
+    event_id = await sync_booking_to_calendar(b, "update" if b.get("gcal_event_id") else "create")
+    if event_id and not b.get("gcal_event_id"):
+        await db.consultations.update_one({"id": bid}, {"$set": {"gcal_event_id": event_id}})
     await audit(request, admin.get("email"), "booking_rescheduled", bid, meta=f"{body.date} {body.time}")
     return {"success": True}
 
@@ -2353,6 +2426,169 @@ async def deals():
         _deals_cache["ts"] = now
         _deals_cache["data"] = data
     return {"data": data or _deals_cache["data"], "cached": False}
+
+
+# ---------------- Google Calendar sync (admin's own calendar) ----------------
+GCAL_CLIENT_ID = os.environ.get("GOOGLE_CALENDAR_CLIENT_ID", "")
+GCAL_CLIENT_SECRET = os.environ.get("GOOGLE_CALENDAR_CLIENT_SECRET", "")
+GCAL_REDIRECT_URI = os.environ.get("GOOGLE_CALENDAR_REDIRECT_URI", "")
+GCAL_SCOPES = ["https://www.googleapis.com/auth/calendar"]
+GCAL_TZ = "Asia/Kolkata"
+GCAL_TOKEN_URI = "https://oauth2.googleapis.com/token"
+
+
+def _gcal_configured() -> bool:
+    return bool(GCAL_CLIENT_ID and GCAL_CLIENT_SECRET and GCAL_REDIRECT_URI)
+
+
+def _gcal_state_token(email: str) -> str:
+    return pyjwt.encode({"purpose": "gcal_oauth", "email": email,
+                         "exp": datetime.now(timezone.utc) + timedelta(minutes=10)},
+                        get_jwt_secret(), algorithm="HS256")
+
+
+def _gcal_read_state(token: str) -> Optional[str]:
+    try:
+        d = pyjwt.decode(token, get_jwt_secret(), algorithms=["HS256"])
+        return d.get("email") if d.get("purpose") == "gcal_oauth" else None
+    except Exception:
+        return None
+
+
+async def _gcal_get_conn():
+    return await db.app_meta.find_one({"_id": "google_calendar"})
+
+
+def _slot_end_hhmm(time_hhmm: str, minutes: int) -> str:
+    total = int(time_hhmm[:2]) * 60 + int(time_hhmm[3:]) + minutes
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
+def _gcal_build_service_sync(conn: dict):
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request as GRequest
+    from googleapiclient.discovery import build
+    creds = Credentials(
+        token=_dec(conn["token_enc"]),
+        refresh_token=_dec(conn["refresh_token_enc"]) if conn.get("refresh_token_enc") else None,
+        token_uri=GCAL_TOKEN_URI, client_id=GCAL_CLIENT_ID, client_secret=GCAL_CLIENT_SECRET,
+        scopes=GCAL_SCOPES)
+    refreshed = None
+    if creds.expired and creds.refresh_token:
+        creds.refresh(GRequest())
+        refreshed = creds.token
+    return build("calendar", "v3", credentials=creds, cache_discovery=False), refreshed
+
+
+async def _gcal_service():
+    conn = await _gcal_get_conn()
+    if not conn or not _gcal_configured():
+        return None
+    loop = asyncio.get_event_loop()
+    service, refreshed = await loop.run_in_executor(None, _gcal_build_service_sync, conn)
+    if refreshed:
+        await db.app_meta.update_one({"_id": "google_calendar"}, {"$set": {"token_enc": _enc(refreshed)}})
+    return service
+
+
+def _event_body(booking: dict):
+    start = f"{booking['slot_date']}T{booking['slot_time']}:00"
+    end = f"{booking['slot_date']}T{_slot_end_hhmm(booking['slot_time'], booking.get('minutes', 60))}:00"
+    desc = (f"Client: {booking.get('name','')}\nEmail: {booking.get('email','')}\n"
+            f"Phone: {booking.get('phone','')}\nFocus: {booking.get('area','')}\n\n{booking.get('message','')}")
+    body = {
+        "summary": f"{booking.get('package','Consultation')} — {booking.get('name','')}",
+        "description": desc,
+        "start": {"dateTime": start, "timeZone": GCAL_TZ},
+        "end": {"dateTime": end, "timeZone": GCAL_TZ},
+    }
+    if booking.get("email"):
+        body["attendees"] = [{"email": booking["email"]}]
+    return body
+
+
+async def sync_booking_to_calendar(booking: dict, action: str):
+    """Create/update/delete the calendar event for a booking. Never raises."""
+    try:
+        service = await _gcal_service()
+        if not service:
+            return None
+        loop = asyncio.get_event_loop()
+        event_id = booking.get("gcal_event_id")
+        if action == "delete":
+            if event_id:
+                await loop.run_in_executor(None, lambda: service.events().delete(
+                    calendarId="primary", eventId=event_id).execute())
+            return None
+        body = _event_body(booking)
+        if event_id:
+            await loop.run_in_executor(None, lambda: service.events().update(
+                calendarId="primary", eventId=event_id, body=body).execute())
+            return event_id
+        ev = await loop.run_in_executor(None, lambda: service.events().insert(
+            calendarId="primary", body=body).execute())
+        return ev.get("id")
+    except Exception:
+        logger.exception("Google Calendar sync failed (%s)", action)
+        return None
+
+
+@api_router.get("/admin/calendar/status")
+async def calendar_status(admin: dict = Depends(require_admin)):
+    conn = await _gcal_get_conn()
+    return {"configured": _gcal_configured(),
+            "connected": bool(conn),
+            "email": (conn or {}).get("email"),
+            "connected_at": (conn or {}).get("connected_at")}
+
+
+@api_router.get("/admin/calendar/oauth/start")
+async def calendar_oauth_start(admin: dict = Depends(require_admin)):
+    if not _gcal_configured():
+        raise HTTPException(status_code=400, detail="Google Calendar not configured")
+    from urllib.parse import urlencode
+    params = {
+        "client_id": GCAL_CLIENT_ID, "redirect_uri": GCAL_REDIRECT_URI,
+        "response_type": "code", "scope": " ".join(GCAL_SCOPES),
+        "access_type": "offline", "prompt": "consent",
+        "include_granted_scopes": "true", "state": _gcal_state_token(admin.get("email")),
+    }
+    return {"authorization_url": "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)}
+
+
+@api_router.get("/admin/calendar/oauth/callback")
+async def calendar_oauth_callback(request: Request, code: str = "", state: str = "", error: str = ""):
+    front = os.environ.get("WEBAUTHN_ORIGIN", "")
+    if error or not code:
+        return RedirectResponse(f"{front}/admin?calendar=error")
+    email = _gcal_read_state(state)
+    if not email or email.lower() not in ADMIN_ALLOWLIST:
+        return RedirectResponse(f"{front}/admin?calendar=error")
+    try:
+        loop = asyncio.get_event_loop()
+        resp = await loop.run_in_executor(None, lambda: requests.post(GCAL_TOKEN_URI, data={
+            "code": code, "client_id": GCAL_CLIENT_ID, "client_secret": GCAL_CLIENT_SECRET,
+            "redirect_uri": GCAL_REDIRECT_URI, "grant_type": "authorization_code"}, timeout=20))
+        tok = resp.json()
+        if not tok.get("access_token"):
+            return RedirectResponse(f"{front}/admin?calendar=error")
+        update = {"_id": "google_calendar", "email": email,
+                  "token_enc": _enc(tok["access_token"]), "connected_at": now_iso()}
+        if tok.get("refresh_token"):
+            update["refresh_token_enc"] = _enc(tok["refresh_token"])
+        await db.app_meta.update_one({"_id": "google_calendar"}, {"$set": update}, upsert=True)
+        await audit(request, email, "calendar_connected")
+    except Exception:
+        logger.exception("Calendar OAuth callback failed")
+        return RedirectResponse(f"{front}/admin?calendar=error")
+    return RedirectResponse(f"{front}/admin?calendar=connected")
+
+
+@api_router.post("/admin/calendar/disconnect")
+async def calendar_disconnect(request: Request, admin: dict = Depends(require_admin)):
+    await db.app_meta.delete_one({"_id": "google_calendar"})
+    await audit(request, admin.get("email"), "calendar_disconnected")
+    return {"success": True}
 
 
 # ---------------- Booking scheduling + email ----------------

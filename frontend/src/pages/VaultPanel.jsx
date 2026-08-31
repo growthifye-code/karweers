@@ -15,17 +15,30 @@ export default function VaultPanel() {
   const [value, setValue] = useState("");
   const [reveal, setReveal] = useState({});
   const [secsLeft, setSecsLeft] = useState(0);
+  const [lockSecs, setLockSecs] = useState(0);
 
   const load = async () => {
     const { data } = await api.get("/admin/vault/status");
     setStatus(data);
     setSecsLeft(data.unlock_seconds_left || 0);
+    setLockSecs(data.lock_seconds_left || 0);
     if (data.unlocked) {
       const r = await api.get("/admin/vault/keys");
       setKeys(r.data.keys || []);
     }
   };
   useEffect(() => { load().catch(() => {}); }, []);
+
+  useEffect(() => {
+    if (lockSecs <= 0) return;
+    const t = setInterval(() => {
+      setLockSecs((s) => {
+        if (s <= 1) { clearInterval(t); load().catch(() => {}); return 0; }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, [lockSecs > 0]);
 
   useEffect(() => {
     if (!status?.unlocked || secsLeft <= 0) return;
@@ -147,12 +160,25 @@ export default function VaultPanel() {
           <div className="mt-5 rounded-xl border border-[hsl(var(--primary))]/30 bg-[hsl(var(--primary))]/5 p-4" data-testid="vault-unlock-box">
             <h4 className="text-sm font-bold">Unlock the vault</h4>
             <p className="text-xs text-muted-foreground">Enter your authenticator code, then approve with your passkey.</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <input value={unlockCode} onChange={(e) => setUnlockCode(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="6-digit code" inputMode="numeric" data-testid="vault-unlock-code" className="w-36 rounded-xl border border-border bg-background px-3 py-2.5 text-center font-mono outline-none focus:border-[hsl(var(--primary))]" />
-              <button onClick={unlock} disabled={busy || unlockCode.length !== 6} data-testid="vault-unlock-btn" className="inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-5 py-2.5 text-sm font-semibold text-[hsl(var(--primary-foreground))] disabled:opacity-60">
-                <Fingerprint className="h-4 w-4" /> Unlock with passkey
-              </button>
-            </div>
+            {lockSecs > 0 ? (
+              <p className="mt-3 rounded-lg bg-red-500/10 px-4 py-3 text-sm font-medium text-red-500" data-testid="vault-frozen">
+                <Lock className="mr-1.5 inline h-4 w-4" /> Unlocking frozen after {status.max_fails} failed attempts. Try again in <span className="font-mono tabular-nums" data-testid="vault-freeze-countdown">{mmss(lockSecs)}</span>.
+              </p>
+            ) : (
+              <>
+                {status.fails > 0 && (
+                  <p className="mt-2 text-xs font-medium text-amber-500" data-testid="vault-fails-left">
+                    {status.max_fails - status.fails} attempt{status.max_fails - status.fails !== 1 ? "s" : ""} left before the vault freezes.
+                  </p>
+                )}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <input value={unlockCode} onChange={(e) => setUnlockCode(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="6-digit code" inputMode="numeric" data-testid="vault-unlock-code" className="w-36 rounded-xl border border-border bg-background px-3 py-2.5 text-center font-mono outline-none focus:border-[hsl(var(--primary))]" />
+                  <button onClick={unlock} disabled={busy || unlockCode.length !== 6} data-testid="vault-unlock-btn" className="inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-5 py-2.5 text-sm font-semibold text-[hsl(var(--primary-foreground))] disabled:opacity-60">
+                    <Fingerprint className="h-4 w-4" /> Unlock with passkey
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>

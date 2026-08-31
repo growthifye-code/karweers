@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useAuth, formatApiErrorDetail } from "@/context/AuthContext";
 import { Logo } from "@/components/Navbar";
 import ThemeToggle from "@/components/ThemeToggle";
-import { Users, FileText, Inbox, Sparkles, Trash2, Wand2, Mail, LifeBuoy, UserCircle, ChevronDown, Tag, AlertTriangle, Star, Target, Package, Pencil, TrendingUp, TrendingDown, ShieldAlert, Unlock } from "lucide-react";
+import { Users, FileText, Inbox, Sparkles, Trash2, Wand2, Mail, LifeBuoy, UserCircle, ChevronDown, Tag, AlertTriangle, Star, Target, Package, Pencil, TrendingUp, TrendingDown, ShieldAlert, Unlock, CalendarCheck, CalendarX } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from "recharts";
 import api from "@/lib/api";
 import VaultPanel from "@/pages/VaultPanel";
@@ -51,6 +51,7 @@ export default function AdminDashboard() {
   const [provisioned, setProvisioned] = useState(null);
   const [auditLog, setAuditLog] = useState([]);
   const [bookings, setBookings] = useState([]);
+  const [calStatus, setCalStatus] = useState(null);
   const [availWeek, setAvailWeek] = useState(null);
   const [reschedule, setReschedule] = useState(null);
 
@@ -78,8 +79,24 @@ export default function AdminDashboard() {
     api.get("/admin/vpn-guard").then((r) => { setVpnGuard(r.data); setAllowlistText((r.data.allowlist || []).join("\n")); }).catch(() => {});
     api.get("/admin/audit-log").then((r) => setAuditLog(r.data.logs || [])).catch(() => {});
     api.get("/admin/bookings").then((r) => setBookings(r.data)).catch(() => {});
+    api.get("/admin/calendar/status").then((r) => setCalStatus(r.data)).catch(() => {});
   };
   useEffect(load, []);
+
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search).get("calendar");
+    if (p === "connected") { toast.success("Google Calendar connected — confirmed sessions will sync automatically."); window.history.replaceState({}, "", "/admin"); }
+    else if (p === "error") { toast.error("Could not connect Google Calendar. Please try again."); window.history.replaceState({}, "", "/admin"); }
+  }, []);
+
+  const connectCalendar = async () => {
+    try { const { data } = await api.get("/admin/calendar/oauth/start"); window.location.href = data.authorization_url; }
+    catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Calendar not configured."); }
+  };
+  const disconnectCalendar = async () => {
+    try { await api.post("/admin/calendar/disconnect"); setCalStatus((s) => ({ ...s, connected: false, email: null })); toast.success("Google Calendar disconnected."); }
+    catch { toast.error("Could not disconnect."); }
+  };
 
   const loadAvailability = (ws) => {
     api.get("/admin/availability", { params: ws ? { week_start: ws } : {} })
@@ -1098,6 +1115,22 @@ export default function AdminDashboard() {
         )}
         {tab === "bookings" && (
           <div className="mt-8" data-testid="admin-bookings">
+            {calStatus && (
+              <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-border bg-card p-4" data-testid="calendar-connect-card">
+                <CalendarCheck className={`h-5 w-5 ${calStatus.connected ? "text-[hsl(var(--primary))]" : "text-muted-foreground"}`} />
+                <div className="mr-auto">
+                  <p className="text-sm font-semibold">Google Calendar sync</p>
+                  <p className="text-xs text-muted-foreground">
+                    {!calStatus.configured ? "Not configured on the server."
+                      : calStatus.connected ? <>Connected as <span className="font-medium text-foreground">{calStatus.email}</span> · confirmed sessions sync automatically</>
+                      : "Connect once to auto-add every confirmed session to your calendar."}
+                  </p>
+                </div>
+                {calStatus.configured && (calStatus.connected
+                  ? <button onClick={disconnectCalendar} data-testid="calendar-disconnect" className="inline-flex items-center gap-1.5 rounded-full border border-border px-4 py-2 text-xs font-medium hover:bg-secondary"><CalendarX className="h-4 w-4" /> Disconnect</button>
+                  : <button onClick={connectCalendar} data-testid="calendar-connect" className="inline-flex items-center gap-1.5 rounded-full bg-[hsl(var(--primary))] px-4 py-2 text-xs font-semibold text-[hsl(var(--primary-foreground))]"><CalendarCheck className="h-4 w-4" /> Connect Google Calendar</button>)}
+              </div>
+            )}
             <div className="overflow-x-auto rounded-2xl border border-border">
               <table className="w-full text-left text-sm">
                 <thead className="bg-card text-muted-foreground">

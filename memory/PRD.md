@@ -140,5 +140,9 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 ## Iteration 5.6 (Aug 31, 2026) — Date Range, Conversion, Security Audit
 - **Date range toggle**: chart period 8 weeks / 3 months (13 weekly) / 12 months (monthly). GET /admin/lead-analytics?period=8w|3m|12m. testids chart-period-toggle, period-<v>.
 - **Conversion view**: per-source paid-conversion (paid statuses: paid/won/scheduled) with % bars — testid conversion-view, conversion-<source>.
+
+## Iteration 5.7 (Aug 31, 2026) — Revenue Ranking + CSV Export
+- **Conversion by value**: analytics now sums `amount` for paid leads per source; conversion cards ranked by revenue with a "Most valuable channel" highlight (testid top-channel). Fixed projection to include `amount`.
+- **Export report**: GET /admin/lead-analytics/export streams a CSV (Source, Total Leads, Paid, Conversion %, Revenue); admin "Export CSV" button (testid export-analytics) downloads it. Verified via API + UI.
 - **Security audit** (deployment static scan + manual): PASS. No hardcoded secrets; URLs env-driven; admin routes gated by require_admin; auth (JWT + Google session cookie, HttpOnly/Secure/SameSite=None); admin allowlist strict; hCaptcha strict. Fixed: N+1 in /admin/clients → now MongoDB aggregations (4 queries total).
 - Advisories (not fixed): tighten CORS to explicit origin; escape user input in outbound email HTML when SMTP is enabled; consider rate-limit/captcha on public /chat/lead.

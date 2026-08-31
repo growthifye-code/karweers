@@ -112,6 +112,16 @@ export default function AdminDashboard() {
   };
   const removeSegment = (s) => persistSegments(segments.filter((x) => x !== s));
 
+  const exportAnalytics = async () => {
+    try {
+      const res = await api.get("/admin/lead-analytics/export", { responseType: "blob" });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a"); a.href = url; a.download = "lead-source-analytics.csv"; a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Analytics exported.");
+    } catch { toast.error("Export failed."); }
+  };
+
   const SOURCE_META = {
     "booking-form": { label: "Booking Form", cls: "bg-[hsl(var(--primary))]/15 text-[hsl(var(--primary))]" },
     "ask-sk-chatbot": { label: "Ask SK Bot", cls: "bg-[hsl(var(--accent))]/15 text-[hsl(var(--accent))]" },
@@ -242,11 +252,17 @@ export default function AdminDashboard() {
                     <h3 className="font-display text-lg font-bold">Lead volume by source</h3>
                     <p className="text-sm text-muted-foreground">Where your enquiries come from</p>
                   </div>
+                  <div className="flex items-center gap-2">
                   <div className="flex gap-1 rounded-full border border-border p-1" data-testid="chart-period-toggle">
                     {[["8w", "8 weeks"], ["3m", "3 months"], ["12m", "12 months"]].map(([v, l]) => (
                       <button key={v} onClick={() => setChartPeriod(v)} data-testid={`period-${v}`}
                         className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${chartPeriod === v ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]" : "text-muted-foreground hover:bg-secondary"}`}>{l}</button>
                     ))}
+                  </div>
+                  <button onClick={exportAnalytics} data-testid="export-analytics"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-2 text-xs font-medium hover:bg-secondary">
+                    <FileText className="h-3.5 w-3.5" /> Export CSV
+                  </button>
                   </div>
                 </div>
                 <div className="mt-4 flex flex-wrap gap-3">
@@ -272,26 +288,28 @@ export default function AdminDashboard() {
                 </div>
                 {analytics.conversion && (
                   <div className="mt-6 border-t border-border pt-5" data-testid="conversion-view">
-                    <h4 className="font-display text-sm font-bold">Conversion by source</h4>
-                    <p className="text-xs text-muted-foreground">Share of each channel's leads that became paid consultations (all-time)</p>
+                    <h4 className="font-display text-sm font-bold">Conversion & revenue by source</h4>
+                    <p className="text-xs text-muted-foreground">Paid consultations and revenue per channel (all-time) — ranked by value</p>
+                    {analytics.ranked?.length > 0 && analytics.ranked[0].revenue > 0 && (
+                      <p className="mt-3 inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))]/10 px-3 py-1.5 text-xs font-semibold text-[hsl(var(--primary))]" data-testid="top-channel">
+                        <Star className="h-3.5 w-3.5" /> Most valuable channel: {SOURCE_LABELS[analytics.ranked[0].source]} · ${analytics.ranked[0].revenue.toLocaleString()}
+                      </p>
+                    )}
                     <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                      {analytics.sources.filter((s) => analytics.conversion[s].total > 0).map((s) => {
-                        const c = analytics.conversion[s];
-                        return (
-                          <div key={s} className="rounded-xl border border-border p-4" data-testid={`conversion-${s}`}>
-                            <div className="flex items-center justify-between">
-                              <span className="inline-flex items-center gap-1.5 text-sm font-medium">
-                                <span className="h-2.5 w-2.5 rounded-full" style={{ background: SOURCE_COLORS[s] }} />{SOURCE_LABELS[s]}
-                              </span>
-                              <span className="font-display text-lg font-black text-[hsl(var(--primary))]">{c.rate}%</span>
-                            </div>
-                            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-secondary">
-                              <div className="h-full rounded-full" style={{ width: `${c.rate}%`, background: SOURCE_COLORS[s] }} />
-                            </div>
-                            <p className="mt-2 text-xs text-muted-foreground">{c.paid} paid of {c.total} lead{c.total > 1 ? "s" : ""}</p>
+                      {(analytics.ranked || []).map((c) => (
+                        <div key={c.source} className="rounded-xl border border-border p-4" data-testid={`conversion-${c.source}`}>
+                          <div className="flex items-center justify-between">
+                            <span className="inline-flex items-center gap-1.5 text-sm font-medium">
+                              <span className="h-2.5 w-2.5 rounded-full" style={{ background: SOURCE_COLORS[c.source] }} />{SOURCE_LABELS[c.source]}
+                            </span>
+                            <span className="font-display text-lg font-black text-[hsl(var(--primary))]">${(c.revenue || 0).toLocaleString()}</span>
                           </div>
-                        );
-                      })}
+                          <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-secondary">
+                            <div className="h-full rounded-full" style={{ width: `${c.rate}%`, background: SOURCE_COLORS[c.source] }} />
+                          </div>
+                          <p className="mt-2 text-xs text-muted-foreground">{c.rate}% converted · {c.paid} paid of {c.total} lead{c.total > 1 ? "s" : ""}</p>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}

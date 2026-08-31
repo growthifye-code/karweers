@@ -500,7 +500,7 @@ async def _auto_escalate_tickets():
 @api_router.get("/admin/lead-analytics")
 async def admin_lead_analytics(period: str = "8w", admin: dict = Depends(require_admin)):
     """Lead volume by source over a selectable period, plus per-source conversion."""
-    leads = await db.consultations.find({}, {"_id": 0, "source": 1, "created_at": 1, "status": 1}).to_list(10000)
+    leads = await db.consultations.find({}, {"_id": 0, "source": 1, "created_at": 1, "status": 1, "amount": 1}).to_list(10000)
     now = datetime.now(timezone.utc)
     SOURCES = ["booking-form", "ask-sk-chatbot", "consultation-checkout", "whatsapp", "other"]
     PAID_STATUSES = {"paid", "won", "scheduled"}
@@ -529,7 +529,7 @@ async def admin_lead_analytics(period: str = "8w", admin: dict = Depends(require
             buckets.append((s, s + timedelta(days=7))); labels.append(s.strftime("%d %b"))
 
     rows = [{"week": labels[i], **{s: 0 for s in SOURCES}} for i in range(len(buckets))]
-    conversion = {s: {"total": 0, "paid": 0} for s in SOURCES}
+    conversion = {s: {"total": 0, "paid": 0, "revenue": 0} for s in SOURCES}
     for l in leads:
         src = l.get("source") or "other"
         if src not in SOURCES:
@@ -537,6 +537,10 @@ async def admin_lead_analytics(period: str = "8w", admin: dict = Depends(require
         conversion[src]["total"] += 1
         if l.get("status") in PAID_STATUSES:
             conversion[src]["paid"] += 1
+            try:
+                conversion[src]["revenue"] += int(l.get("amount") or 0)
+            except Exception:
+                pass
         try:
             ts = datetime.fromisoformat(l["created_at"])
             if ts.tzinfo is None:
@@ -551,8 +555,42 @@ async def admin_lead_analytics(period: str = "8w", admin: dict = Depends(require
         t = conversion[s]["total"]
         conversion[s]["rate"] = round(100 * conversion[s]["paid"] / t) if t else 0
     totals = {s: sum(r[s] for r in rows) for s in SOURCES}
+    ranked = sorted(
+        [{"source": s, **conversion[s]} for s in SOURCES if conversion[s]["total"] > 0],
+        key=lambda x: (x["revenue"], x["paid"]), reverse=True)
     return {"weeks": rows, "sources": SOURCES, "totals": totals, "granularity": granularity,
-            "period": period, "conversion": conversion}
+            "period": period, "conversion": conversion, "ranked": ranked}
+
+
+@api_router.get("/admin/lead-analytics/export")
+async def admin_lead_analytics_export(admin: dict = Depends(require_admin)):
+    leads = await db.consultations.find({}, {"_id": 0, "source": 1, "status": 1, "amount": 1}).to_list(10000)
+    SOURCES = ["booking-form", "ask-sk-chatbot", "consultation-checkout", "whatsapp", "other"]
+    LABELS = {"booking-form": "Booking Form", "ask-sk-chatbot": "Ask SK Bot",
+              "consultation-checkout": "Checkout", "whatsapp": "WhatsApp", "other": "Other"}
+    PAID_STATUSES = {"paid", "won", "scheduled"}
+    agg = {s: {"total": 0, "paid": 0, "revenue": 0} for s in SOURCES}
+    for l in leads:
+        src = l.get("source") or "other"
+        if src not in SOURCES:
+            src = "other"
+        agg[src]["total"] += 1
+        if l.get("status") in PAID_STATUSES:
+            agg[src]["paid"] += 1
+            try:
+                agg[src]["revenue"] += int(l.get("amount") or 0)
+            except Exception:
+                pass
+    lines = ["Source,Total Leads,Paid,Conversion %,Revenue"]
+    for s in sorted(SOURCES, key=lambda x: (agg[x]["revenue"], agg[x]["paid"]), reverse=True):
+        a = agg[s]
+        if a["total"] == 0:
+            continue
+        rate = round(100 * a["paid"] / a["total"]) if a["total"] else 0
+        lines.append(f'{LABELS[s]},{a["total"]},{a["paid"]},{rate},{a["revenue"]}')
+    csv = "\r\n".join(lines) + "\r\n"
+    return Response(content=csv, media_type="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=lead-source-analytics.csv"})
 
 
 # ---------------- Service Desk (tickets) ----------------

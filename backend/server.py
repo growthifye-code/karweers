@@ -218,7 +218,7 @@ async def require_admin(user: dict = Depends(get_current_user)) -> dict:
 # ---------------- Auth routes ----------------
 @api_router.post("/auth/register")
 async def register(body: RegisterIn, request: Request):
-    verify_captcha(body.captcha_token, request.client.host if request.client else None)
+    verify_captcha(body.captcha_token, _client_ip(request))
     email = body.email.lower()
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -566,13 +566,14 @@ async def country_should_block(request: Request):
 
 @api_router.post("/auth/login")
 async def login(body: LoginIn, request: Request):
-    verify_captcha(body.captcha_token, request.client.host if request.client else None)
+    client_ip = _client_ip(request)
+    verify_captcha(body.captcha_token, client_ip)
     email = body.email.lower()
     identifier = _login_identifier(request, email)
     await check_login_lockout(identifier)
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(body.password, user["password_hash"]):
-        await register_failed_login(identifier, request.client.host if request.client else "unknown", email)
+        await register_failed_login(identifier, client_ip, email)
         raise HTTPException(status_code=401, detail="Invalid email or password")
     await clear_login_attempts(identifier)
     # Enforce allowlist: role always reflects the allowlist, never drifts.
@@ -599,7 +600,7 @@ class CaptchaGateIn(BaseModel):
 @api_router.post("/auth/captcha-gate")
 async def captcha_gate(body: CaptchaGateIn, request: Request, response: Response):
     """Verify a solved hCaptcha, then set a short-lived cookie that gates the Google OAuth redirect."""
-    verify_captcha(body.captcha_token, request.client.host if request.client else None)
+    verify_captcha(body.captcha_token, _client_ip(request))
     response.set_cookie("captcha_gate", issue_captcha_gate(), httponly=True, secure=True,
                         samesite="none", path="/", max_age=CAPTCHA_GATE_TTL)
     return {"ok": True}
@@ -1830,7 +1831,7 @@ async def meta():
 # ---------------- Consultation routes ----------------
 @api_router.post("/consultations")
 async def create_consultation(body: ConsultationIn, request: Request):
-    verify_captcha(body.captcha_token, request.client.host if request.client else None)
+    verify_captcha(body.captcha_token, _client_ip(request))
     doc = body.model_dump()
     doc.pop("captcha_token", None)
     doc.update({"id": str(uuid.uuid4()), "status": "new", "source": "booking-form", "created_at": now_iso()})
@@ -1986,7 +1987,7 @@ class NewsletterIn(BaseModel):
 
 @api_router.post("/newsletter")
 async def subscribe(body: NewsletterIn, request: Request):
-    verify_captcha(body.captcha_token, request.client.host if request.client else None)
+    verify_captcha(body.captcha_token, _client_ip(request))
     email = body.email.lower()
     if await db.subscribers.find_one({"email": email}):
         return {"success": True, "message": "You're already subscribed — thank you!"}
@@ -2029,7 +2030,7 @@ async def get_packages():
 
 @api_router.post("/payments/checkout")
 async def create_checkout(body: CheckoutIn, request: Request):
-    verify_captcha(body.captcha_token, request.client.host if request.client else None)
+    verify_captcha(body.captcha_token, _client_ip(request))
     pkg = PACKAGES.get(body.package_id)
     if not pkg:
         raise HTTPException(status_code=400, detail="Invalid package")

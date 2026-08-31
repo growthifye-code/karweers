@@ -1,0 +1,35 @@
+{
+  "summary": "Verified the real-client-IP fix for the login brute-force tracker. Wrote a direct-function pytest suite (7 tests) that drives _client_ip, _login_identifier, check_login_lockout, register_failed_login and clear_login_attempts with a fake Starlette-like Request. All 7 tests pass. The fix is correct: identifier is keyed to X-Forwarded-For (real client IP), two client IPs behind the same proxy produce different identifiers (no collateral lockout), lockout triggers exactly at LOGIN_MAX_ATTEMPTS=5 with 429 + Retry-After header, and clear_login_attempts releases the lock.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_bruteforce_ip.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_iteration6.xml"
+  ],
+  "test_results": {
+    "test_client_ip_from_xff_first": "PASS - first IP in X-Forwarded-For wins over X-Real-IP and socket peer",
+    "test_client_ip_from_xri_when_no_xff": "PASS - falls back to X-Real-IP when XFF absent",
+    "test_client_ip_falls_back_to_peer": "PASS - falls back to request.client.host when both headers absent",
+    "test_login_identifier_uses_xff_not_proxy": "PASS - identifier == '<real_ip>:<email>', proxy IP is NOT in identifier",
+    "test_different_client_ips_produce_different_identifiers": "PASS - same proxy + same email but different XFF => different identifiers",
+    "test_lockout_after_max_attempts_and_release_on_clear": "PASS - 5 fails set locked_until in future; check_login_lockout raises HTTPException(429) with Retry-After header; clear_login_attempts removes doc and releases lock",
+    "test_two_real_ips_same_email_isolated": "PASS - locking attacker IP does NOT lock a legitimate user sharing the proxy IP"
+  },
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is very large (>2000 lines) and mixes auth, security, vault, admin, analytics — recommend splitting into modules (auth.py, security.py, vault.py, admin.py, crm.py). Not blocking, but harms maintainability.",
+    "verify_captcha is still called with request.client.host in /auth/register and /auth/captcha-gate (lines 221, 603). For consistency and to correctly attribute captcha bypass attempts to real client IPs, these should also use _client_ip(request). Same issue class as the one just fixed for login."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_bruteforce_ip.py (new)",
+    "/app/backend/tests/conftest.py (new - enables pytest-asyncio auto mode and rebinds Motor client per test to avoid 'Event loop is closed')"
+  ],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "N/A (skipped per request)"},
+  "test_credentials": "Not needed - test used direct function calls with fake Request, no HTTP/captcha involved.",
+  "seed_data_creation": "Test creates and cleans up login_attempts docs for TEST_IPS=[203.0.113.10, 203.0.113.20, 198.51.100.5] and emails [test_bf_user1@example.com, test_bf_user2@example.com] via autouse fixture. Also clears any related blocked_ips and security_alerts rows after each test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Brute-force real-client-IP fix is verified end-to-end at the function level. When testing more auth/security flows, note (a) pytest-xdist -n 2 with per-function asyncio loops causes 'Event loop is closed' against server.py's module-level Motor client — the pattern in tests/conftest.py (autouse fixture that rebinds server.client/server.db to a fresh AsyncIOMotorClient) is a working workaround; (b) do NOT use `from server import db` in tests, always `server.db` after the rebind; (c) hCaptcha is STRICT so /api/auth/login cannot be exercised via curl — test brute-force logic via direct imports as done here.",
+  "rca of the issue": "Previous bug: login() used request.client.host (which under Kubernetes ingress is the proxy IP) both to build the login-lockout identifier and to record the offending IP. Effect: 5 wrong-password attempts from ANY user (or attacker) behind the same proxy would lock out all other legitimate users sharing that proxy IP. Fix (already applied by previous agent): a new _client_ip() helper reads X-Forwarded-For (first IP) then X-Real-IP and only falls back to request.client.host. login() now derives client_ip via _client_ip(request) and passes it to _login_identifier() and register_failed_login(). Verification: 7 direct-function tests confirm identifier precedence, per-real-IP isolation, 5-attempt lockout with 429+Retry-After, and clean release on clear_login_attempts."
+}

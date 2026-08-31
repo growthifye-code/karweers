@@ -7,7 +7,7 @@ export default function Footer() {
   return (
     <footer className="border-t border-border bg-background" data-testid="footer">
       <div className="mx-auto max-w-7xl px-6 py-16 lg:px-10">
-        <div className="grid gap-12 md:grid-cols-5">
+        <div className="grid gap-12 md:grid-cols-6">
           <div className="md:col-span-2">
             <Logo />
             <p className="mt-5 max-w-md text-sm leading-relaxed text-muted-foreground">
@@ -18,7 +18,7 @@ export default function Footer() {
               <a href={`mailto:${CONTACT.email}`} aria-label="Email" className="grid h-10 w-10 place-items-center rounded-full border border-border hover:bg-secondary"><Mail className="h-4 w-4" /></a>
               <a href={`tel:${CONTACT.phoneRaw}`} aria-label="Phone" className="grid h-10 w-10 place-items-center rounded-full border border-border hover:bg-secondary"><Phone className="h-4 w-4" /></a>
               <a href={`https://wa.me/${CONTACT.whatsapp}`} target="_blank" rel="noreferrer" aria-label="WhatsApp" className="grid h-10 w-10 place-items-center rounded-full border border-border hover:bg-secondary"><MessageCircle className="h-4 w-4" /></a>
-              <a href="https://linkedin.com" target="_blank" rel="noreferrer" aria-label="LinkedIn" className="grid h-10 w-10 place-items-center rounded-full border border-border hover:bg-secondary"><Linkedin className="h-4 w-4" /></a>
+              <a href="https://www.linkedin.com/in/karweers" target="_blank" rel="noreferrer" aria-label="LinkedIn" data-testid="footer-linkedin" className="grid h-10 w-10 place-items-center rounded-full border border-border hover:bg-secondary"><Linkedin className="h-4 w-4" /></a>
             </div>
           </div>
           <div>
@@ -44,6 +44,14 @@ export default function Footer() {
               <li><Link to="/privacy" className="hover:text-foreground">Privacy & GDPR</Link></li>
               <li><Link to="/terms" className="hover:text-foreground">Terms & Conditions</Link></li>
               <li><Link to="/refund" className="hover:text-foreground">Refund Policy</Link></li>
+            </ul>
+          </div>
+          <div>
+            <h4 className="text-sm font-semibold text-foreground">Account</h4>
+            <ul className="mt-4 space-y-3 text-sm text-muted-foreground">
+              <li><Link to="/login" data-testid="footer-client-login" className="hover:text-foreground">Client Login</Link></li>
+              <li><Link to="/login" data-testid="footer-admin-login" className="hover:text-foreground">Admin Login</Link></li>
+              <li><Link to="/register" className="hover:text-foreground">Create Account</Link></li>
             </ul>
           </div>
         </div>

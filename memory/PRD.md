@@ -221,3 +221,10 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 
 ## Iteration 5.23 (Jun 2026) — Failed vault-unlock alerts
 - Wrong authenticator code OR rejected passkey at the vault now raises a high-severity security alert (type vault_unlock_failed, with email+IP) → shows in Login Security "Recent security events" feed + unseen toast + inert email; also audit-logged (vault_totp_fail / vault_passkey_fail). Verified via curl (wrong code → 401 + alert unseen=1).
+
+## Iteration 5.24 (Jun 2026) — Login/Footer access + LinkedIn + brute-force IP fix verified
+- **Admin login entry point**: added a labelled "Admin Login" link in the Navbar (desktop + mobile) and a new "Account" column in the Footer with Client Login, Admin Login and Create Account. Both logins point to the single secure /login page (admins auto-route to /admin by role). No security/bypass change — admins still solve hCaptcha and are recognised via ADMIN_ALLOWLIST. testids: nav-admin-login, mobile-admin-login, footer-client-login, footer-admin-login.
+- **LinkedIn**: footer LinkedIn icon now links to https://www.linkedin.com/in/karweers (testid footer-linkedin).
+- **Admin allowlist confirmed**: ADMIN_ALLOWLIST = exactly sudarshan@karweers.com, sudarshan.karweer@gmail.com; startup demotes any other admin to client.
+- **Brute-force real-client-IP fix VERIFIED** (backend testing agent, 7/7 pass, iteration_6.json): login lockout identifier + register_failed_login now key on the real client IP via _client_ip(request) (X-Forwarded-For → X-Real-IP → socket peer), not the ingress proxy IP. Two IPs behind the same proxy stay isolated (no collateral lockout); lockout at 5 fails → 429 + Retry-After; clear releases lock.
+- **Consistency fix**: verify_captcha now receives _client_ip(request) in /auth/register, /auth/captcha-gate, /consultations, /newsletter, /checkout (was request.client.host) for correct real-IP attribution. Backend health 200; no functional change to captcha verification.

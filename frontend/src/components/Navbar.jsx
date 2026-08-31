@@ -88,7 +88,10 @@ export default function Navbar() {
                 <button onClick={() => { logout(); navigate("/"); }} data-testid="nav-logout" className="text-sm font-medium text-muted-foreground hover:text-foreground">Logout</button>
               </>
             ) : (
-              <Link to="/login" data-testid="nav-login" className="text-sm font-medium text-muted-foreground hover:text-foreground">Client Login</Link>
+              <>
+                <Link to="/login" data-testid="nav-login" className="text-sm font-medium text-muted-foreground hover:text-foreground">Client Login</Link>
+                <Link to="/login" data-testid="nav-admin-login" className="text-sm font-medium text-muted-foreground hover:text-foreground">Admin Login</Link>
+              </>
             )}
             <a href="/#consult" data-testid="nav-consult-cta" className="group inline-flex items-center gap-1 rounded-full bg-[hsl(var(--primary))] px-5 py-2.5 text-sm font-semibold text-[hsl(var(--primary-foreground))] transition-transform hover:-translate-y-0.5">
               Book Consultation <ArrowUpRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
@@ -112,7 +115,10 @@ export default function Navbar() {
                 {user ? (
                   <button onClick={() => { logout(); navigate("/"); setOpen(false); }} className="text-sm font-medium">Logout</button>
                 ) : (
-                  <Link to="/login" onClick={() => setOpen(false)} className="text-sm font-medium">Client Login</Link>
+                  <>
+                    <Link to="/login" onClick={() => setOpen(false)} className="text-sm font-medium">Client Login</Link>
+                    <Link to="/login" onClick={() => setOpen(false)} data-testid="mobile-admin-login" className="text-sm font-medium">Admin Login</Link>
+                  </>
                 )}
               </div>
               <a href="/#consult" onClick={() => setOpen(false)} className="rounded-full bg-[hsl(var(--primary))] px-5 py-2.5 text-center text-sm font-semibold text-[hsl(var(--primary-foreground))]">Book Consultation</a>

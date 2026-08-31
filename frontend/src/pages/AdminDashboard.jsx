@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useAuth, formatApiErrorDetail } from "@/context/AuthContext";
 import { Logo } from "@/components/Navbar";
 import ThemeToggle from "@/components/ThemeToggle";
-import { Users, FileText, Inbox, Sparkles, Trash2, Wand2, Mail, LifeBuoy, UserCircle, ChevronDown, Tag, AlertTriangle, Star, Target, Package, Pencil, TrendingUp, TrendingDown, ShieldAlert } from "lucide-react";
+import { Users, FileText, Inbox, Sparkles, Trash2, Wand2, Mail, LifeBuoy, UserCircle, ChevronDown, Tag, AlertTriangle, Star, Target, Package, Pencil, TrendingUp, TrendingDown, ShieldAlert, Unlock } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from "recharts";
 import api from "@/lib/api";
 
@@ -145,6 +145,14 @@ export default function AdminDashboard() {
       toast.success("Monthly revenue goal updated.");
     } catch { toast.error("Could not save goal."); }
     finally { setSavingGoal(false); }
+  };
+  const unlockLogin = async (ip, email) => {
+    try {
+      await api.post("/admin/login-attempts/unlock", { ip, email });
+      const r = await api.get("/admin/login-attempts");
+      setLoginAttempts(r.data);
+      toast.success(`Cleared lockout for ${email || ip}.`);
+    } catch { toast.error("Could not clear lockout."); }
   };
 
   const SOURCE_META = {
@@ -411,7 +419,8 @@ export default function AdminDashboard() {
                             <th className="pb-2 pr-4 font-semibold">IP</th>
                             <th className="pb-2 pr-4 font-semibold">Fails</th>
                             <th className="pb-2 pr-4 font-semibold">Last attempt</th>
-                            <th className="pb-2 font-semibold">Status</th>
+                            <th className="pb-2 pr-4 font-semibold">Status</th>
+                            <th className="pb-2 font-semibold text-right">Action</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -427,6 +436,12 @@ export default function AdminDashboard() {
                                 ) : (
                                   <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-xs font-medium text-muted-foreground">Cleared</span>
                                 )}
+                              </td>
+                              <td className="py-2.5 text-right">
+                                <button onClick={() => unlockLogin(a.ip, a.email)} data-testid={`unlock-login-${i}`}
+                                  className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs font-medium hover:bg-secondary">
+                                  <Unlock className="h-3.5 w-3.5" /> {a.locked ? "Unlock" : "Clear"}
+                                </button>
                               </td>
                             </tr>
                           ))}

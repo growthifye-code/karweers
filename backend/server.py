@@ -621,6 +621,19 @@ async def admin_login_attempts(admin: dict = Depends(require_admin)):
             "lockout_minutes": LOGIN_LOCKOUT_MINUTES}
 
 
+class UnlockIn(BaseModel):
+    ip: str
+    email: str
+
+
+@api_router.post("/admin/login-attempts/unlock")
+async def admin_unlock_login(body: UnlockIn, admin: dict = Depends(require_admin)):
+    """Manually clear a lockout / failed-attempt record so a genuine user can sign in again."""
+    identifier = f"{body.ip}:{body.email}"
+    res = await db.login_attempts.delete_one({"identifier": identifier})
+    return {"cleared": res.deleted_count > 0}
+
+
 @api_router.get("/admin/lead-analytics")
 async def admin_lead_analytics(period: str = "8w", admin: dict = Depends(require_admin)):
     """Lead volume by source over a selectable period, plus per-source conversion."""

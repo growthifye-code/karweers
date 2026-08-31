@@ -171,3 +171,7 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 ## Iteration 5.13 (Jun 2026) — Login Security visibility (admin)
 - GET /api/admin/login-attempts returns recent failed-login records (ip, email, recent/total fails, locked flag + locked_until, last attempt) + locked_now count and policy (max_attempts, lockout_minutes). register_failed_login now stores ip/email + cumulative fail_total.
 - Admin Overview: "Login Security" card (testid login-attempts-card) with a "N locked now" / "No active lockouts" badge and a table (login-attempts-table, rows login-attempt-row-N) showing each attacker's email/IP/fails/last-attempt/status (Locked vs Cleared). Verified via curl + screenshot.
+
+## Iteration 5.14 (Jun 2026) — Manual unlock control
+- POST /api/admin/login-attempts/unlock {ip, email} deletes the login_attempts record so a genuinely-stuck user can sign in immediately. Admin-only.
+- Login Security card: added an Action column with an "Unlock" (locked) / "Clear" button per row (testid unlock-login-N); on click it clears the lockout and refreshes the list with a toast. Verified via curl (cleared:true, list empties) + screenshot (click removed the row → empty state).

@@ -132,3 +132,7 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 ## Iteration 5.4 (Aug 31, 2026) — Lead Source View
 - Every consultation now records a `source`: booking-form (create_consultation), consultation-checkout (create_checkout), ask-sk-chatbot (chat bot). WhatsApp is a direct link (no DB record) — mapped for future WA API capture.
 - Admin Leads tab: source filter chips (All / per-source with counts, testid lead-source-filters, lead-source-<key>) + colour-coded Source column badge (lead-source-badge-<id>). Verified in UI.
+
+## Iteration 5.5 (Aug 31, 2026) — Source Analytics chart
+- Backend GET /admin/lead-analytics?weeks=8 → weekly buckets of lead counts per source + totals.
+- Overview tab: recharts stacked bar chart "Lead volume by source" (last 8 weeks) with colour legend + totals. testid lead-source-chart. Verified in UI.

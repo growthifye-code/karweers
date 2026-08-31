@@ -5,6 +5,7 @@ import { useAuth, formatApiErrorDetail } from "@/context/AuthContext";
 import { Logo } from "@/components/Navbar";
 import ThemeToggle from "@/components/ThemeToggle";
 import { Users, FileText, Inbox, Sparkles, Trash2, Wand2, Mail, LifeBuoy, UserCircle, ChevronDown, Tag, AlertTriangle, Star } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from "recharts";
 import api from "@/lib/api";
 
 const CATS = [
@@ -34,6 +35,7 @@ export default function AdminDashboard() {
   const [crmTag, setCrmTag] = useState("all");
   const [segments, setSegments] = useState([]);
   const [leadSource, setLeadSource] = useState("all");
+  const [analytics, setAnalytics] = useState(null);
   const [ticketReplies, setTicketReplies] = useState({});
 
   const [form, setForm] = useState({ title: "", category: "news", sector: SECTORS[0], summary: "", content: "", tags: "", image: DEFAULT_IMG, featured: false });
@@ -48,6 +50,7 @@ export default function AdminDashboard() {
     api.get("/newsletter").then((r) => setSubscribers(r.data)).catch(() => {});
     api.get("/admin/clients").then((r) => setClients(r.data)).catch(() => {});
     api.get("/admin/tickets").then((r) => setTickets(r.data)).catch(() => {});
+    api.get("/admin/lead-analytics").then((r) => setAnalytics(r.data)).catch(() => {});
   };
   useEffect(load, []);
 
@@ -173,6 +176,9 @@ export default function AdminDashboard() {
 
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
+  const SOURCE_LABELS = { "booking-form": "Booking Form", "ask-sk-chatbot": "Ask SK Bot", "consultation-checkout": "Checkout", "whatsapp": "WhatsApp", "other": "Other" };
+  const SOURCE_COLORS = { "booking-form": "#C6F135", "ask-sk-chatbot": "#7dd3fc", "consultation-checkout": "#60a5fa", "whatsapp": "#25D366", "other": "#9ca3af" };
+
   const statCards = [
     { icon: FileText, label: "Articles", value: stats.articles },
     { icon: Inbox, label: "Consultation Leads", value: stats.consultations },
@@ -213,14 +219,48 @@ export default function AdminDashboard() {
         </div>
 
         {tab === "overview" && (
-          <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4" data-testid="admin-overview">
-            {statCards.map((s) => (
-              <div key={s.label} className="rounded-2xl border border-border bg-card p-6">
-                <s.icon className="h-7 w-7 text-[hsl(var(--accent))]" />
-                <p className="mt-4 font-display text-4xl font-black">{s.value}</p>
-                <p className="mt-1 text-sm text-muted-foreground">{s.label}</p>
+          <div className="mt-8 space-y-8" data-testid="admin-overview">
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+              {statCards.map((s) => (
+                <div key={s.label} className="rounded-2xl border border-border bg-card p-6">
+                  <s.icon className="h-7 w-7 text-[hsl(var(--accent))]" />
+                  <p className="mt-4 font-display text-4xl font-black">{s.value}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{s.label}</p>
+                </div>
+              ))}
+            </div>
+
+            {analytics && (
+              <div className="rounded-2xl border border-border bg-card p-6" data-testid="lead-source-chart">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="font-display text-lg font-bold">Lead volume by source</h3>
+                    <p className="text-sm text-muted-foreground">Last 8 weeks · where your enquiries come from</p>
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    {analytics.sources.filter((s) => analytics.totals[s] > 0).map((s) => (
+                      <span key={s} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <span className="h-2.5 w-2.5 rounded-full" style={{ background: SOURCE_COLORS[s] }} />
+                        {SOURCE_LABELS[s]} <span className="font-semibold text-foreground">{analytics.totals[s]}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="mt-6 h-64 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={analytics.weeks} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                      <XAxis dataKey="week" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
+                      <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
+                      <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12 }} cursor={{ fill: "hsl(var(--secondary))", opacity: 0.4 }} />
+                      {analytics.sources.map((s) => (
+                        <Bar key={s} dataKey={s} stackId="a" name={SOURCE_LABELS[s]} fill={SOURCE_COLORS[s]} radius={s === "other" ? [4, 4, 0, 0] : 0} />
+                      ))}
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
-            ))}
+            )}
           </div>
         )}
 

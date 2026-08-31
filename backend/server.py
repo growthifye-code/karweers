@@ -494,6 +494,36 @@ async def _auto_escalate_tickets():
                 "priority": ESCALATE_NEXT[pr], "auto_escalated": True, "escalated_at": now_iso()}})
 
 
+@api_router.get("/admin/lead-analytics")
+async def admin_lead_analytics(weeks: int = 8, admin: dict = Depends(require_admin)):
+    """Lead volume by source over the last N weeks (for the Overview chart)."""
+    leads = await db.consultations.find({}, {"_id": 0, "source": 1, "created_at": 1}).to_list(5000)
+    now = datetime.now(timezone.utc)
+    buckets = []
+    for i in range(weeks - 1, -1, -1):
+        start = (now - timedelta(days=now.weekday() + 7 * i)).replace(hour=0, minute=0, second=0, microsecond=0)
+        buckets.append(start)
+    labels = [b.strftime("%d %b") for b in buckets]
+    SOURCES = ["booking-form", "ask-sk-chatbot", "consultation-checkout", "whatsapp", "other"]
+    rows = [{"week": labels[i], **{s: 0 for s in SOURCES}} for i in range(weeks)]
+    for l in leads:
+        try:
+            ts = datetime.fromisoformat(l["created_at"])
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+        except Exception:
+            continue
+        src = l.get("source") or "other"
+        if src not in SOURCES:
+            src = "other"
+        for i in range(weeks):
+            if buckets[i] <= ts < buckets[i] + timedelta(days=7):
+                rows[i][src] += 1
+                break
+    totals = {s: sum(r[s] for r in rows) for s in SOURCES}
+    return {"weeks": rows, "sources": SOURCES, "totals": totals}
+
+
 # ---------------- Service Desk (tickets) ----------------
 class TicketIn(BaseModel):
     subject: str

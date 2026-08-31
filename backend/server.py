@@ -233,13 +233,64 @@ async def register(body: RegisterIn, request: Request):
     return {"token": token, "user": {"id": uid, "email": email, "name": body.name, "role": role, "client_code": cc}}
 
 
+# ---------------- Login brute-force protection ----------------
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_LOCKOUT_MINUTES = 15
+
+
+def _login_identifier(request: Request, email: str) -> str:
+    ip = request.client.host if request.client else "unknown"
+    return f"{ip}:{email}"
+
+
+async def check_login_lockout(identifier: str):
+    """Raise 429 if this ip+email is currently locked out."""
+    doc = await db.login_attempts.find_one({"identifier": identifier})
+    if not doc:
+        return
+    locked_until = doc.get("locked_until")
+    if not locked_until:
+        return
+    try:
+        lu = datetime.fromisoformat(locked_until)
+        if lu.tzinfo is None:
+            lu = lu.replace(tzinfo=timezone.utc)
+    except Exception:
+        return
+    now = datetime.now(timezone.utc)
+    if lu > now:
+        retry = int((lu - now).total_seconds())
+        raise HTTPException(status_code=429,
+                            detail=f"Too many failed attempts. Try again in {max(1, retry // 60) } minute(s).",
+                            headers={"Retry-After": str(retry)})
+
+
+async def register_failed_login(identifier: str):
+    """Increment failed-attempt counter; lock the account after the threshold."""
+    doc = await db.login_attempts.find_one({"identifier": identifier})
+    count = (doc or {}).get("count", 0) + 1
+    update = {"count": count, "updated_at": now_iso()}
+    if count >= LOGIN_MAX_ATTEMPTS:
+        update["locked_until"] = (datetime.now(timezone.utc) + timedelta(minutes=LOGIN_LOCKOUT_MINUTES)).isoformat()
+        update["count"] = 0  # reset counter; lockout window now governs access
+    await db.login_attempts.update_one({"identifier": identifier}, {"$set": update}, upsert=True)
+
+
+async def clear_login_attempts(identifier: str):
+    await db.login_attempts.delete_one({"identifier": identifier})
+
+
 @api_router.post("/auth/login")
 async def login(body: LoginIn, request: Request):
     verify_captcha(body.captcha_token, request.client.host if request.client else None)
     email = body.email.lower()
+    identifier = _login_identifier(request, email)
+    await check_login_lockout(identifier)
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(body.password, user["password_hash"]):
+        await register_failed_login(identifier)
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    await clear_login_attempts(identifier)
     # Enforce allowlist: role always reflects the allowlist, never drifts.
     role = role_for(email)
     if user.get("role") != role:
@@ -1278,6 +1329,7 @@ async def startup():
     await db.activity_events.create_index("user_id")
     await db.support_tickets.create_index("user_id")
     await db.support_tickets.create_index("status")
+    await db.login_attempts.create_index("identifier", unique=True)
     await db.articles.create_index("slug", unique=True)
     # Seed admin
     admin_email = os.environ["ADMIN_EMAIL"].lower()

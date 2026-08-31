@@ -163,3 +163,7 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - Google login (both client & admin, /login + /register) is now gated by hCaptcha. The "Continue with Google" button is disabled until the captcha is solved; on click the frontend calls POST /api/auth/captcha-gate {captcha_token} which verifies the captcha and sets a short-lived (10 min) httpOnly `captcha_gate` cookie, then redirects to Emergent Google Auth (redirect URL unchanged).
 - POST /api/auth/session now requires the captcha_gate cookie (403 otherwise) and clears it after a successful exchange. Emergent redirect/session-exchange flow untouched.
 - Verified via curl (session 403 w/o gate, passes w/ valid gate JWT) + screenshot (Google button disabled until captcha, hint shown).
+
+## Iteration 5.12 (Jun 2026) — Login brute-force protection
+- POST /api/auth/login now rate-limits by ip+email: 5 failed attempts trigger a 15-min lockout (login_attempts collection, unique index on identifier). Locked requests return 429 with a friendly "Try again in N minute(s)." message + Retry-After header. Successful login clears the counter. Applies to email/password login (admin + client); captcha still runs first.
+- Verified via direct function test: 5 fails → 429 lockout with Retry-After; clear on success releases the lock.

@@ -452,6 +452,60 @@ def send_signals_digest_email(to_email: str, name: str, items: list, site: str =
     return _smtp_send(msg)
 
 
+def render_library_digest_html(name: str, books: list, site: str = "https://www.sudarshankarweer.com", unsubscribe_url: str = "") -> str:
+    cards = ""
+    for b in books:
+        badges = []
+        if b.get("has_read"):
+            badges.append("Read free")
+        if b.get("has_audio"):
+            badges.append("Audiobook")
+        badges.append("Ritual")
+        chips = " · ".join(badges)
+        cards += (
+            f'<a href="{site}/library/{b.get("slug","")}" style="display:block;text-decoration:none;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-bottom:12px;">'
+            f'<span style="display:inline-block;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#059669;">{b.get("theme","")}</span>'
+            f'<p style="font-size:16px;font-weight:700;color:#111;margin:6px 0 2px;">{b.get("title","")}</p>'
+            f'<p style="font-size:12px;color:#6b7280;margin:0 0 6px;">{b.get("author","")} · {b.get("year","")}</p>'
+            f'<p style="font-size:13px;color:#374151;margin:0 0 6px;">{b.get("blurb","")}</p>'
+            f'<p style="font-size:11px;color:#9ca3af;margin:0;">{chips}</p></a>'
+        )
+    unsub = (f'<p style="font-size:12px;color:#9ca3af;margin-top:20px;text-align:center;">'
+             f'You receive this because you subscribed to Sudarshan Karweer updates. '
+             f'<a href="{unsubscribe_url}" style="color:#9ca3af;text-decoration:underline;">Unsubscribe</a> anytime.</p>'
+             if unsubscribe_url else "")
+    inner = (
+        f'<p style="font-size:15px;color:#111;">Hi {name or "there"},</p>'
+        f'<p style="font-size:14px;color:#374151;">Here is this week\'s fresh shelf from the Leadership Library — read the classics, listen free, and turn each one into a daily ritual.</p>'
+        f'<div style="margin-top:14px;">{cards}</div>'
+        f'<a href="{site}/library" style="display:inline-block;margin-top:8px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Open the Library</a>'
+        f'<p style="font-size:13px;color:#374151;margin-top:16px;">— Team Sudarshan Karweer</p>'
+        f'{unsub}'
+    )
+    return _shell("This week's Leadership shelf", inner)
+
+
+def send_library_digest_email(to_email: str, name: str, books: list, site: str = "https://www.sudarshankarweer.com", unsubscribe_url: str = "") -> str:
+    """Weekly fresh Library shelf to a subscriber (INERT until SMTP configured)."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email or not books:
+        return "skipped"
+    msg = EmailMessage()
+    msg["Subject"] = "This week's Leadership shelf 📚"
+    msg["From"] = user
+    msg["To"] = to_email
+    if unsubscribe_url:
+        msg["List-Unsubscribe"] = f"<{unsubscribe_url}>"
+        msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+    msg.set_content("This week's Leadership shelf: " + " | ".join(b.get("title", "") for b in books)
+                    + f"  Open the Library: {site}/library"
+                    + (f"  Unsubscribe: {unsubscribe_url}" if unsubscribe_url else ""))
+    msg.add_alternative(render_library_digest_html(name, books, site, unsubscribe_url), subtype="html")
+    return _smtp_send(msg)
+
+
+
 def render_sector_digest_html(name: str, groups: list, site: str = "https://www.sudarshankarweer.com", unsubscribe_url: str = "", prefs_url: str = "") -> str:
     blocks = ""
     for g in groups:

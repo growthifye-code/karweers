@@ -9,7 +9,7 @@ import ConsentRenewalPrompt from "@/components/ConsentRenewalPrompt";
 import api, { track } from "@/lib/api";
 import {
   Sparkles, Calendar, BookOpen, GraduationCap, ArrowUpRight, LifeBuoy,
-  ShieldCheck, Download, Trash2, Check, MessageSquarePlus, FileText, XCircle,
+  ShieldCheck, Download, Trash2, Check, MessageSquarePlus, FileText, XCircle, Trophy,
 } from "lucide-react";
 
 const PRIORITIES = ["low", "medium", "high"];
@@ -126,6 +126,7 @@ export default function ClientDashboard() {
   const [recommended, setRecommended] = useState([]);
   const [personalised, setPersonalised] = useState(false);
   const [blogs, setBlogs] = useState([]);
+  const [sims, setSims] = useState([]);
 
   const loadRecs = () => {
     api.get("/learning/recommended", { params: { limit: 4 } })
@@ -135,6 +136,7 @@ export default function ClientDashboard() {
   useEffect(() => {
     api.get("/learning/topics").then((r) => setTopics(r.data || [])).catch(() => {});
     api.get("/auth/me").then((r) => setInterests(r.data.interests || [])).catch(() => {});
+    api.get("/me/simulations").then((r) => setSims(r.data.games || [])).catch(() => {});
     loadRecs();
   }, []);
 
@@ -265,6 +267,27 @@ export default function ClientDashboard() {
             </div>
           </section>
         )}
+
+        <section className="mt-14" data-testid="dashboard-simulations">
+          <div className="flex items-center gap-2"><Trophy className="h-5 w-5 text-[hsl(var(--primary))]" /><h2 className="font-display text-2xl font-bold">My Simulations</h2></div>
+          {sims.length > 0 ? (
+            <div className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              {sims.map((s) => (
+                <Link key={s.game_slug} to={`/games/${s.game_slug}`} className="group rounded-2xl border border-border bg-card p-5 transition-transform hover:-translate-y-1 hover:border-[hsl(var(--primary))]/50" data-testid={`sim-${s.game_slug}`}>
+                  <h3 className="font-display text-lg font-bold">{s.game_title}</h3>
+                  <p className="mt-2 text-sm text-muted-foreground">Best <span className="font-semibold text-[hsl(var(--primary))]">{s.best}/{s.max_score}</span> · {s.plays} play{s.plays === 1 ? "" : "s"}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Last played {s.last_played}</p>
+                  <span className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-foreground group-hover:text-[hsl(var(--primary))]">Beat your score <ArrowUpRight className="h-4 w-4" /></span>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-6 rounded-2xl border border-border bg-card p-6" data-testid="sim-empty">
+              <p className="text-sm text-muted-foreground">You haven't played a strategy simulation yet. Rehearse the hard calls in the War Room.</p>
+              <Link to="/games" className="mt-4 inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-5 py-2.5 text-sm font-semibold text-[hsl(var(--primary-foreground))]">Enter the War Room <ArrowUpRight className="h-4 w-4" /></Link>
+            </div>
+          )}
+        </section>
 
         <ServiceDesk />
 

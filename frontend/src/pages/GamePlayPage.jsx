@@ -1,19 +1,22 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ChevronLeft, CheckCircle2, XCircle, Trophy, RotateCcw, BookOpen, ArrowRight, Sparkles } from "lucide-react";
+import { ChevronLeft, CheckCircle2, XCircle, Trophy, RotateCcw, ArrowRight, Sparkles, MessageSquare, Medal, LogIn } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import Seo from "@/components/Seo";
+import { useAuth } from "@/context/AuthContext";
 import api, { track } from "@/lib/api";
 
 export default function GamePlayPage() {
   const { slug } = useParams();
+  const { user } = useAuth();
   const [game, setGame] = useState(null);
   const [started, setStarted] = useState(false);
   const [idx, setIdx] = useState(0);
   const [answers, setAnswers] = useState({});
   const [picked, setPicked] = useState(null);       // option id chosen for current round (locked)
   const [result, setResult] = useState(null);        // final debrief
+  const [board, setBoard] = useState(null);          // leaderboard
 
   useEffect(() => { window.scrollTo(0, 0); }, [slug, started, idx, result]);
   useEffect(() => {
@@ -40,13 +43,14 @@ export default function GamePlayPage() {
     if (isLast) {
       const r = await api.post(`/games/${slug}/score`, { answers: { ...answers, [round.id]: picked } });
       setResult(r.data);
+      api.get(`/games/${slug}/leaderboard`).then((lb) => setBoard(lb.data)).catch(() => {});
     } else {
       setIdx((i) => i + 1);
       setPicked(null);
     }
   };
 
-  const restart = () => { setStarted(true); setIdx(0); setAnswers({}); setPicked(null); setResult(null); };
+  const restart = () => { setStarted(true); setIdx(0); setAnswers({}); setPicked(null); setResult(null); setBoard(null); };
 
   const bandColor = (band) => band === "high" ? "text-[hsl(var(--primary))]" : band === "mid" ? "text-amber-400" : "text-rose-400";
 
@@ -147,16 +151,48 @@ export default function GamePlayPage() {
                   </ul>
                 </div>
 
+                {/* Leaderboard */}
+                <div className="mt-6 rounded-2xl border border-border bg-card p-6" data-testid="game-leaderboard">
+                  <h3 className="flex items-center gap-2 font-display text-lg font-bold"><Medal className="h-5 w-5 text-[hsl(var(--primary))]" /> Top scores</h3>
+                  {user ? (
+                    <p className="mt-1 text-xs text-muted-foreground" data-testid="game-mybest">
+                      {result.saved ? "Run saved. " : ""}Your best: <span className="font-semibold text-[hsl(var(--primary))]">{board?.my_best ?? result.score}/{result.max_score}</span> · {board?.plays ?? 1} play{(board?.plays ?? 1) === 1 ? "" : "s"}
+                    </p>
+                  ) : (
+                    <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-[hsl(var(--primary))]/30 bg-[hsl(var(--primary))]/5 p-3" data-testid="game-login-prompt">
+                      <LogIn className="h-4 w-4 text-[hsl(var(--primary))]" />
+                      <span className="text-sm text-foreground">Sign in to save your score and join the leaderboard.</span>
+                      <Link to="/login" className="ml-auto rounded-full bg-[hsl(var(--primary))] px-4 py-1.5 text-xs font-semibold text-[hsl(var(--primary-foreground))]">Sign in</Link>
+                    </div>
+                  )}
+                  {board?.top?.length ? (
+                    <ul className="mt-4 divide-y divide-border">
+                      {board.top.map((t) => (
+                        <li key={t.rank} className="flex items-center gap-3 py-2.5 text-sm" data-testid={`leaderboard-row-${t.rank}`}>
+                          <span className={`grid h-6 w-6 flex-shrink-0 place-items-center rounded-full text-[11px] font-bold ${t.rank <= 3 ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]" : "border border-border text-muted-foreground"}`}>{t.rank}</span>
+                          <span className="flex-1 font-medium text-foreground">{t.name}</span>
+                          <span className="text-xs text-muted-foreground">{t.date}</span>
+                          <span className="font-semibold text-[hsl(var(--primary))]">{t.score}/{t.max_score}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-4 text-sm text-muted-foreground">Be the first on the board — sign in and play.</p>
+                  )}
+                </div>
+
                 <div className="mt-6 flex flex-wrap gap-3">
                   <button onClick={restart} data-testid="game-replay"
                     className="inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-6 py-3 text-sm font-semibold text-[hsl(var(--primary-foreground))] transition-transform hover:-translate-y-0.5">
                     <RotateCcw className="h-4 w-4" /> Play again
                   </button>
+                  <Link to={`/?area=Business%20Coaching&msg=${encodeURIComponent(`I just played the "${game.title}" strategy simulation (${result.framework}). I'd like to discuss applying these ideas in my business.`)}#consult`}
+                    data-testid="game-discuss-sk"
+                    className="inline-flex items-center gap-2 rounded-full border border-[hsl(var(--primary))] px-6 py-3 text-sm font-semibold text-[hsl(var(--primary))] transition-colors hover:bg-[hsl(var(--primary))]/10">
+                    <MessageSquare className="h-4 w-4" /> Discuss this with SK
+                  </Link>
                   <Link to="/games" className="inline-flex items-center gap-2 rounded-full border border-border px-6 py-3 text-sm font-semibold text-foreground transition-colors hover:border-[hsl(var(--primary))]">
                     Try another game
-                  </Link>
-                  <Link to="/library" className="inline-flex items-center gap-2 rounded-full border border-border px-6 py-3 text-sm font-semibold text-foreground transition-colors hover:border-[hsl(var(--primary))]">
-                    <BookOpen className="h-4 w-4" /> Read the source
                   </Link>
                 </div>
               </div>

@@ -1,0 +1,38 @@
+{
+  "summary": "Iteration 15: verified 3 new features (Book/Game→Booking CTA, Game Leaderboard + My Simulations, Weekly Library Digest) + hCaptcha preview fix. Backend: 8/8 pytest cases pass covering anon/authed scoring, leaderboard shape, /me/simulations, admin library-digest run. Frontend: Book→Booking CTA prefills area/message and scrolls to #consult; Game result renders leaderboard + login prompt + discuss-sk; ClientDashboard shows dashboard-simulations with populated sim cards; hCaptcha TEST checkbox clicks to aria-checked=true on preview. Two issues found: (1) FIXED missing MessageSquare import in BookPage.jsx caused whole /library/:slug route to crash. (2) LibraryPage subscribe form does NOT send captcha_token — backend returns 400 'Captcha verification required'.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "BookPage.jsx", "issue": "MessageSquare icon used but not imported → 'MessageSquare is not defined' runtime error, whole book page crashed", "selector": "[data-testid=\"book-discuss-sk\"]", "priority": "CRITICAL (fixed by testing agent — added MessageSquare to lucide-react import)"}
+    ],
+    "integration_issues": [
+      {"flow": "Library subscribe (LibraryPage /library)", "issue": "subscribe() POSTs /api/newsletter with only {email} — no captcha_token. Backend verify_captcha rejects empty token with 400 'Captcha verification required' even on preview (empty-token short-circuit runs before preview-host check). Users can never subscribe from the Library page today. Fix: attach an hCaptcha widget (like consultation form) OR send captcha_token: 'preview' fallback; ideally reuse Captcha.jsx component.", "affected_selectors": ["[data-testid=\"library-subscribe\"]", "[data-testid=\"library-subscribe-email\"]", "[data-testid=\"library-subscribe-btn\"]"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration15_new_features.py",
+    "/app/test_reports/pytest/iter15.xml"
+  ],
+  "action_items": [
+    "LibraryPage subscribe must send a valid captcha_token — currently omits it, backend returns 400 on every submission (preview and prod). Suggest: add hCaptcha widget (reuse <Captcha/> component) or pass a preview-safe fallback token.",
+    "Consider hardening backend verify_captcha: allow empty token on preview host too (currently order: empty → 400 first, preview check second) — matches the newsletter form UX where captcha isn't mandatory.",
+    "Confirm the missing MessageSquare import fix is preserved and lint the BookPage."
+  ],
+  "critical_code_review_comments": [
+    "server.py still 4972 lines — carry-over from iter 14; new game_scores/library-digest logic reinforces the case for router split (games, library, admin-digest).",
+    "score_game accepts any answers dict and silently scores 0 for unknown option ids; recommend Pydantic validator to 400 on unknown round/option ids so client bugs surface.",
+    "verify_captcha short-circuits on empty token BEFORE checking preview host — inconsistent with the stated 'lenient on preview' behaviour and directly caused the library-subscribe regression.",
+    "LibraryPage.jsx subscribe() lacks any captcha handling — every other form (login/register/consultation) uses <Captcha/>; adding it here keeps UX consistent and fixes the 400."
+  ],
+  "updated_files": [
+    "/app/frontend/src/pages/BookPage.jsx (added MessageSquare to lucide-react import)",
+    "/app/backend/tests/test_iteration15_new_features.py (new)"
+  ],
+  "success_rate": {"backend": "100% (8/8)", "frontend": "~90% (1 real bug: library subscribe captcha)"},
+  "test_credentials": "Admin sudarshan@karweers.com / Sudarshan@2026 (consent:true, captcha_token:'preview'). Test clients registered ad-hoc with captcha_token:'preview'.",
+  "seed_data_creation": "Created 2 game_scores docs (TEST client + TESTDash client) via POST /api/games/art-of-war/score. Also posted a valid preview subscribe (test.sub.*@test.com) into subscribers via curl during captcha debugging. Called POST /admin/library-digest/run once (returns skipped:email_not_configured OR sent:true depending on env). Idempotent.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend suite lives at /app/backend/tests/test_iteration15_new_features.py — GAME slug is 'art-of-war' (there is no 'energy-strategy-hub' game; that string is the preview hostname). Register a client via POST /api/auth/register with body {name,email,password,captcha_token:'preview',consent:true} and grab token from response. Frontend uses localStorage key 'sk_token' for the Bearer token. The library-subscribe fix requires backend + frontend coordination — retest after main agent adds captcha or preview fallback."
+}

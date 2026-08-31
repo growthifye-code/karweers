@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { BookOpen, Headphones, Play, ShoppingCart, ChevronLeft, Sparkles, Info, Repeat } from "lucide-react";
+import { BookOpen, Headphones, Play, ShoppingCart, ChevronLeft, Sparkles, Info, Repeat, MessageSquare } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import Seo from "@/components/Seo";
@@ -56,10 +56,17 @@ export default function BookPage() {
                 <h1 className="mt-4 font-display text-4xl font-bold md:text-5xl" data-testid="book-title">{book.title}</h1>
                 <p className="mt-2 text-base text-muted-foreground">{book.author} · {book.year}</p>
               </div>
-              <a href={book.amazon} target="_blank" rel="noopener noreferrer" data-testid="book-amazon"
-                className="inline-flex flex-shrink-0 items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-5 py-3 text-sm font-semibold text-[hsl(var(--primary-foreground))] transition-transform hover:-translate-y-0.5">
-                <ShoppingCart className="h-4 w-4" /> Get it on Amazon
-              </a>
+              <div className="flex flex-shrink-0 flex-wrap gap-3">
+                <Link to={`/?area=Business%20Coaching&msg=${encodeURIComponent(`I'd like to discuss "${book.title}" by ${book.author} and how to apply its ideas in my business.`)}#consult`}
+                  data-testid="book-discuss-sk"
+                  className="inline-flex items-center gap-2 rounded-full border border-[hsl(var(--primary))] px-5 py-3 text-sm font-semibold text-[hsl(var(--primary))] transition-colors hover:bg-[hsl(var(--primary))]/10">
+                  <MessageSquare className="h-4 w-4" /> Discuss this with SK
+                </Link>
+                <a href={book.amazon} target="_blank" rel="noopener noreferrer" data-testid="book-amazon"
+                  className="inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-5 py-3 text-sm font-semibold text-[hsl(var(--primary-foreground))] transition-transform hover:-translate-y-0.5">
+                  <ShoppingCart className="h-4 w-4" /> Get it on Amazon
+                </a>
+              </div>
             </div>
           )}
         </div>

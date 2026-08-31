@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { BookOpen, Headphones, ShoppingCart, ArrowUpRight, Sparkles, RefreshCw, Repeat } from "lucide-react";
+import { toast } from "sonner";
+import { BookOpen, Headphones, ShoppingCart, ArrowUpRight, Sparkles, RefreshCw, Repeat, Mail } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import Seo from "@/components/Seo";
+import Captcha from "@/components/Captcha";
 import api from "@/lib/api";
 
 const COVERS = [
@@ -15,10 +17,27 @@ const COVERS = [
 export default function LibraryPage() {
   const [books, setBooks] = useState([]);
   const [scope, setScope] = useState("shelf");
+  const [email, setEmail] = useState("");
+  const [captcha, setCaptcha] = useState("");
+  const [subBusy, setSubBusy] = useState(false);
   useEffect(() => {
     window.scrollTo(0, 0);
     api.get(`/books${scope === "all" ? "?scope=all" : ""}`).then((r) => setBooks(r.data || [])).catch(() => {});
   }, [scope]);
+
+  const subscribe = async (e) => {
+    e.preventDefault();
+    if (!email) { toast.error("Please enter your email."); return; }
+    if (!captcha) { toast.error("Please complete the captcha."); return; }
+    setSubBusy(true);
+    try {
+      const { data } = await api.post("/newsletter", { email, captcha_token: captcha });
+      toast.success(data.message || "You're on the list — the fresh shelf lands every Monday.");
+      setEmail("");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Could not subscribe right now.");
+    } finally { setSubBusy(false); }
+  };
 
   const today = new Date().toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
 
@@ -69,6 +88,22 @@ export default function LibraryPage() {
               </div>
             </Link>
           ))}
+        </div>
+      </section>
+      <section className="border-t border-border bg-secondary/30 py-14">
+        <div className="mx-auto max-w-3xl px-6 text-center lg:px-10">
+          <span className="grid h-12 w-12 mx-auto place-items-center rounded-xl bg-[hsl(var(--primary))]/12 text-[hsl(var(--primary))]"><Mail className="h-6 w-6" /></span>
+          <h2 className="mt-5 font-display text-2xl font-bold md:text-3xl">Get the fresh shelf every Monday</h2>
+          <p className="mx-auto mt-3 max-w-xl text-sm text-muted-foreground md:text-base">Join the Library digest and we'll email you the week's rotating picks — read, listen and turn each into a ritual. Unsubscribe anytime.</p>
+          <form onSubmit={subscribe} data-testid="library-subscribe" className="mx-auto mt-6 flex max-w-md flex-col gap-3 sm:flex-row">
+            <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="you@company.com" data-testid="library-subscribe-email"
+              className="flex-1 rounded-full border border-border bg-background px-5 py-3 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]" />
+            <button type="submit" disabled={subBusy} data-testid="library-subscribe-btn"
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-[hsl(var(--primary))] px-6 py-3 text-sm font-semibold text-[hsl(var(--primary-foreground))] transition-transform hover:-translate-y-0.5 disabled:opacity-60">
+              {subBusy ? "Joining…" : "Get the digest"}
+            </button>
+          </form>
+          <div className="mt-4 flex justify-center"><Captcha onVerify={setCaptcha} onExpire={() => setCaptcha("")} /></div>
         </div>
       </section>
       <Footer />

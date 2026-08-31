@@ -35,6 +35,7 @@ from emailer import send_security_alert_email
 from emailer import send_new_booking_alert_email, send_session_reminder_email, send_weekly_agenda_email, send_waitlist_opening_email
 from emailer import send_consent_receipt_email
 from emailer import send_signals_digest_email, render_signals_digest_html, send_test_email
+from emailer import send_library_digest_email
 from emailer import send_sector_digest_email
 from emailer import send_payment_receipt_email, send_refund_email
 from emailer import send_gst_invoice_email, send_abandoned_nudge_email
@@ -1196,6 +1197,16 @@ async def admin_run_signals_digest(admin: dict = Depends(require_admin)):
     return {"sent": True, "subscribers": subs}
 
 
+@api_router.post("/admin/library-digest/run")
+async def admin_run_library_digest(admin: dict = Depends(require_admin)):
+    """Send the weekly Library shelf digest to subscribers now."""
+    if not os.environ.get("GMAIL_APP_PASSWORD"):
+        return {"sent": False, "skipped": "email_not_configured"}
+    subs = await db.subscribers.count_documents({})
+    await _send_library_digest()
+    return {"sent": True, "subscribers": subs}
+
+
 # ---------------- Client self-service: consent record + withdrawal ----------------
 @api_router.get("/me/consent")
 async def my_consent(user: dict = Depends(get_current_user)):
@@ -2074,6 +2085,19 @@ async def _send_signals_digest():
     await db.app_meta.update_one({"_id": "signals_digest"}, {"$set": {"last_run": now_iso()}}, upsert=True)
 
 
+async def _send_library_digest():
+    """Email subscribers the fresh weekly Library shelf (today's rotation)."""
+    books = [_book_public(b) for b in _daily_shelf()]
+    if not books:
+        return
+    subs = await db.subscribers.find({}, {"_id": 0, "email": 1, "name": 1}).to_list(5000)
+    loop = asyncio.get_event_loop()
+    for c in subs:
+        await loop.run_in_executor(None, lambda cc=c: send_library_digest_email(
+            cc["email"], cc.get("name", "there"), books, PUBLIC_SITE, _unsub_url(cc["email"])))
+    await db.app_meta.update_one({"_id": "library_digest"}, {"$set": {"last_run": now_iso()}}, upsert=True)
+
+
 async def _digest_scheduler():
     while True:
         try:
@@ -2110,6 +2134,11 @@ async def _digest_scheduler():
                     sd = await db.app_meta.find_one({"_id": "signals_digest"})
                     if (sd or {}).get("last_run", "")[:10] != ist_now.date().isoformat():
                         await _send_signals_digest()
+                # Weekly Library shelf digest to subscribers — Monday ~09:00 IST.
+                if ist_now.weekday() == 0 and ist_now.hour == 9:
+                    ld = await db.app_meta.find_one({"_id": "library_digest"})
+                    if (ld or {}).get("last_run", "")[:10] != ist_now.date().isoformat():
+                        await _send_library_digest()
             if now.weekday() == 0 and os.environ.get("GMAIL_APP_PASSWORD"):  # Monday
                 meta = await db.app_meta.find_one({"_id": "digest"})
                 last = (meta or {}).get("last_run", "")
@@ -3184,7 +3213,7 @@ async def get_game(slug: str):
 
 
 @api_router.post("/games/{slug}/score")
-async def score_game(slug: str, body: GameScoreIn):
+async def score_game(slug: str, body: GameScoreIn, user: Optional[dict] = Depends(get_optional_user)):
     g = GAMES_BY_SLUG.get(slug)
     if not g:
         raise HTTPException(status_code=404, detail="Unknown game")
@@ -3198,7 +3227,66 @@ async def score_game(slug: str, body: GameScoreIn):
         breakdown.append({"round": r["id"], "chosen": chosen, "score": sc,
                           "feedback": opt["feedback"] if opt else "",
                           "best": max(o["score"] for o in r["options"])})
-    return {**_game_debrief(g, total), "breakdown": breakdown}
+    result = {**_game_debrief(g, total), "breakdown": breakdown}
+    result["saved"] = False
+    if user:
+        prev_best = await db.game_scores.find({"user_id": user["id"], "game_slug": slug}).sort("score", -1).limit(1).to_list(1)
+        result["personal_best_before"] = prev_best[0]["score"] if prev_best else None
+        await db.game_scores.insert_one({
+            "id": str(uuid.uuid4()), "game_slug": slug, "game_title": g["title"],
+            "user_id": user["id"], "name": user.get("name", "Anonymous"),
+            "email": user.get("email", ""), "score": total,
+            "max_score": result["max_score"], "band": result["band"], "created_at": now_iso()})
+        result["saved"] = True
+    return result
+
+
+def _first_name(n: str) -> str:
+    return (n or "Anonymous").strip().split(" ")[0] or "Anonymous"
+
+
+@api_router.get("/games/{slug}/leaderboard")
+async def game_leaderboard(slug: str, user: Optional[dict] = Depends(get_optional_user)):
+    g = GAMES_BY_SLUG.get(slug)
+    if not g:
+        raise HTTPException(status_code=404, detail="Unknown game")
+    # Best score per user (public top board).
+    pipeline = [
+        {"$match": {"game_slug": slug}},
+        {"$sort": {"score": -1, "created_at": 1}},
+        {"$group": {"_id": "$user_id", "name": {"$first": "$name"},
+                    "score": {"$max": "$score"}, "max_score": {"$first": "$max_score"},
+                    "created_at": {"$first": "$created_at"}}},
+        {"$sort": {"score": -1, "created_at": 1}},
+        {"$limit": 10},
+    ]
+    rows = await db.game_scores.aggregate(pipeline).to_list(10)
+    top = [{"rank": i + 1, "name": _first_name(r.get("name")), "score": r["score"],
+            "max_score": r.get("max_score", 15), "date": (r.get("created_at") or "")[:10]}
+           for i, r in enumerate(rows)]
+    out = {"top": top, "max_score": sum(max(o["score"] for o in rr["options"]) for rr in g["rounds"])}
+    if user:
+        mine = await db.game_scores.find({"user_id": user["id"], "game_slug": slug},
+                                         {"_id": 0}).sort("created_at", -1).to_list(50)
+        out["my_runs"] = [{"score": m["score"], "max_score": m.get("max_score", 15),
+                           "band": m.get("band", ""), "date": (m.get("created_at") or "")[:10]} for m in mine]
+        out["my_best"] = max((m["score"] for m in mine), default=None)
+        out["plays"] = len(mine)
+    return out
+
+
+@api_router.get("/me/simulations")
+async def my_simulations(user: dict = Depends(get_current_user)):
+    rows = await db.game_scores.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    by_game = {}
+    for m in rows:
+        g = by_game.setdefault(m["game_slug"], {"game_slug": m["game_slug"], "game_title": m.get("game_title", m["game_slug"]),
+                                                "best": 0, "max_score": m.get("max_score", 15), "plays": 0, "last_played": ""})
+        g["plays"] += 1
+        g["best"] = max(g["best"], m["score"])
+        if (m.get("created_at") or "") > g["last_played"]:
+            g["last_played"] = (m.get("created_at") or "")[:10]
+    return {"games": sorted(by_game.values(), key=lambda x: x["last_played"], reverse=True), "total_runs": len(rows)}
 
 
 

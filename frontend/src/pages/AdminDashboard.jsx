@@ -121,6 +121,14 @@ export default function AdminDashboard() {
       else toast.error("Email is not configured yet.");
     } catch { toast.error("Could not send the digest."); }
   };
+  const sendLibraryDigestNow = async () => {
+    if (!window.confirm("Send this week's Library shelf digest to all subscribers now?")) return;
+    try {
+      const { data } = await api.post("/admin/library-digest/run");
+      if (data.sent) toast.success(`Library digest sent to ${data.subscribers} subscriber(s).`);
+      else toast.error("Email is not configured yet.");
+    } catch { toast.error("Could not send the library digest."); }
+  };
   const saveCardAccent = async (accent) => {
     try {
       await api.post("/admin/card-style", { accent });
@@ -592,6 +600,13 @@ export default function AdminDashboard() {
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button onClick={previewDigest} data-testid="preview-digest" className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium hover:bg-secondary"><FileText className="h-4 w-4" /> Preview</button>
                     <button onClick={sendDigestNow} data-testid="send-digest" className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium hover:bg-secondary"><Mail className="h-4 w-4" /> Send now</button>
+                  </div>
+                </div>
+                <div className="mt-5 border-t border-border pt-4">
+                  <p className="text-sm font-semibold">Weekly library digest</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Email subscribers this week's fresh Leadership Library shelf (auto-sends Mondays).</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button onClick={sendLibraryDigestNow} data-testid="send-library-digest" className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium hover:bg-secondary"><Mail className="h-4 w-4" /> Send now</button>
                   </div>
                 </div>
               </div>

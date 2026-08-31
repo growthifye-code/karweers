@@ -40,6 +40,18 @@ export default function Consultation({ testimonials = [] }) {
   useEffect(() => {
     api.get("/consultation/packages").then((r) => setPackages(r.data)).catch(() => {});
     api.get("/consultation/availability").then((r) => setAvail(r.data)).catch(() => {});
+    // Pre-fill from a "Discuss this with SK" deep-link (book / game debrief).
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const msg = p.get("msg");
+      const area = p.get("area");
+      if (msg || area) {
+        setForm((f) => ({ ...f, message: msg || f.message, area: AREAS.includes(area) ? area : f.area }));
+      }
+      if (window.location.hash === "#consult") {
+        setTimeout(() => document.getElementById("consult")?.scrollIntoView({ behavior: "smooth", block: "start" }), 500);
+      }
+    } catch { /* noop */ }
   }, []);
 
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });

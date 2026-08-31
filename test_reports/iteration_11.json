@@ -1,0 +1,27 @@
+{
+  "summary": "Verified the new clickable-boxes / topic-modal / OEM logos increment on Sectors, Capital & OEM deep-dive pages. All 10 field boxes on /sectors/storage are clickable and open the in-page TopicModal (never a new tab). Card-level clicks (card-key_oems-<i>, card-competition-<i>, card-use_cases-<i>) open the modal for that specific item without also triggering the parent box (stopPropagation works). Modal renders overview, details grid, SK Take, and 3 tabs (news/blogs/videos) with 8 news items, 8 blogs, and multiple curated videos. topic-modal-close button and Escape key both close the modal. Same behaviour verified on /oems/catl and /capital/adb. Regression sections (entity-news, entity-videos) still render; entity-insights renders on /capital/adb (not on /sectors/storage — no insights curated for that slug, not a bug). Backend /api/sectors/storage & /api/oems/catl payloads correctly include logo (clearbit.com) and favicon (google s2) URLs on key_oems/competition cards.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "EntityPage.CardLogo / NewsItem", "issue": "Company logos on OEM/competition cards and source logos on news items do NOT visually render in the preview sandbox because external hosts (logo.clearbit.com, www.google.com/s2/favicons) are blocked by DNS (ERR_NAME_NOT_RESOLVED on every image request). Payload has correct URLs so this is an environment-only failure — on a normal end-user browser the logos should load. Consider self-hosting/proxying favicons through /api/logo?domain=... to make the feature deterministic and remove the flash-of-missing-logo on restricted networks.", "selector": "[data-testid^=\"card-key_oems-\"] img, [data-testid^=\"card-competition-\"] img, [data-testid=\"entity-news-item\"] img", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Optional: proxy external logos through the backend (e.g. GET /api/logo?domain=byd.com) so cards show branding even on networks that block clearbit/google-favicon. Current sandbox blocks DNS for these hosts."
+  ],
+  "critical_code_review_comments": [
+    "EntityPage.jsx renderField wraps a large div with onClick=openTopic and inner <button> cards with e.stopPropagation. Works, but semantically the outer div should be role=button / tabIndex=0 with keyboard handlers (Enter/Space) so it is accessible — currently the boxes are only mouse-clickable.",
+    "TopicModal.jsx: no error state — if /api/topic fails, loading is set false but data stays null and body renders empty. Add an error branch with retry.",
+    "TopicModal.jsx: body overflow of the underlying page is not locked when modal is open (document.body.style.overflow). Users can scroll page behind the modal."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped)", "frontend": "100% (all functional checks pass; logo images fail to load only due to sandbox DNS restrictions)"},
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Preview sandbox cannot resolve external hosts (logo.clearbit.com, google.com/s2/favicons, etc.) so any assertion on visible <img> for card logos will fail here. Backend payload IS correct. Use payload-level assertion (fetch('/api/sectors/storage').profile.key_oems[0].logo) instead of DOM image visibility when validating logos in this environment. All new data-testids in place: field-<key>, card-<fieldkey>-<index>, topic-modal, topic-modal-close, topic-tab-news/blogs/videos, topic-news-item.",
+  "rca of the issue": "Card/News logos not visible in sandbox → RCA: External CDN (logo.clearbit.com) and Google favicon service unreachable from the container network (ERR_NAME_NOT_RESOLVED). CardLogo hides <img> on onError, so DOM appears logo-less. Mitigation: (a) add a self-hosted /api/logo proxy endpoint that fetches & caches favicons server-side and returns them from the same origin, or (b) bundle a small set of static logos in /frontend/public for the top OEMs/agencies."
+}

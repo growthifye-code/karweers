@@ -14,6 +14,9 @@ import InsightsPage from "@/pages/InsightsPage";
 import ArticleDetail from "@/pages/ArticleDetail";
 import LearningPage from "@/pages/LearningPage";
 import SignalsArchivePage from "@/pages/SignalsArchivePage";
+import ResumePaymentPage from "@/pages/ResumePaymentPage";
+import ExplorePage from "@/pages/ExplorePage";
+import EntityPage from "@/pages/EntityPage";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import AuthCallback from "@/pages/AuthCallback";
@@ -45,8 +48,13 @@ function AppRoutes() {
       <Route path="/market" element={<MarketPage />} />
       <Route path="/deals" element={<DealsPage />} />
       <Route path="/learning" element={<LearningPage />} />
+      <Route path="/explore" element={<ExplorePage />} />
+      <Route path="/sectors/:slug" element={<EntityPage kind="sector" />} />
+      <Route path="/capital/:slug" element={<EntityPage kind="agency" />} />
+      <Route path="/oems/:slug" element={<EntityPage kind="oem" />} />
       <Route path="/signals" element={<SignalsArchivePage />} />
       <Route path="/signals/:date" element={<SignalsArchivePage />} />
+      <Route path="/resume/:bid" element={<ResumePaymentPage />} />
       <Route path="/insights/:slug" element={<ArticleDetail />} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />

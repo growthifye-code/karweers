@@ -537,3 +537,80 @@ def send_refund_email(to_email: str, booking: dict, reason: str = "") -> str:
     msg.add_alternative(_shell("Refund processed", inner), subtype="html")
     return _smtp_send(msg)
 
+
+
+def send_abandoned_nudge_email(to_email: str, booking: dict, resume_url: str) -> str:
+    """Gentle nudge to complete an abandoned consultation payment (INERT until SMTP configured)."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email:
+        return "skipped"
+    inner = (
+        f'<p style="font-size:15px;color:#111;">Hi {booking.get("name","there")},</p>'
+        f'<p style="font-size:14px;color:#374151;">You were almost there — your <strong>{booking.get("package","")}</strong> slot on '
+        f'<strong>{booking.get("slot_date","")} {booking.get("slot_time","")} IST</strong> is still held for you, but payment wasn\'t completed.</p>'
+        f'<p style="font-size:14px;color:#374151;">Complete your booking securely to lock it in — the total is {_inr(booking.get("amount_total",0))} (incl. GST).</p>'
+        f'<a href="{resume_url}" style="display:inline-block;margin-top:10px;background:#C6F135;color:#0A0A0A;padding:12px 24px;border-radius:999px;text-decoration:none;font-weight:700;font-size:14px;">Complete my booking</a>'
+        f'<p style="font-size:12px;color:#9ca3af;margin-top:16px;">If we don\'t hear from you, the slot is released so someone else can book it. No charge has been made.</p>'
+        f'<p style="font-size:13px;color:#374151;margin-top:16px;">— Team Sudarshan Karweer</p>'
+    )
+    msg = EmailMessage()
+    msg["Subject"] = "Your consultation slot is still held — complete your booking"
+    msg["From"] = user
+    msg["To"] = to_email
+    msg.set_content(f"Complete your {booking.get('package','')} booking on {booking.get('slot_date','')} {booking.get('slot_time','')} IST: {resume_url}")
+    msg.add_alternative(_shell("Complete your booking", inner), subtype="html")
+    return _smtp_send(msg)
+
+
+def render_gst_invoice_html(booking: dict, gst: dict) -> str:
+    base = float(booking.get("amount", 0))
+    gst_amt = float(booking.get("gst_amount", 0))
+    total = float(booking.get("amount_total", 0))
+    half = round(gst_amt / 2, 2)
+    rows = (
+        f'<tr><td style="padding:8px;border:1px solid #e5e7eb;">{booking.get("package","Consultation")} (SAC {gst.get("sac","998311")})</td>'
+        f'<td style="padding:8px;border:1px solid #e5e7eb;text-align:right;">{_inr(base)}</td></tr>'
+        f'<tr><td style="padding:8px;border:1px solid #e5e7eb;">CGST @ 9%</td><td style="padding:8px;border:1px solid #e5e7eb;text-align:right;">{_inr(half)}</td></tr>'
+        f'<tr><td style="padding:8px;border:1px solid #e5e7eb;">SGST @ 9%</td><td style="padding:8px;border:1px solid #e5e7eb;text-align:right;">{_inr(half)}</td></tr>'
+        f'<tr><td style="padding:8px;border:1px solid #e5e7eb;font-weight:700;">Total (incl. GST)</td>'
+        f'<td style="padding:8px;border:1px solid #e5e7eb;text-align:right;font-weight:700;">{_inr(total)}</td></tr>'
+    )
+    supplier = (
+        f'<p style="margin:0;font-size:15px;font-weight:700;color:#111;">{gst.get("legal_name","")}</p>'
+        f'<p style="margin:2px 0;font-size:12px;color:#374151;">{gst.get("address","")}</p>'
+        f'<p style="margin:2px 0;font-size:12px;color:#374151;">GSTIN: {gst.get("gstin","")}'
+        + (f' · State: {gst.get("state","")} ({gst.get("state_code","")})' if gst.get("state") else "") + '</p>'
+    )
+    inner = (
+        '<p style="font-size:18px;font-weight:800;color:#111;letter-spacing:.04em;">TAX INVOICE</p>'
+        f'{supplier}'
+        f'<table style="width:100%;margin-top:14px;font-size:12px;color:#374151;"><tr>'
+        f'<td>Invoice No: <strong>{booking.get("invoice_no","")}</strong></td>'
+        f'<td style="text-align:right;">Date: <strong>{(booking.get("invoice_at","") or "")[:10]}</strong></td></tr></table>'
+        f'<p style="margin-top:12px;font-size:13px;color:#111;">Billed to: <strong>{booking.get("name","")}</strong> ({booking.get("email","")})</p>'
+        f'<p style="margin:2px 0;font-size:12px;color:#6b7280;">Session: {booking.get("slot_date","")} {booking.get("slot_time","")} IST · Payment ID {booking.get("razorpay_payment_id","")}</p>'
+        f'<table style="width:100%;border-collapse:collapse;margin-top:12px;font-size:13px;color:#111;">'
+        f'<tr><th style="padding:8px;border:1px solid #e5e7eb;text-align:left;">Description</th>'
+        f'<th style="padding:8px;border:1px solid #e5e7eb;text-align:right;">Amount</th></tr>{rows}</table>'
+        f'<p style="margin-top:10px;font-size:11px;color:#9ca3af;">Place of supply defaults to the supplier state for B2C where recipient GSTIN/address is not provided. This is a computer-generated tax invoice.</p>'
+        f'<p style="font-size:13px;color:#374151;margin-top:14px;">— {gst.get("legal_name","Team Sudarshan Karweer")}</p>'
+    )
+    return _shell("Tax Invoice", inner)
+
+
+def send_gst_invoice_email(to_email: str, booking: dict, gst: dict) -> str:
+    """Email a GST tax invoice alongside the payment receipt (INERT until SMTP + GSTIN configured)."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email or not gst.get("gstin"):
+        return "skipped"
+    msg = EmailMessage()
+    msg["Subject"] = f"Tax Invoice {booking.get('invoice_no','')} — Sudarshan Karweer"
+    msg["From"] = user
+    msg["To"] = to_email
+    msg.set_content(f"Tax Invoice {booking.get('invoice_no','')} for {booking.get('package','')}. "
+                    f"Total {booking.get('amount_total','')} INR incl. GST. GSTIN {gst.get('gstin','')}.")
+    msg.add_alternative(render_gst_invoice_html(booking, gst), subtype="html")
+    return _smtp_send(msg)
+

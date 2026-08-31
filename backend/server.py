@@ -34,7 +34,9 @@ from emailer import send_new_booking_alert_email, send_session_reminder_email, s
 from emailer import send_consent_receipt_email
 from emailer import send_signals_digest_email, render_signals_digest_html, send_test_email
 from emailer import send_payment_receipt_email, send_refund_email
+from emailer import send_gst_invoice_email, send_abandoned_nudge_email
 import xml.etree.ElementTree as ET
+import contextvars
 from datetime import datetime as _dt
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
@@ -60,11 +62,31 @@ def gen_client_code() -> str:
     return "SK-" + uuid.uuid4().hex[:6].upper()
 
 
-def verify_captcha(token, ip=None):
+_current_host: contextvars.ContextVar = contextvars.ContextVar("_current_host", default="")
+PREVIEW_HOST_MARKERS = ("preview.emergentagent.com", "preview.emergentcf.cloud", "localhost", "127.0.0.1")
+
+
+def _is_preview_host(request=None) -> bool:
+    host = ""
+    if request is not None:
+        host = (request.headers.get("x-forwarded-host") or request.headers.get("origin")
+                or request.headers.get("host") or "")
+    if not host:
+        host = _current_host.get() or ""
+    host = host.lower()
+    return any(m in host for m in PREVIEW_HOST_MARKERS)
+
+
+def verify_captcha(token, ip=None, request=None):
     if not token:
         raise HTTPException(status_code=400, detail="Captcha verification required")
+    # Preview/dev: the real Enterprise sitekey is hostname-locked in the hCaptcha
+    # dashboard, so the widget cannot complete a challenge on the ephemeral preview
+    # domain. There the frontend uses the always-pass hCaptcha TEST key; accept a
+    # present token. Production (real domain) always runs full server-side verify.
+    if _is_preview_host(request):
+        return True
     # Lenient mode: real site key set but real secret not yet configured.
-    # A valid hCaptcha token must still be present (bot must solve the widget).
     if HCAPTCHA_SECRET == _HCAPTCHA_TEST_SECRET:
         return True
     try:
@@ -264,7 +286,7 @@ async def require_admin(user: dict = Depends(get_current_user)) -> dict:
 # ---------------- Auth routes ----------------
 @api_router.post("/auth/register")
 async def register(body: RegisterIn, request: Request):
-    verify_captcha(body.captcha_token, _client_ip(request))
+    verify_captcha(body.captcha_token, _client_ip(request), request)
     if not body.consent:
         raise HTTPException(status_code=400, detail="You must read and agree to the Terms & Conditions and Privacy Policy to continue.")
     email = body.email.lower()
@@ -616,7 +638,7 @@ async def country_should_block(request: Request):
 @api_router.post("/auth/login")
 async def login(body: LoginIn, request: Request):
     client_ip = _client_ip(request)
-    verify_captcha(body.captcha_token, client_ip)
+    verify_captcha(body.captcha_token, client_ip, request)
     if not body.consent:
         raise HTTPException(status_code=400, detail="You must read and agree to the Terms & Conditions and Privacy Policy to continue.")
     email = body.email.lower()
@@ -653,7 +675,7 @@ class CaptchaGateIn(BaseModel):
 @api_router.post("/auth/captcha-gate")
 async def captcha_gate(body: CaptchaGateIn, request: Request, response: Response):
     """Verify a solved hCaptcha + consent, then set a short-lived cookie that gates the Google OAuth redirect."""
-    verify_captcha(body.captcha_token, _client_ip(request))
+    verify_captcha(body.captcha_token, _client_ip(request), request)
     if not body.consent:
         raise HTTPException(status_code=400, detail="You must read and agree to the Terms & Conditions and Privacy Policy to continue.")
     response.set_cookie("captcha_gate", issue_captcha_gate(consent=True), httponly=True, secure=True,
@@ -2052,6 +2074,8 @@ async def _digest_scheduler():
     while True:
         try:
             await _auto_escalate_tickets()  # hourly SLA escalation pass
+            await _refresh_all_news_if_due()  # 4-hourly news scrape for sectors/agencies/OEMs
+            await _process_pending_payments()  # nudge abandoned checkouts, release stale holds
             await _refresh_home_content()   # daily AI homepage copy (self-guards on 24h staleness)
             now = datetime.now(timezone.utc)
             # Every Saturday, publish (roll forward) availability to the coming week.
@@ -2148,7 +2172,7 @@ async def meta():
 # ---------------- Consultation routes ----------------
 @api_router.post("/consultations")
 async def create_consultation(body: ConsultationIn, request: Request):
-    verify_captcha(body.captcha_token, _client_ip(request))
+    verify_captcha(body.captcha_token, _client_ip(request), request)
     doc = body.model_dump()
     doc.pop("captcha_token", None)
     doc.update({"id": str(uuid.uuid4()), "status": "new", "source": "booking-form", "created_at": now_iso()})
@@ -2469,6 +2493,631 @@ async def signals_og_image(day: str):
                     headers={"Cache-Control": "public, max-age=3600"})
 
 
+# ---------------- Sector deep-dive pages (tech, OEMs, competition, videos, SK insights, news) ----------------
+SECTORS = {
+    "storage": {"name": "Energy Storage (BESS)", "tag": "Storage", "video_topic": "energy",
+                "query": "battery energy storage BESS India", "blurb": "Grid-scale & behind-the-meter battery storage — the backbone of a firm, renewable grid."},
+    "green-hydrogen": {"name": "Green Hydrogen", "tag": "Green Hydrogen", "video_topic": "energy",
+                       "query": "green hydrogen electrolyser India", "blurb": "Electrolysis-based hydrogen for hard-to-abate industry and long-duration energy."},
+    "climate-finance": {"name": "Climate & Green Finance", "tag": "Climate Finance", "video_topic": "climate-finance",
+                        "query": "climate finance green bonds India renewable", "blurb": "Blended capital, green bonds and the money that makes the transition bankable."},
+    "renewable-energy": {"name": "Renewable Energy", "tag": "Energy Transition", "video_topic": "energy",
+                         "query": "renewable energy solar wind India transition", "blurb": "Solar, wind and the build-out reshaping how power is generated."},
+    "energy-transition": {"name": "Energy Transition", "tag": "Energy Transition", "video_topic": "energy",
+                          "query": "energy transition India decarbonisation", "blurb": "The macro shift from fossil fuels to clean, electrified energy systems."},
+    "strategy": {"name": "Strategy & Scaling", "tag": "Strategy", "video_topic": "fundraising",
+                 "query": "business strategy scaling fundraising India", "blurb": "How founders and CXOs build bankable, enduring businesses."},
+    "macro": {"name": "Macro & Markets", "tag": "Macro", "video_topic": "global-macro",
+              "query": "India economy macro markets energy", "blurb": "The macro and market forces shaping capital and the transition."},
+    "asset-monetisation": {"name": "Government Asset Monetisation", "tag": "Asset Monetisation", "video_topic": "india-economy",
+              "query": "government asset monetisation India infrastructure InvIT NMP", "blurb": "Unlocking value from public infrastructure — depots, land, roads and utilities."},
+    "business-coaching": {"name": "Business Coaching & Scaling", "tag": "Coaching", "video_topic": "leadership",
+              "query": "business coaching leadership scaling founders CXO India", "blurb": "Sharpening founders and CXOs to build enduring, bankable businesses."},
+}
+TAG_TO_SECTOR = {v["tag"]: k for k, v in SECTORS.items()}
+
+CREDIBLE_SOURCES = {
+    "economic times": ("The Economic Times", "economictimes.indiatimes.com"),
+    "times of india": ("Times of India", "timesofindia.indiatimes.com"),
+    "business standard": ("Business Standard", "business-standard.com"),
+    "mint": ("Mint", "livemint.com"),
+    "livemint": ("Mint", "livemint.com"),
+    "hindu businessline": ("Hindu BusinessLine", "thehindubusinessline.com"),
+    "businessline": ("Hindu BusinessLine", "thehindubusinessline.com"),
+    "cnbc": ("CNBC", "cnbc.com"),
+    "reuters": ("Reuters", "reuters.com"),
+    "ani": ("ANI", "aninews.in"),
+    "press information bureau": ("PIB", "pib.gov.in"),
+    "pib": ("PIB", "pib.gov.in"),
+}
+
+
+def _logo_url(dom: str) -> str:
+    return f"/api/logo?domain={dom}"
+
+
+def _match_source(name: str):
+    n = (name or "").lower()
+    for key, val in CREDIBLE_SOURCES.items():
+        if key in n:
+            return {"name": val[0], "logo": _logo_url(val[1]), "favicon": _logo_url(val[1])}
+    return None
+
+
+def _source_domain(el) -> str:
+    if el is not None:
+        url = el.get("url") or ""
+        if url:
+            from urllib.parse import urlparse
+            return urlparse(url).netloc.replace("www.", "")
+    return ""
+
+
+def _fetch_sector_news(query: str) -> list:
+    import xml.etree.ElementTree as ET
+    from urllib.parse import quote
+    url = f"https://news.google.com/rss/search?q={quote(query)}&hl=en-IN&gl=IN&ceid=IN:en"
+    try:
+        r = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        root = ET.fromstring(r.content)
+    except Exception:
+        logger.warning("news fetch failed for %s", query)
+        return []
+    credible, others = [], []
+    for item in root.iter("item"):
+        src_el = item.find("source")
+        source = (src_el.text if src_el is not None else "") or ""
+        title = (item.findtext("title") or "").rsplit(" - ", 1)[0]
+        link = item.findtext("link") or ""
+        pub = item.findtext("pubDate") or ""
+        m = _match_source(source)
+        if m:
+            credible.append({"title": title, "link": link, "published": pub, "source": m["name"],
+                             "logo": m["logo"], "favicon": m["favicon"], "credible": True})
+        else:
+            dom = _source_domain(src_el)
+            if not dom:
+                continue
+            others.append({"title": title, "link": link, "published": pub, "source": source or dom,
+                           "logo": _logo_url(dom), "favicon": _logo_url(dom), "credible": False})
+    out = credible[:10]
+    if len(out) < 8:
+        out += others[: 8 - len(out)]
+    return out[:12]
+
+
+async def _claude_json(prompt: str) -> Optional[dict]:
+    try:
+        chat = new_chat("sector-" + str(uuid.uuid4())).with_model("anthropic", "claude-sonnet-4-6")
+        text = ""
+        async for ev in chat.stream_message(UserMessage(text=prompt)):
+            if isinstance(ev, TextDelta):
+                text += ev.content
+            elif isinstance(ev, StreamDone):
+                break
+        text = text.strip()
+        if text.startswith("```"):
+            text = text.strip("`")
+            if text.startswith("json"):
+                text = text[4:]
+        return json.loads(text)
+    except Exception:
+        logger.exception("claude json gen failed")
+        return None
+
+
+async def _ensure_sector_deepdive(slug: str, force: bool = False) -> dict:
+    s = SECTORS[slug]
+    doc = await db.sector_content.find_one({"_id": slug})
+    if doc and not force:
+        gen = doc.get("generated_at", "")
+        try:
+            if (datetime.now(timezone.utc) - datetime.fromisoformat(gen)) < timedelta(days=7):
+                return doc
+        except Exception:
+            pass
+    prompt = (
+        f"You are briefing on the '{s['name']}' segment for a premium advisory site. Return STRICT JSON only, factual and evergreen "
+        f"(no fabricated live prices or dated figures presented as current). Keys:\n"
+        "overview: 45-70 word plain-English summary;\n"
+        "technology: 45-70 words on how the core technology/method works and where it stands in maturity;\n"
+        "key_oems: array of 5 objects {name, note(6-12 words)} — real, well-known manufacturers/players/firms in this segment;\n"
+        "competition: array of 4 objects {name, note} — key competitive dynamics or leading companies;\n"
+        "competing_tech: 40-60 words on rival/adjacent technologies or approaches;\n"
+        "leader: 30-50 words on which technology/player is currently leading the pack and why;\n"
+        "market_valuation: 35-55 words on market size/growth in qualitative terms (avoid stating a precise current figure as fact);\n"
+        "financing: 45-70 words on how companies/projects in this segment are typically financed (debt, equity, blended capital, green bonds, viability-gap/grants, InvITs) with India context;\n"
+        "tech_automation: 45-70 words on how technology, automation and machine intelligence are improving efficiency, cost and decision-making in this segment — name specific automation/efficiency levers;\n"
+        "efficiency: array of 3-4 short strings — the highest-impact automation & efficiency-improvement areas here;\n"
+        "use_cases: array of 3 objects {name, note(10-18 words)} — real, live examples/use cases that illustrate impact.\n"
+        "Output JSON only."
+    )
+    data = await _claude_json(prompt)
+    if not data:
+        return doc or {"_id": slug, "overview": s["blurb"]}
+    data["_id"] = slug
+    data["generated_at"] = now_iso()
+    await db.sector_content.replace_one({"_id": slug}, data, upsert=True)
+    return data
+
+
+async def _generate_sk_insight(slug: str):
+    s = SECTORS[slug]
+    prompt = (
+        f"Write ONE sharp 'SK Insight' (Sudarshan Karweer's voice — ex-EY Big 4 advisor, $2B+ debt syndication, "
+        f"renewables/storage/hydrogen/climate-finance) about the {s['name']} sector: a timely, factual, opinionated take a founder/CXO can act on. "
+        f"60-90 words. Return STRICT JSON: {{\"insight\": string, \"title\": 6-10 words}}. JSON only."
+    )
+    data = await _claude_json(prompt)
+    if not data or not data.get("insight"):
+        return
+    await db.sector_insights.insert_one({
+        "id": str(uuid.uuid4()), "slug": slug, "title": data.get("title", "SK Insight"),
+        "insight": data["insight"], "date": datetime.now(timezone.utc).date().isoformat(), "created_at": now_iso()})
+
+
+async def _refresh_sector_news():
+    for slug, s in SECTORS.items():
+        items = await asyncio.to_thread(_fetch_sector_news, s["query"])
+        if items:
+            await db.sector_news.replace_one({"_id": slug},
+                {"_id": slug, "items": items, "updated_at": now_iso()}, upsert=True)
+
+
+@api_router.get("/sectors")
+async def list_sectors():
+    return [{"slug": k, "name": v["name"], "tag": v["tag"], "blurb": v["blurb"]} for k, v in SECTORS.items()]
+
+
+@api_router.get("/sectors/{slug}")
+async def get_sector(slug: str):
+    if slug not in SECTORS:
+        raise HTTPException(status_code=404, detail="Unknown sector")
+    s = SECTORS[slug]
+    deep = await _ensure_sector_deepdive(slug)
+    deep.pop("_id", None)
+    if isinstance(deep.get("key_oems"), list):
+        deep["key_oems"] = _enrich_cards(deep["key_oems"])
+    if isinstance(deep.get("competition"), list):
+        deep["competition"] = _enrich_cards(deep["competition"])
+    news = await db.sector_news.find_one({"_id": slug}, {"_id": 0})
+    if not news:
+        asyncio.create_task(_refresh_sector_news())
+    insights = await db.sector_insights.find({"slug": slug}, {"_id": 0}).sort("created_at", -1).to_list(8)
+    try:
+        videos = curator.library(s["video_topic"], 12)
+    except Exception:
+        videos = []
+    return {"slug": slug, "name": s["name"], "tag": s["tag"], "blurb": s["blurb"], "video_topic": s["video_topic"],
+            "deepdive": deep, "news": (news or {}).get("items", []), "news_updated": (news or {}).get("updated_at", ""),
+            "insights": insights, "videos": videos}
+
+
+# ---------------- Climate-Finance Agencies & OEM / Competitor deep-dive pages ----------------
+AGENCIES = {
+    # Multilateral Development Banks
+    "world-bank": {"name": "World Bank (IBRD)", "tag": "MDB", "group": "Multilateral Development Banks", "domain": "worldbank.org",
+                   "query": "World Bank India climate finance renewable", "blurb": "The largest development lender — concessional capital and policy muscle for climate & infrastructure."},
+    "ifc": {"name": "IFC (World Bank Group)", "tag": "MDB", "group": "Multilateral Development Banks", "domain": "ifc.org",
+            "query": "IFC India green bonds private sector climate", "blurb": "The private-sector arm of the World Bank — equity, debt and green bonds for business."},
+    "adb": {"name": "Asian Development Bank", "tag": "MDB", "group": "Multilateral Development Banks", "domain": "adb.org",
+            "query": "Asian Development Bank India energy climate finance", "blurb": "Asia-Pacific's development bank — a cornerstone lender for India's energy transition."},
+    "aiib": {"name": "AIIB", "tag": "MDB", "group": "Multilateral Development Banks", "domain": "aiib.org",
+             "query": "AIIB India infrastructure renewable energy loan", "blurb": "The Asian Infrastructure Investment Bank — infrastructure and clean-energy capital across Asia."},
+    "ndb": {"name": "New Development Bank (BRICS)", "tag": "MDB", "group": "Multilateral Development Banks", "domain": "ndb.int",
+            "query": "New Development Bank BRICS India infrastructure loan", "blurb": "The BRICS bank — sustainable infrastructure funding for member economies including India."},
+    "imf": {"name": "IMF", "tag": "MDB", "group": "Multilateral Development Banks", "domain": "imf.org",
+            "query": "IMF India climate macroeconomic resilience", "blurb": "The macro anchor — surveillance, resilience finance and climate-macro guidance."},
+    # Global Climate Funds
+    "gcf": {"name": "Green Climate Fund", "tag": "Climate Fund", "group": "Global Climate Funds", "domain": "greenclimate.fund",
+            "query": "Green Climate Fund India project accredited", "blurb": "The world's largest dedicated climate fund — mitigation and adaptation grants & concessional loans."},
+    "gef": {"name": "Global Environment Facility", "tag": "Climate Fund", "group": "Global Climate Funds", "domain": "thegef.org",
+            "query": "Global Environment Facility India grant climate", "blurb": "Grants for biodiversity, climate and land — often the catalytic first cheque."},
+    "cif": {"name": "Climate Investment Funds", "tag": "Climate Fund", "group": "Global Climate Funds", "domain": "cif.org",
+            "query": "Climate Investment Funds India clean technology", "blurb": "Concessional capital channelled via MDBs to de-risk clean-tech and coal-transition."},
+    # Bilateral & DFI Partners
+    "kfw": {"name": "KfW (Germany)", "tag": "DFI", "group": "Bilateral & DFI Partners", "domain": "kfw.de",
+            "query": "KfW India solar renewable green energy loan", "blurb": "Germany's development bank — a major concessional lender to India's solar & green corridors."},
+    "jica": {"name": "JICA (Japan)", "tag": "DFI", "group": "Bilateral & DFI Partners", "domain": "jica.go.jp",
+             "query": "JICA India infrastructure metro clean energy loan", "blurb": "Japan's agency — long-tenor, low-cost yen loans for India's infrastructure & energy."},
+    "afd": {"name": "AFD (France)", "tag": "DFI", "group": "Bilateral & DFI Partners", "domain": "afd.fr",
+            "query": "AFD Agence Francaise India climate energy", "blurb": "France's development agency — climate-focused sovereign and sub-sovereign lending."},
+    "dfc": {"name": "US DFC", "tag": "DFI", "group": "Bilateral & DFI Partners", "domain": "dfc.gov",
+            "query": "US DFC India renewable energy investment", "blurb": "America's development finance institution — equity, debt and guarantees for clean energy."},
+    "giz": {"name": "GIZ (Germany)", "tag": "DFI", "group": "Bilateral & DFI Partners", "domain": "giz.de",
+            "query": "GIZ India energy climate technical cooperation", "blurb": "Germany's technical-cooperation agency — capacity, policy and pilot programmes."},
+    "fmo": {"name": "FMO (Netherlands)", "tag": "DFI", "group": "Bilateral & DFI Partners", "domain": "fmo.nl",
+            "query": "FMO India renewable energy investment fund", "blurb": "The Dutch entrepreneurial development bank — private-sector clean-energy investment."},
+    "bii": {"name": "British International Investment", "tag": "DFI", "group": "Bilateral & DFI Partners", "domain": "bii.co.uk",
+            "query": "British International Investment India climate renewable", "blurb": "The UK's DFI — patient equity and debt for India's climate and infrastructure."},
+    # India Funds & Agencies
+    "niif": {"name": "NIIF", "tag": "India Fund", "group": "India Funds & Agencies", "domain": "niifindia.in",
+             "query": "NIIF National Investment Infrastructure Fund India", "blurb": "India's sovereign-anchored infrastructure fund platform — equity for scale."},
+    "ireda": {"name": "IREDA", "tag": "India Fund", "group": "India Funds & Agencies", "domain": "ireda.in",
+              "query": "IREDA renewable energy financing India loan", "blurb": "India's dedicated green-energy NBFC — the go-to lender for RE projects."},
+    "sidbi": {"name": "SIDBI", "tag": "India Fund", "group": "India Funds & Agencies", "domain": "sidbi.in",
+              "query": "SIDBI MSME green finance India", "blurb": "India's MSME development bank — green lines and enterprise finance."},
+    "nabard": {"name": "NABARD", "tag": "India Fund", "group": "India Funds & Agencies", "domain": "nabard.org",
+               "query": "NABARD rural climate adaptation fund India", "blurb": "India's rural development bank — climate adaptation and agri-green finance."},
+    "pfc": {"name": "Power Finance Corporation", "tag": "India Fund", "group": "India Funds & Agencies", "domain": "pfcindia.com",
+            "query": "Power Finance Corporation PFC India renewable loan", "blurb": "India's power-sector financier — scaling into large renewable portfolios."},
+    "rec": {"name": "REC Limited", "tag": "India Fund", "group": "India Funds & Agencies", "domain": "recindia.nic.in",
+            "query": "REC Limited India power renewable financing", "blurb": "A leading power-infrastructure NBFC — growing green and transmission finance."},
+}
+
+OEMS = {
+    # Battery & storage
+    "catl": {"name": "CATL", "tag": "Battery / Storage", "domain": "catl.com", "video_topic": "energy",
+             "query": "CATL battery storage cells India", "blurb": "The world's largest battery-cell maker — LFP and grid-scale storage leader."},
+    "byd": {"name": "BYD", "tag": "Battery / Storage", "domain": "byd.com", "video_topic": "energy",
+            "query": "BYD battery storage India electric", "blurb": "Vertically-integrated batteries, storage and EVs at massive scale."},
+    "tesla-energy": {"name": "Tesla Energy", "tag": "Battery / Storage", "domain": "tesla.com", "video_topic": "energy",
+                     "query": "Tesla Megapack Powerwall energy storage", "blurb": "Megapack & Powerwall — software-defined grid and home storage."},
+    "fluence": {"name": "Fluence", "tag": "Battery / Storage", "domain": "fluenceenergy.com", "video_topic": "energy",
+                "query": "Fluence energy storage India grid", "blurb": "Grid-scale storage systems and AI-driven optimisation software."},
+    "exide": {"name": "Exide Industries", "tag": "Battery / Storage", "domain": "exideindustries.com", "video_topic": "energy",
+              "query": "Exide Industries lithium battery India gigafactory", "blurb": "India's storage incumbent — building lithium-ion gigafactory capacity."},
+    "amara-raja": {"name": "Amara Raja", "tag": "Battery / Storage", "domain": "amararaja.com", "video_topic": "energy",
+                   "query": "Amara Raja battery gigafactory India lithium", "blurb": "Indian battery major moving from lead-acid into lithium giga-scale."},
+    # Solar
+    "waaree": {"name": "Waaree Energies", "tag": "Solar", "domain": "waaree.com", "video_topic": "energy",
+               "query": "Waaree Energies solar module India manufacturing", "blurb": "India's largest solar-module manufacturer by capacity."},
+    "vikram-solar": {"name": "Vikram Solar", "tag": "Solar", "domain": "vikramsolar.com", "video_topic": "energy",
+                     "query": "Vikram Solar module manufacturing India", "blurb": "Leading Indian module maker with global project footprint."},
+    "adani-green": {"name": "Adani Green Energy", "tag": "Solar / Developer", "domain": "adanigreenenergy.com", "video_topic": "energy",
+                    "query": "Adani Green Energy renewable India capacity", "blurb": "One of the world's largest solar-plus-wind developers."},
+    "first-solar": {"name": "First Solar", "tag": "Solar", "domain": "firstsolar.com", "video_topic": "energy",
+                    "query": "First Solar thin film India Tamil Nadu factory", "blurb": "Thin-film specialist with a large India manufacturing base."},
+    "longi": {"name": "LONGi", "tag": "Solar", "domain": "longi.com", "video_topic": "energy",
+              "query": "LONGi solar wafer module efficiency", "blurb": "Global wafer & module leader pushing cell-efficiency records."},
+    # Wind
+    "suzlon": {"name": "Suzlon", "tag": "Wind", "domain": "suzlon.com", "video_topic": "energy",
+               "query": "Suzlon wind turbine India order book", "blurb": "India's flagship wind-turbine maker with a large installed fleet."},
+    "inox-wind": {"name": "Inox Wind", "tag": "Wind", "domain": "inoxwind.com", "video_topic": "energy",
+                  "query": "Inox Wind turbine India manufacturing", "blurb": "Indian turbine maker scaling larger-rotor platforms."},
+    "vestas": {"name": "Vestas", "tag": "Wind", "domain": "vestas.com", "video_topic": "energy",
+               "query": "Vestas wind turbine India order", "blurb": "The global wind leader — turbines, service and digital optimisation."},
+    "siemens-gamesa": {"name": "Siemens Gamesa", "tag": "Wind", "domain": "siemensgamesa.com", "video_topic": "energy",
+                       "query": "Siemens Gamesa wind India offshore", "blurb": "Onshore & offshore turbines with a strong India manufacturing line."},
+    # Hydrogen & developers
+    "ohmium": {"name": "Ohmium", "tag": "Green Hydrogen", "domain": "ohmium.com", "video_topic": "energy",
+               "query": "Ohmium green hydrogen electrolyser India", "blurb": "PEM-electrolyser maker manufacturing in India for global markets."},
+    "reliance-newenergy": {"name": "Reliance New Energy", "tag": "Green Hydrogen", "domain": "ril.com", "video_topic": "energy",
+                           "query": "Reliance green hydrogen giga factory Jamnagar", "blurb": "Building an integrated solar-to-hydrogen giga-complex at Jamnagar."},
+    "tata-power": {"name": "Tata Power", "tag": "Developer", "domain": "tatapower.com", "video_topic": "energy",
+                   "query": "Tata Power renewable solar India capacity", "blurb": "Integrated utility scaling solar, rooftop, storage and manufacturing."},
+    "renew": {"name": "ReNew", "tag": "Developer", "domain": "renew.com", "video_topic": "energy",
+              "query": "ReNew Power renewable India capacity", "blurb": "One of India's largest independent renewable-power producers."},
+}
+
+ENTITY_MAPS = {"agency": AGENCIES, "oem": OEMS}
+
+
+def _entity_map(kind: str) -> dict:
+    return ENTITY_MAPS[kind]
+
+
+def _agency_prompt(ent: dict) -> str:
+    return (
+        f"You are briefing on '{ent['name']}' — a climate/development-finance institution — for a premium advisory site "
+        f"focused on India & Asia. Return STRICT JSON only, factual and evergreen (do NOT name specific current office-holders; "
+        f"describe roles generally). Keys:\n"
+        "overview: 45-70 word plain-English summary of what it is and its role in climate/development finance;\n"
+        "mandate: 40-60 words on its mission and climate/energy focus;\n"
+        "india_presence: 45-70 words on its India & Asia presence — where it is based, how it operates in India, and its focus here;\n"
+        "key_people: array of 3-4 objects {role, note(8-16 words)} — describe leadership ROLES generally (e.g. 'Country Director, India'), NOT names;\n"
+        "focus_areas: array of 5 short strings — its main sectors/themes;\n"
+        "notable_programs: array of 3 objects {name, note(10-18 words)} — real flagship funds/programmes relevant to India/Asia;\n"
+        "financing_instruments: array of 4 short strings — the instruments it deploys (e.g. concessional loans, green bonds, guarantees, equity);\n"
+        "how_to_engage: 35-55 words on how a founder/CXO or developer can access or partner with it.\n"
+        "Output JSON only."
+    )
+
+
+def _oem_prompt(ent: dict) -> str:
+    return (
+        f"You are briefing on '{ent['name']}' — a manufacturer/company in clean energy — for a premium advisory site. "
+        f"Return STRICT JSON only, factual and evergreen (no fabricated dated figures presented as current). Keys:\n"
+        "overview: 45-70 word plain-English summary of the company and what it makes;\n"
+        "technology: 45-70 words on its core products and technology edge;\n"
+        "manufacturing_capacity: 40-60 words on its manufacturing footprint and scale in qualitative terms;\n"
+        "locations: array of 4-6 short strings — key manufacturing / HQ locations (India emphasised where relevant);\n"
+        "sales_presence: 35-55 words on its India & global sales/market presence;\n"
+        "recent_focus: array of 3 objects {title, note(10-18 words)} — recent expansion/launch themes (evergreen framing);\n"
+        "competition: array of 4 objects {name, note(6-12 words)} — its key competitors;\n"
+        "tech_automation: 45-70 words on how automation, machine intelligence and digital tech drive efficiency and cost in its operations;\n"
+        "market_position: 30-50 words on where it stands versus peers.\n"
+        "Output JSON only."
+    )
+
+
+async def _ensure_entity_profile(kind: str, slug: str, force: bool = False) -> dict:
+    ent = _entity_map(kind)[slug]
+    key = f"{kind}:{slug}"
+    doc = await db.entity_content.find_one({"_id": key})
+    if doc and not force:
+        try:
+            if (datetime.now(timezone.utc) - datetime.fromisoformat(doc.get("generated_at", ""))) < timedelta(days=7):
+                return doc
+        except Exception:
+            pass
+    prompt = _agency_prompt(ent) if kind == "agency" else _oem_prompt(ent)
+    data = await _claude_json(prompt)
+    if not data:
+        return doc or {"_id": key, "overview": ent["blurb"]}
+    data["_id"] = key
+    data["generated_at"] = now_iso()
+    await db.entity_content.replace_one({"_id": key}, data, upsert=True)
+    return data
+
+
+async def _generate_entity_insight(kind: str, slug: str):
+    ent = _entity_map(kind)[slug]
+    today = datetime.now(timezone.utc).date().isoformat()
+    if await db.entity_insights.find_one({"kind": kind, "slug": slug, "date": today}):
+        return
+    label = "climate/development-finance institution" if kind == "agency" else "clean-energy manufacturer"
+    prompt = (
+        f"Write ONE sharp 'SK Insight' (Sudarshan Karweer's voice — ex-EY Big 4 advisor, $2B+ debt syndication, "
+        f"renewables/storage/hydrogen/climate-finance) about {ent['name']} ({label}) with an India/Asia lens: a timely, factual, "
+        f"opinionated take a founder/CXO can act on. 60-90 words. Return STRICT JSON: {{\"insight\": string, \"title\": 6-10 words}}. JSON only."
+    )
+    data = await _claude_json(prompt)
+    if not data or not data.get("insight"):
+        return
+    await db.entity_insights.insert_one({
+        "id": str(uuid.uuid4()), "kind": kind, "slug": slug, "title": data.get("title", "SK Insight"),
+        "insight": data["insight"], "date": today, "created_at": now_iso()})
+
+
+async def _refresh_entity_news(kind: str):
+    for slug, ent in _entity_map(kind).items():
+        items = await asyncio.to_thread(_fetch_sector_news, ent["query"])
+        if items:
+            await db.entity_news.replace_one({"_id": f"{kind}:{slug}"},
+                {"_id": f"{kind}:{slug}", "items": items, "updated_at": now_iso()}, upsert=True)
+
+
+async def _entity_detail(kind: str, slug: str) -> dict:
+    ent = _entity_map(kind)[slug]
+    key = f"{kind}:{slug}"
+    profile = await _ensure_entity_profile(kind, slug)
+    profile = {k: v for k, v in profile.items() if k not in ("_id", "generated_at")}
+    for _cf in ("competition", "key_oems"):
+        if isinstance(profile.get(_cf), list):
+            profile[_cf] = _enrich_cards(profile[_cf])
+    news = await db.entity_news.find_one({"_id": key}, {"_id": 0})
+    if not news:
+        asyncio.create_task(_refresh_entity_news(kind))
+    asyncio.create_task(_generate_entity_insight(kind, slug))
+    insights = await db.entity_insights.find({"kind": kind, "slug": slug}, {"_id": 0}).sort("created_at", -1).to_list(8)
+    try:
+        videos = curator.library(ent.get("video_topic", "climate-finance"), 8)
+    except Exception:
+        videos = []
+    return {"slug": slug, "name": ent["name"], "tag": ent["tag"], "group": ent.get("group", ""),
+            "blurb": ent["blurb"], "logo": _logo_url(ent['domain']), "kind": kind,
+            "video_topic": ent.get("video_topic", "climate-finance" if kind == "agency" else "energy"),
+            "profile": profile, "news": (news or {}).get("items", []), "news_updated": (news or {}).get("updated_at", ""),
+            "insights": insights, "videos": videos}
+
+
+@api_router.get("/agencies")
+async def list_agencies():
+    groups = {}
+    for k, v in AGENCIES.items():
+        groups.setdefault(v["group"], []).append({"slug": k, "name": v["name"], "tag": v["tag"], "blurb": v["blurb"],
+            "logo": _logo_url(v['domain'])})
+    order = ["Multilateral Development Banks", "Global Climate Funds", "Bilateral & DFI Partners", "India Funds & Agencies"]
+    return [{"group": g, "items": groups[g]} for g in order if g in groups]
+
+
+@api_router.get("/agencies/{slug}")
+async def get_agency(slug: str):
+    if slug not in AGENCIES:
+        raise HTTPException(status_code=404, detail="Unknown agency")
+    return await _entity_detail("agency", slug)
+
+
+@api_router.get("/oems")
+async def list_oems():
+    groups = {}
+    for k, v in OEMS.items():
+        groups.setdefault(v["tag"], []).append({"slug": k, "name": v["name"], "tag": v["tag"], "blurb": v["blurb"],
+            "logo": _logo_url(v['domain'])})
+    return [{"group": g, "items": items} for g, items in groups.items()]
+
+
+@api_router.get("/oems/{slug}")
+async def get_oem(slug: str):
+    if slug not in OEMS:
+        raise HTTPException(status_code=404, detail="Unknown OEM")
+    return await _entity_detail("oem", slug)
+
+
+# ---- Company logos (India + global players) & clickable "box" topic detail ----
+COMPANY_DOMAINS = {
+    "tesla": "tesla.com", "byd": "byd.com", "catl": "catl.com", "exide": "exideindustries.com",
+    "amara raja": "amararaja.com", "fluence": "fluenceenergy.com", "lg energy": "lgensol.com",
+    "lg chem": "lgchem.com", "panasonic": "panasonic.com", "samsung sdi": "samsungsdi.com",
+    "northvolt": "northvolt.com", "waaree": "waaree.com", "vikram solar": "vikramsolar.com",
+    "adani green": "adanigreenenergy.com", "adani solar": "adanisolar.com", "adani": "adani.com",
+    "first solar": "firstsolar.com", "longi": "longi.com", "jinko": "jinkosolar.com",
+    "trina": "trinasolar.com", "ja solar": "jasolar.com", "canadian solar": "canadiansolar.com",
+    "renew": "renew.com", "tata power": "tatapower.com", "tata": "tata.com", "reliance": "ril.com",
+    "jsw": "jsw.in", "suzlon": "suzlon.com", "inox": "inoxwind.com", "vestas": "vestas.com",
+    "siemens gamesa": "siemensgamesa.com", "siemens": "siemens.com", "ge vernova": "gevernova.com",
+    "general electric": "ge.com", "goldwind": "goldwind.com", "envision": "envision-group.com",
+    "nordex": "nordex-online.com", "ohmium": "ohmium.com", "ntpc": "ntpc.co.in", "sjvn": "sjvn.nic.in",
+    "nhpc": "nhpcindia.com", "power grid": "powergrid.in", "greenko": "greenkogroup.com",
+    "avaada": "avaada.com", "acme": "acme.in", "azure power": "azurepower.com",
+    "hero future": "herofutureenergies.com", "sembcorp": "sembcorp.com", "engie": "engie.com",
+    "edf": "edf.fr", "orsted": "orsted.com", "iberdrola": "iberdrola.com", "brookfield": "brookfield.com",
+    "sungrow": "sungrowpower.com", "huawei": "huawei.com", "sma": "sma.de", "hitachi": "hitachienergy.com",
+    "abb": "abb.com", "schneider": "se.com", "bhel": "bhel.com", "l&t": "larsentoubro.com",
+    "larsen": "larsentoubro.com", "gail": "gail.co.in", "ongc": "ongcindia.com", "indian oil": "iocl.com",
+    "bp ": "bp.com", "shell": "shell.com", "totalenergies": "totalenergies.com", "acwa": "acwapower.com",
+    "masdar": "masdar.ae", "premier energies": "premierenergies.com", "rec group": "recgroup.com",
+    "world bank": "worldbank.org", "ifc": "ifc.org", "adb": "adb.org", "aiib": "aiib.org",
+    "green climate": "greenclimate.fund", "kfw": "kfw.de", "jica": "jica.go.jp",
+}
+
+
+def _company_logo(name: str):
+    if not name:
+        return None
+    n = " " + name.lower() + " "
+    for k, dom in COMPANY_DOMAINS.items():
+        if k in n:
+            return {"logo": _logo_url(dom), "favicon": _logo_url(dom)}
+    import re
+    token = re.sub(r"[^a-z0-9]", "", name.lower().split("(")[0].split(",")[0].split("-")[0].split(" ")[0])
+    if len(token) >= 4:
+        return {"logo": _logo_url(f"{token}.com"), "favicon": _logo_url(f"{token}.com")}
+    return None
+
+
+def _enrich_cards(items):
+    if not isinstance(items, list):
+        return items
+    out = []
+    for it in items:
+        if isinstance(it, dict) and it.get("name") and not it.get("logo"):
+            lg = _company_logo(it["name"])
+            if lg:
+                it = {**it, **lg}
+        out.append(it)
+    return out
+
+
+async def _ensure_topic_profile(name: str, context: str) -> dict:
+    import hashlib
+    key = hashlib.md5(f"{name}|{context}".lower().encode()).hexdigest()
+    doc = await db.topic_content.find_one({"_id": key})
+    if doc:
+        try:
+            if (datetime.now(timezone.utc) - datetime.fromisoformat(doc.get("generated_at", ""))) < timedelta(days=7):
+                return doc
+        except Exception:
+            pass
+    ctx = f" in the context of {context}" if context else ""
+    prompt = (
+        f"Brief on '{name}'{ctx} for a premium India/Asia advisory site. STRICT JSON only, factual and "
+        f"evergreen (no fabricated dated figures presented as current). Keys:\n"
+        "overview: 55-85 word plain-English summary;\n"
+        "details: array of 4-6 objects {point(3-6 words), note(12-22 words)} spanning technology, financing, "
+        "market position, India relevance, and automation/efficiency;\n"
+        "sk_take: 60-90 words in Sudarshan Karweer's opinionated advisory voice (ex-EY Big 4, $2B+ debt "
+        "syndication) that a founder/CXO can act on.\n"
+        "Output JSON only."
+    )
+    data = await _claude_json(prompt)
+    if not data:
+        return doc or {"_id": key, "overview": ""}
+    data["_id"] = key
+    data["generated_at"] = now_iso()
+    await db.topic_content.replace_one({"_id": key}, data, upsert=True)
+    return data
+
+
+@api_router.get("/topic")
+async def get_topic(name: str, context: str = "", topic: str = "energy"):
+    prof = await _ensure_topic_profile(name, context)
+    prof = {k: v for k, v in prof.items() if k not in ("_id", "generated_at")}
+    q = f"{name} {context}".strip()
+    news = await asyncio.to_thread(_fetch_sector_news, q)
+    blogs = await asyncio.to_thread(_fetch_sector_news, f"{q} analysis OR opinion OR outlook OR blog")
+    try:
+        videos = curator.library(topic, 6)
+    except Exception:
+        videos = []
+    lg = _company_logo(name) or {}
+    return {"name": name, "context": context, **prof,
+            "logo": lg.get("logo"), "favicon": lg.get("favicon"),
+            "news": news, "blogs": blogs, "videos": videos}
+
+
+NEWS_REFRESH_HOURS = 4
+
+
+_LOGO_CACHE: dict = {}
+_LOGO_PLACEHOLDER = _base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+)
+
+
+@api_router.get("/logo")
+async def get_logo(domain: str):
+    dom = (domain or "").strip().lower().replace("https://", "").replace("http://", "").strip("/")
+    if not dom:
+        return Response(content=_LOGO_PLACEHOLDER, media_type="image/png")
+    if dom in _LOGO_CACHE:
+        b, ct = _LOGO_CACHE[dom]
+        return Response(content=b, media_type=ct, headers={"Cache-Control": "public, max-age=604800"})
+    sources = [
+        f"https://logo.clearbit.com/{dom}?size=64",
+        f"https://www.google.com/s2/favicons?domain={dom}&sz=64",
+        f"https://icons.duckduckgo.com/ip3/{dom}.ico",
+    ]
+    for url in sources:
+        try:
+            r = await asyncio.to_thread(lambda u=url: requests.get(u, timeout=8, headers={"User-Agent": "Mozilla/5.0"}))
+            if r.status_code == 200 and r.content and len(r.content) > 120:
+                ct = r.headers.get("content-type", "image/png")
+                if "image" not in ct:
+                    ct = "image/png"
+                _LOGO_CACHE[dom] = (r.content, ct)
+                return Response(content=r.content, media_type=ct, headers={"Cache-Control": "public, max-age=604800"})
+        except Exception:
+            continue
+    _LOGO_CACHE[dom] = (_LOGO_PLACEHOLDER, "image/png")
+    return Response(content=_LOGO_PLACEHOLDER, media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+
+
+async def _refresh_all_news_if_due():
+    meta = await db.app_meta.find_one({"_id": "news_refresh"}) or {}
+    try:
+        due = (datetime.now(timezone.utc) - datetime.fromisoformat(meta.get("last", ""))) >= timedelta(hours=NEWS_REFRESH_HOURS)
+    except Exception:
+        due = True
+    if not due:
+        return
+    try:
+        await _refresh_sector_news()
+        await _refresh_entity_news("agency")
+        await _refresh_entity_news("oem")
+        await db.app_meta.update_one({"_id": "news_refresh"}, {"$set": {"last": now_iso()}}, upsert=True)
+    except Exception:
+        logger.exception("news refresh failed")
+
+
+async def _warm_entities():
+    """One-time background warm of sector/agency/OEM profiles so pages load instantly.
+    Cached in Mongo for 7 days, so this is cheap and idempotent across restarts."""
+    await asyncio.sleep(5)
+    try:
+        sem = asyncio.Semaphore(3)
+
+        async def _one(coro):
+            async with sem:
+                try:
+                    await coro
+                except Exception:
+                    pass
+
+        tasks = []
+        for slug in SECTORS:
+            tasks.append(_one(_ensure_sector_deepdive(slug)))
+        for slug in AGENCIES:
+            tasks.append(_one(_ensure_entity_profile("agency", slug)))
+        for slug in OEMS:
+            tasks.append(_one(_ensure_entity_profile("oem", slug)))
+        await asyncio.gather(*tasks)
+        logger.info("entity profile warm complete")
+    except Exception:
+        logger.exception("entity warm failed")
+
+
 @api_router.post("/admin/home/regenerate")
 async def admin_home_regenerate(request: Request, admin: dict = Depends(require_admin)):
     data = await _refresh_home_content(force=True)
@@ -2542,7 +3191,7 @@ class NewsletterIn(BaseModel):
 
 @api_router.post("/newsletter")
 async def subscribe(body: NewsletterIn, request: Request):
-    verify_captcha(body.captcha_token, _client_ip(request))
+    verify_captcha(body.captcha_token, _client_ip(request), request)
     email = body.email.lower()
     if await db.subscribers.find_one({"email": email}):
         return {"success": True, "message": "You're already subscribed — thank you!"}
@@ -2771,7 +3420,7 @@ class BookIn(BaseModel):
 
 @api_router.post("/consultation/book")
 async def book_consultation(body: BookIn, request: Request, background_tasks: BackgroundTasks):
-    verify_captcha(body.captcha_token, _client_ip(request))
+    verify_captcha(body.captcha_token, _client_ip(request), request)
     pkg = PACKAGES.get(body.package_id)
     if not pkg:
         raise HTTPException(status_code=400, detail="Invalid package")
@@ -2851,23 +3500,130 @@ async def verify_payment(body: PaymentVerifyIn, request: Request, background_tas
             "razorpay_signature": body.razorpay_signature})
     except Exception:
         raise HTTPException(status_code=400, detail="Payment could not be verified.")
-    upd = {"status": "pending_confirmation", "paid": True,
-           "razorpay_payment_id": body.razorpay_payment_id, "paid_at": now_iso()}
-    await db.consultations.update_one({"id": body.booking_id}, {"$set": upd})
-    b.update(upd)
-    background_tasks.add_task(send_payment_receipt_email, b["email"], b)
-    admin_to = os.environ.get("BOOKING_ADMIN_EMAIL") or os.environ.get("ADMIN_EMAIL")
-    if admin_to:
-        background_tasks.add_task(send_new_booking_alert_email, admin_to, b)
+    await _mark_booking_paid(b, body.razorpay_payment_id)
     return {"success": True, "status": "pending_confirmation",
             "message": "Payment received! Your slot is reserved and pending confirmation — we'll confirm your session shortly."}
 
 
 @api_router.post("/payments/abandon/{bid}")
 async def abandon_payment(bid: str):
-    """Release a slot if the client closes checkout without paying."""
-    await db.consultations.delete_one({"id": bid, "status": "pending_payment", "paid": {"$ne": True}})
+    """Client left checkout without paying. Keep the slot held and timestamp it for the nudge; the scheduler releases it if still unpaid after 24h."""
+    await db.consultations.update_one(
+        {"id": bid, "status": "pending_payment", "paid": {"$ne": True}},
+        {"$set": {"abandoned_at": now_iso()}})
     return {"success": True}
+
+
+@api_router.get("/payments/resume/{bid}")
+async def resume_payment(bid: str):
+    """Reopen checkout for an unpaid booking (used by the abandoned-cart nudge link)."""
+    b = await db.consultations.find_one({"id": bid}, {"_id": 0})
+    if not b or b.get("paid") or b.get("status") != "pending_payment":
+        raise HTTPException(status_code=404, detail="This booking is no longer awaiting payment.")
+    return {"booking_id": bid, "order_id": b.get("razorpay_order_id"), "amount": b.get("amount_paise"),
+            "currency": "INR", "key_id": os.environ.get("RAZORPAY_KEY_ID", ""), "package": b.get("package"),
+            "slot_date": b.get("slot_date"), "slot_time": b.get("slot_time"),
+            "breakdown": {"base": b.get("amount"), "gst_pct": b.get("gst_pct", GST_PCT),
+                          "gst_amount": b.get("gst_amount"), "total": b.get("amount_total")},
+            "prefill": {"name": b.get("name"), "email": b.get("email"), "contact": b.get("phone", "")}}
+
+
+# ---------------- GST tax invoice config + numbering ----------------
+def _gst_config() -> dict:
+    gstin = os.environ.get("GST_GSTIN", "").strip()
+    return {
+        "enabled": bool(gstin), "gstin": gstin,
+        "legal_name": os.environ.get("GST_LEGAL_NAME", "").strip(),
+        "address": os.environ.get("GST_ADDRESS", "").strip(),
+        "state": os.environ.get("GST_STATE", "").strip(),
+        "state_code": os.environ.get("GST_STATE_CODE", "").strip(),
+        "sac": os.environ.get("GST_SAC", "998311").strip() or "998311",
+        "prefix": os.environ.get("GST_INVOICE_PREFIX", "").strip(),
+    }
+
+
+async def _next_invoice_no() -> str:
+    doc = await db.app_meta.find_one_and_update(
+        {"_id": "invoice_seq"}, {"$inc": {"n": 1}}, upsert=True, return_document=True)
+    n = (doc or {}).get("n", 1)
+    return f"{_gst_config()['prefix']}{n:05d}"
+
+
+async def _mark_booking_paid(b: dict, payment_id: str) -> bool:
+    """Idempotently mark a booking paid, generate its invoice, and fire receipt/invoice/alert emails."""
+    if not b or b.get("paid"):
+        return False
+    gst = _gst_config()
+    upd = {"status": "pending_confirmation", "paid": True, "razorpay_payment_id": payment_id, "paid_at": now_iso()}
+    if gst["enabled"]:
+        upd["invoice_no"] = await _next_invoice_no()
+        upd["invoice_at"] = now_iso()
+    res = await db.consultations.update_one({"id": b["id"], "paid": {"$ne": True}}, {"$set": upd})
+    if res.modified_count == 0:
+        return False  # another path (webhook/verify) already finalized it
+    b.update(upd)
+    asyncio.create_task(asyncio.to_thread(send_payment_receipt_email, b["email"], b))
+    if gst["enabled"]:
+        asyncio.create_task(asyncio.to_thread(send_gst_invoice_email, b["email"], b, gst))
+    admin_to = os.environ.get("BOOKING_ADMIN_EMAIL") or os.environ.get("ADMIN_EMAIL")
+    if admin_to:
+        asyncio.create_task(asyncio.to_thread(send_new_booking_alert_email, admin_to, b))
+    return True
+
+
+@api_router.post("/payments/webhook")
+async def payments_webhook(request: Request):
+    """Server-side confirmation backup — captures payments even if the client's browser drops."""
+    secret = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "").strip()
+    body = await request.body()
+    if not secret:
+        logger.warning("razorpay webhook received but no secret configured")
+        return {"ok": True, "ignored": "no_secret"}
+    sig = request.headers.get("X-Razorpay-Signature", "")
+    client = _razorpay_client()
+    try:
+        client.utility.verify_webhook_signature(body.decode("utf-8"), sig, secret)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid webhook signature")
+    try:
+        payload = json.loads(body)
+        event = payload.get("event", "")
+        entity = payload.get("payload", {}).get("payment", {}).get("entity", {})
+        order_id = entity.get("order_id")
+        payment_id = entity.get("id")
+        if event == "payment.captured" and order_id:
+            b = await db.consultations.find_one({"razorpay_order_id": order_id})
+            if b:
+                await _mark_booking_paid(b, payment_id)
+    except Exception:
+        logger.exception("razorpay webhook handling error")
+    return {"ok": True}
+
+
+async def _process_pending_payments():
+    """Nudge abandoned checkouts (after 1h) and release stale holds (after 24h)."""
+    now = datetime.now(timezone.utc)
+    nudge_before = (now - timedelta(hours=1)).isoformat()
+    release_before = (now - timedelta(hours=24)).isoformat()
+    # Release stale holds.
+    stale = await db.consultations.find(
+        {"status": "pending_payment", "paid": {"$ne": True}, "created_at": {"$lt": release_before}}).to_list(200)
+    for b in stale:
+        await db.consultations.delete_one({"id": b["id"], "status": "pending_payment", "paid": {"$ne": True}})
+        if b.get("slot_date"):
+            await _notify_waitlist(b["slot_date"])
+    # Nudge (once) checkouts idle > 1h.
+    if os.environ.get("GMAIL_APP_PASSWORD"):
+        pend = await db.consultations.find(
+            {"status": "pending_payment", "paid": {"$ne": True}, "nudged_at": {"$exists": False},
+             "created_at": {"$lt": nudge_before, "$gte": release_before}}).to_list(200)
+        for b in pend:
+            resume_url = f"{PUBLIC_SITE}/resume/{b['id']}"
+            try:
+                await asyncio.to_thread(send_abandoned_nudge_email, b.get("email", ""), b, resume_url)
+            except Exception:
+                pass
+            await db.consultations.update_one({"id": b["id"]}, {"$set": {"nudged_at": now_iso()}})
 
 
 async def _refund_booking(b: dict, reason: str = "") -> bool:
@@ -2979,7 +3735,7 @@ class WaitlistIn(BaseModel):
 
 @api_router.post("/consultation/waitlist")
 async def join_waitlist(body: WaitlistIn, request: Request):
-    verify_captcha(body.captcha_token, _client_ip(request))
+    verify_captcha(body.captcha_token, _client_ip(request), request)
     pkg = PACKAGES.get(body.package_id) if body.package_id else None
     existing = await db.waitlist.find_one({"email": body.email.lower(), "date": body.date, "notified": {"$ne": True}})
     if existing:
@@ -3605,6 +4361,7 @@ async def security_headers(request: Request, call_next):
 async def security_guard(request: Request, call_next):
     """Site-wide attack detection & automatic blocking for all /api traffic."""
     path = request.url.path
+    _current_host.set((request.headers.get("x-forwarded-host") or request.headers.get("origin") or request.headers.get("host") or "").lower())
     if request.method == "OPTIONS" or not path.startswith("/api"):
         return await call_next(request)
     ip = _client_ip(request)
@@ -3755,6 +4512,7 @@ async def startup():
                 "feed": _hc.get("feed", []), "generated_at": _hc.get("generated_at")}}, upsert=True)
     asyncio.create_task(_refresh_home_content())  # warm the content cache
     asyncio.create_task(_digest_scheduler())
+    asyncio.create_task(_warm_entities())  # warm sector/agency/OEM profiles in background
 
 
 @app.on_event("shutdown")

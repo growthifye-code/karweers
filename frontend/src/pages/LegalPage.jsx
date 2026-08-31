@@ -4,7 +4,7 @@ import Footer from "@/components/Footer";
 import Seo from "@/components/Seo";
 import { CONTACT } from "@/lib/assets";
 
-const DOCS = {
+export const DOCS = {
   privacy: {
     title: "Privacy Policy & GDPR",
     updated: "June 2026",

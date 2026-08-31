@@ -127,8 +127,7 @@ export default function Consultation({ testimonials = [] }) {
       modal: {
         ondismiss: async () => {
           await api.post(`/payments/abandon/${data.booking_id}`).catch(() => {});
-          toast("Payment cancelled — the slot has been released.");
-          refreshAvail();
+          toast("Payment cancelled — we'll hold your slot briefly and email you a link to finish.");
         },
       },
     });

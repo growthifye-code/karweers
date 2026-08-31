@@ -1161,6 +1161,8 @@ async def vault_unlock_totp(body: VaultCodeIn, request: Request, response: Respo
         raise HTTPException(status_code=400, detail="Enroll authenticator first")
     if not pyotp.TOTP(_dec(mfa["totp_secret_enc"])).verify(body.code, valid_window=1):
         await audit(request, email, "vault_totp_fail")
+        await raise_security_alert("high", "vault_unlock_failed", _client_ip(request),
+                                   "Failed vault unlock (wrong authenticator code)", email, email=email)
         raise HTTPException(status_code=401, detail="Invalid authenticator code")
     response.set_cookie("vault_totp", _issue_vault_jwt(email, "totp"), httponly=True, secure=True,
                         samesite="none", path="/", max_age=VAULT_TTL)
@@ -1249,6 +1251,9 @@ async def vault_wa_auth_verify(payload: WACredIn, request: Request, response: Re
             credential_public_key=base64url_to_bytes(row["public_key"]),
             credential_current_sign_count=row["sign_count"], require_user_verification=True)
     except Exception as e:
+        await audit(request, email, "vault_passkey_fail")
+        await raise_security_alert("high", "vault_unlock_failed", _client_ip(request),
+                                   "Failed vault unlock (passkey rejected)", email, email=email)
         raise HTTPException(status_code=400, detail=f"Passkey authentication failed: {e}")
     await db.webauthn_credentials.update_one({"_id": row["_id"]}, {"$set": {"sign_count": v.new_sign_count}})
     response.set_cookie("vault_unlock", _issue_vault_jwt(email, "unlocked"), httponly=True, secure=True,

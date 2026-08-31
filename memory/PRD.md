@@ -218,3 +218,6 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 
 ## Iteration 5.22 (Jun 2026) — Vault access log line
 - vault_status returns last_unlock (most recent audit_log "vault_unlocked": actor, ip, at). VaultPanel shows "Last unlocked {time} by {actor} · {ip}" (testid vault-last-unlock) so admins spot unexpected access. Verified via CDP screenshot.
+
+## Iteration 5.23 (Jun 2026) — Failed vault-unlock alerts
+- Wrong authenticator code OR rejected passkey at the vault now raises a high-severity security alert (type vault_unlock_failed, with email+IP) → shows in Login Security "Recent security events" feed + unseen toast + inert email; also audit-logged (vault_totp_fail / vault_passkey_fail). Verified via curl (wrong code → 401 + alert unseen=1).

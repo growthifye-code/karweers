@@ -46,6 +46,7 @@ function AppRoutes() {
       <Route path="/deals" element={<DealsPage />} />
       <Route path="/learning" element={<LearningPage />} />
       <Route path="/signals" element={<SignalsArchivePage />} />
+      <Route path="/signals/:date" element={<SignalsArchivePage />} />
       <Route path="/insights/:slug" element={<ArticleDetail />} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />

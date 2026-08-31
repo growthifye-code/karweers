@@ -8,7 +8,7 @@ import VideoCard from "@/components/VideoCard";
 import api, { track } from "@/lib/api";
 import {
   Sparkles, Calendar, BookOpen, GraduationCap, ArrowUpRight, LifeBuoy,
-  ShieldCheck, Download, Trash2, Check, MessageSquarePlus,
+  ShieldCheck, Download, Trash2, Check, MessageSquarePlus, FileText, XCircle,
 } from "lucide-react";
 
 const PRIORITIES = ["low", "medium", "high"];
@@ -161,6 +161,27 @@ export default function ClientDashboard() {
     try { await api.delete("/me"); toast.success("Account deleted."); logout(true); }
     catch { toast.error("Deletion failed."); }
   };
+  const [consent, setConsent] = useState(null);
+  useEffect(() => { api.get("/me/consent").then((r) => setConsent(r.data)).catch(() => {}); }, []);
+  const downloadConsent = async () => {
+    try {
+      const { data } = await api.get("/me/consent");
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = "my-consent-record.json"; a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Your consent record was downloaded.");
+    } catch { toast.error("Could not download your consent record."); }
+  };
+  const withdrawConsent = async () => {
+    if (!window.confirm("Withdraw your consent to the Terms & Privacy Policy? We'll stop analytics/personalisation tracking. You'll be asked to agree again next time you sign in.")) return;
+    try {
+      const { data } = await api.post("/me/consent/withdraw");
+      setConsent((c) => ({ ...(c || {}), consent: { agreed: false, at: data.at } }));
+      try { localStorage.removeItem("sk_consent"); } catch {}
+      toast.success("Your consent has been withdrawn and recorded.");
+    } catch { toast.error("Could not withdraw consent."); }
+  };
 
   return (
     <div className="min-h-screen bg-background text-left text-foreground">
@@ -251,6 +272,25 @@ export default function ClientDashboard() {
           <div className="mt-5 flex flex-wrap gap-3">
             <button onClick={downloadData} data-testid="download-data" className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-sm font-medium hover:bg-secondary"><Download className="h-4 w-4" /> Download my data</button>
             <button onClick={deleteAccount} data-testid="delete-account" className="inline-flex items-center gap-2 rounded-full border border-[hsl(var(--destructive))]/40 px-5 py-2.5 text-sm font-medium text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))]/10"><Trash2 className="h-4 w-4" /> Delete my account</button>
+          </div>
+
+          <div className="mt-8 border-t border-border pt-6" data-testid="consent-controls">
+            <h3 className="font-display text-base font-bold">Terms & Privacy consent</h3>
+            {consent?.consent ? (
+              <p className="mt-1 text-sm text-muted-foreground" data-testid="consent-status">
+                {consent.consent.agreed
+                  ? <>You agreed to our Terms &amp; Privacy Policy{consent.consent.version ? <> (v{consent.consent.version})</> : null}{consent.consent.at ? <> on {new Date(consent.consent.at).toLocaleDateString()}</> : null}.</>
+                  : <>You have withdrawn your consent{consent.consent.at ? <> on {new Date(consent.consent.at).toLocaleDateString()}</> : null}. You'll be asked to agree again at next sign-in.</>}
+              </p>
+            ) : (
+              <p className="mt-1 text-sm text-muted-foreground" data-testid="consent-status">Your consent status will appear here.</p>
+            )}
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button onClick={downloadConsent} data-testid="download-consent" className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-sm font-medium hover:bg-secondary"><FileText className="h-4 w-4" /> Download my consent record</button>
+              {consent?.consent?.agreed !== false && (
+                <button onClick={withdrawConsent} data-testid="withdraw-consent" className="inline-flex items-center gap-2 rounded-full border border-[hsl(var(--destructive))]/40 px-5 py-2.5 text-sm font-medium text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))]/10"><XCircle className="h-4 w-4" /> Withdraw consent</button>
+              )}
+            </div>
           </div>
         </section>
       </main>

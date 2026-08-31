@@ -30,6 +30,7 @@ from emailer import send_booking_email
 from emailer import send_security_alert_email
 from emailer import send_new_booking_alert_email, send_session_reminder_email, send_weekly_agenda_email, send_waitlist_opening_email
 from emailer import send_consent_receipt_email
+from emailer import send_signals_digest_email
 import xml.etree.ElementTree as ET
 from datetime import datetime as _dt
 
@@ -1080,6 +1081,38 @@ async def admin_consent_export(admin: dict = Depends(require_admin)):
                     headers={"Content-Disposition": "attachment; filename=consent-log.csv"})
 
 
+@api_router.post("/admin/signals-digest/run")
+async def admin_run_signals_digest(admin: dict = Depends(require_admin)):
+    """Send the weekly Market Signals digest to subscribers now."""
+    if not os.environ.get("GMAIL_APP_PASSWORD"):
+        return {"sent": False, "skipped": "email_not_configured"}
+    subs = await db.subscribers.count_documents({})
+    await _send_signals_digest()
+    return {"sent": True, "subscribers": subs}
+
+
+# ---------------- Client self-service: consent record + withdrawal ----------------
+@api_router.get("/me/consent")
+async def my_consent(user: dict = Depends(get_current_user)):
+    """The signed-in user's own consent history + current status (for export)."""
+    logs = await db.consent_logs.find({"email": user["email"]}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return {"consent": user.get("consent"), "history": logs, "policy_version": CONSENT_POLICY_VERSION}
+
+
+@api_router.post("/me/consent/withdraw")
+async def withdraw_consent(request: Request, user: dict = Depends(get_current_user)):
+    """Record a consent withdrawal (does not delete the account; tracking stops on withdrawal)."""
+    ts = now_iso()
+    await db.consent_logs.insert_one({
+        "id": str(uuid.uuid4()), "user_id": user["id"], "email": user["email"], "name": user.get("name", ""),
+        "action": "withdraw", "agreed": False, "terms_version": CONSENT_POLICY_VERSION,
+        "privacy_version": CONSENT_POLICY_VERSION, "ip": _client_ip(request),
+        "user_agent": (request.headers.get("user-agent", "") or "")[:400], "created_at": ts})
+    await db.users.update_one({"id": user["id"]}, {"$set": {
+        "consent": {"agreed": False, "version": CONSENT_POLICY_VERSION, "at": ts, "action": "withdraw"}}})
+    return {"withdrawn": True, "at": ts}
+
+
 class RetentionIn(BaseModel):
     days: int = 90
 
@@ -1896,6 +1929,34 @@ async def admin_run_digest(admin: dict = Depends(require_admin)):
     return await _send_weekly_digest()
 
 
+def _collect_top_signal_items(signals: list, limit: int = 6) -> list:
+    """Flatten recent daily feeds into a de-duplicated set of the best items."""
+    seen, items = set(), []
+    for s in signals:
+        for f in s.get("feed", []):
+            key = (f.get("title") or "").strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            items.append({"title": f.get("title", ""), "take": f.get("take", ""), "tag": f.get("tag", "")})
+    return items[:limit]
+
+
+async def _send_signals_digest():
+    """Email newsletter subscribers a weekly round-up of the best Market Signals."""
+    week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).date().isoformat()
+    signals = await db.signals_archive.find(
+        {"date": {"$gte": week_ago}}, {"_id": 0}).sort("date", -1).to_list(14)
+    items = _collect_top_signal_items(signals, 6)
+    if not items:
+        return
+    subs = await db.subscribers.find({}, {"_id": 0, "email": 1, "name": 1}).to_list(5000)
+    loop = asyncio.get_event_loop()
+    for c in subs:
+        await loop.run_in_executor(None, lambda cc=c: send_signals_digest_email(cc["email"], cc.get("name", "there"), items))
+    await db.app_meta.update_one({"_id": "signals_digest"}, {"$set": {"last_run": now_iso()}}, upsert=True)
+
+
 async def _digest_scheduler():
     while True:
         try:
@@ -1920,6 +1981,11 @@ async def _digest_scheduler():
                         await _send_weekly_agenda()
                         await db.app_meta.update_one({"_id": "availability"},
                                                      {"$set": {"last_weekly_agenda": ist_now.date().isoformat()}}, upsert=True)
+                # Weekly Market Signals digest to subscribers — Friday ~09:00 IST.
+                if ist_now.weekday() == 4 and ist_now.hour == 9:
+                    sd = await db.app_meta.find_one({"_id": "signals_digest"})
+                    if (sd or {}).get("last_run", "")[:10] != ist_now.date().isoformat():
+                        await _send_signals_digest()
             if now.weekday() == 0 and os.environ.get("GMAIL_APP_PASSWORD"):  # Monday
                 meta = await db.app_meta.find_one({"_id": "digest"})
                 last = (meta or {}).get("last_run", "")

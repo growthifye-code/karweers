@@ -406,3 +406,34 @@ def send_consent_receipt_email(to_email: str, name: str, action: str, version: s
                     f"Read them: {site}/terms and {site}/privacy. — Team Sudarshan Karweer")
     msg.add_alternative(_shell("Consent receipt", inner), subtype="html")
     return _smtp_send(msg)
+
+
+def send_signals_digest_email(to_email: str, name: str, items: list, site: str = "https://www.sudarshankarweer.com") -> str:
+    """Weekly round-up of the best Market Signals to a subscriber (INERT until SMTP configured)."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email or not items:
+        return "skipped"
+    cards = ""
+    for it in items:
+        cards += (
+            f'<div style="border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-bottom:12px;">'
+            f'<span style="display:inline-block;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#059669;">{it.get("tag","")}</span>'
+            f'<p style="font-size:15px;font-weight:700;color:#111;margin:8px 0 4px;">{it.get("title","")}</p>'
+            f'<p style="font-size:13px;color:#374151;margin:0;">{it.get("take","")}</p></div>'
+        )
+    inner = (
+        f'<p style="font-size:15px;color:#111;">Hi {name or "there"},</p>'
+        f'<p style="font-size:14px;color:#374151;">Here are this week\'s sharpest Market Signals on the energy transition, capital and strategy.</p>'
+        f'<div style="margin-top:14px;">{cards}</div>'
+        f'<a href="{site}/signals" style="display:inline-block;margin-top:8px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Browse the full archive</a>'
+        f'<p style="font-size:13px;color:#374151;margin-top:16px;">— Team Sudarshan Karweer</p>'
+    )
+    msg = EmailMessage()
+    msg["Subject"] = "This week in Market Signals"
+    msg["From"] = user
+    msg["To"] = to_email
+    msg.set_content("This week's Market Signals: " + " | ".join(i.get("title", "") for i in items) + f"  Read more: {site}/signals")
+    msg.add_alternative(_shell("Weekly Market Signals", inner), subtype="html")
+    return _smtp_send(msg)
+

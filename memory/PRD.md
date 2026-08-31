@@ -121,3 +121,10 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 ## Iteration 5.2 (Aug 31, 2026) — Tag Filter + Ticket SLA
 - **CRM tag filter**: filter chips (All / per-tag with counts) above the CRM table filter clients by tag client-side. Testids: crm-tag-filters, crm-tag-all, crm-tag-<tag>.
 - **Ticket SLA**: SLA thresholds (high 4h / medium 24h / low 72h) on open|in-progress tickets. Breached tickets get a red border + "SLA breached" badge (sla-breach-<id>), sort to top, show time-open; a summary banner (sla-summary) counts breaches. Frontend-only (uses created_at/updated_at). Verified via UI.
+
+## Iteration 5.3 (Aug 31, 2026) — WhatsApp, Ask-SK Lead Bot, Consent Detail, Segments, Auto-Escalate
+- **WhatsApp button**: green FAB (bottom-left) → wa.me/917208998944 with prefilled text. testid whatsapp-button.
+- **Ask SK lead bot**: greet → capture name + phone (POST /chat/lead → inserted into consultations as source 'ask-sk-chatbot', status new, visible in CRM Leads) → ask what they're exploring → AI answer contextualised to services (existing /ai/chat) → each reply closes with "A member of Sudarshan's team will revert back to you shortly." testids lead-capture/lead-name/lead-phone/lead-start/ai-input.
+- **GDPR consent detail**: banner "What we collect" panel lists Strictly necessary (always on) vs Analytics & personalisation (optional); Accept all / Essential only. Tracking gated on 'accepted'.
+- **CRM saved segments**: save a tag filter as a one-click view (localStorage sk_crm_segments). testids save-segment/saved-segments/segment-<tag>.
+- **Ticket auto-escalate**: backend _auto_escalate_tickets() bumps open|in-progress past SLA (low→medium, medium→high), sets auto_escalated; runs on GET /admin/tickets + hourly scheduler. Badge auto-escalated-<id>. Verified: 2d-old medium → high.

@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useAuth, formatApiErrorDetail } from "@/context/AuthContext";
 import { Logo } from "@/components/Navbar";
 import ThemeToggle from "@/components/ThemeToggle";
-import { Users, FileText, Inbox, Sparkles, Trash2, Wand2, Mail, LifeBuoy, UserCircle, ChevronDown, Tag, AlertTriangle } from "lucide-react";
+import { Users, FileText, Inbox, Sparkles, Trash2, Wand2, Mail, LifeBuoy, UserCircle, ChevronDown, Tag, AlertTriangle, Star } from "lucide-react";
 import api from "@/lib/api";
 
 const CATS = [
@@ -32,6 +32,7 @@ export default function AdminDashboard() {
   const [clientNotes, setClientNotes] = useState("");
   const [clientTags, setClientTags] = useState("");
   const [crmTag, setCrmTag] = useState("all");
+  const [segments, setSegments] = useState([]);
   const [ticketReplies, setTicketReplies] = useState({});
 
   const [form, setForm] = useState({ title: "", category: "news", sector: SECTORS[0], summary: "", content: "", tags: "", image: DEFAULT_IMG, featured: false });
@@ -90,6 +91,17 @@ export default function AdminDashboard() {
   const filteredClients = crmTag === "all" ? clients : clients.filter((c) => (c.tags || []).includes(crmTag));
   const sortedTickets = [...tickets].sort((a, b) => (isBreached(b) ? 1 : 0) - (isBreached(a) ? 1 : 0));
   const breachedCount = tickets.filter(isBreached).length;
+
+  useEffect(() => {
+    try { setSegments(JSON.parse(localStorage.getItem("sk_crm_segments") || "[]")); } catch { setSegments([]); }
+  }, []);
+  const persistSegments = (next) => { setSegments(next); try { localStorage.setItem("sk_crm_segments", JSON.stringify(next)); } catch {} };
+  const saveSegment = () => {
+    if (crmTag === "all" || segments.includes(crmTag)) return;
+    persistSegments([...segments, crmTag]);
+    toast.success(`Saved segment: ${crmTag}`);
+  };
+  const removeSegment = (s) => persistSegments(segments.filter((x) => x !== s));
 
   const generate = async () => {
     if (!aiTopic.trim()) { toast.error("Enter a topic for the AI to write about."); return; }
@@ -213,6 +225,23 @@ export default function AdminDashboard() {
                     {tg} ({clients.filter((c) => (c.tags || []).includes(tg)).length})
                   </button>
                 ))}
+                {crmTag !== "all" && !segments.includes(crmTag) && (
+                  <button onClick={saveSegment} data-testid="save-segment"
+                    className="inline-flex items-center gap-1 rounded-full border border-[hsl(var(--accent))]/50 px-3 py-1.5 text-xs font-semibold text-[hsl(var(--accent))] hover:bg-[hsl(var(--accent))]/10">
+                    <Star className="h-3.5 w-3.5" /> Save segment
+                  </button>
+                )}
+              </div>
+            )}
+            {segments.length > 0 && (
+              <div className="mb-4 flex flex-wrap items-center gap-2" data-testid="saved-segments">
+                <span className="mr-1 inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-[hsl(var(--accent))]"><Star className="h-3.5 w-3.5" /> Saved</span>
+                {segments.map((s) => (
+                  <span key={s} className={`inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${crmTag === s ? "border-[hsl(var(--accent))] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]" : "border-border text-muted-foreground"}`}>
+                    <button onClick={() => setCrmTag(s)} data-testid={`segment-${s}`}>{s}</button>
+                    <button onClick={() => removeSegment(s)} data-testid={`remove-segment-${s}`} className="opacity-60 hover:opacity-100">×</button>
+                  </span>
+                ))}
               </div>
             )}
             <div className="overflow-x-auto rounded-2xl border border-border">
@@ -259,6 +288,7 @@ export default function AdminDashboard() {
                     <div className="flex items-center gap-2">
                       <p className="font-semibold">{t.subject}</p>
                       {breached && <span className="inline-flex items-center gap-1 rounded-full bg-[hsl(var(--destructive))]/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[hsl(var(--destructive))]" data-testid={`sla-breach-${t.id}`}><AlertTriangle className="h-3 w-3" /> SLA breached</span>}
+                      {t.auto_escalated && <span className="inline-flex items-center gap-1 rounded-full bg-[hsl(var(--accent))]/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[hsl(var(--accent))]" data-testid={`auto-escalated-${t.id}`}>Auto-escalated</span>}
                     </div>
                     <p className="mt-0.5 text-xs text-muted-foreground">{t.ticket_code} · {t.name} ({t.client_code || t.email}) · {t.category} · <span className={breached ? "font-semibold text-[hsl(var(--destructive))]" : ""}>open {fmtAge(ticketAgeHrs(t))}</span></p>
                   </div>

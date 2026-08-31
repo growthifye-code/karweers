@@ -438,6 +438,62 @@ async def admin_update_client(cid: str, body: ClientMetaIn, admin: dict = Depend
     return {"success": True, **upd}
 
 
+# ---------------- Chatbot lead capture (into CRM leads) ----------------
+class ChatLeadIn(BaseModel):
+    name: str
+    phone: str
+    email: Optional[str] = ""
+    message: Optional[str] = ""
+
+
+@api_router.post("/chat/lead")
+async def chat_lead(body: ChatLeadIn):
+    lead = {
+        "id": str(uuid.uuid4()),
+        "name": body.name.strip(),
+        "email": (body.email or "").strip(),
+        "phone": body.phone.strip(),
+        "company": "",
+        "area": "Chatbot enquiry",
+        "package": "",
+        "amount": 0,
+        "message": body.message or "",
+        "status": "new",
+        "source": "ask-sk-chatbot",
+        "created_at": now_iso(),
+    }
+    await db.consultations.insert_one(lead)
+    return {"success": True, "id": lead["id"]}
+
+
+# ---------------- Ticket SLA + auto-escalation ----------------
+SLA_HOURS = {"high": 4, "medium": 24, "low": 72}
+ESCALATE_NEXT = {"low": "medium", "medium": "high"}
+
+
+def _ticket_age_hours(t: dict) -> float:
+    ts = t.get("created_at") or t.get("updated_at")
+    try:
+        dt = datetime.fromisoformat(ts)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - dt).total_seconds() / 3600.0
+    except Exception:
+        return 0.0
+
+
+async def _auto_escalate_tickets():
+    open_t = await db.support_tickets.find({"status": {"$in": ["open", "in-progress"]}}).to_list(2000)
+    for t in open_t:
+        pr = t.get("priority", "medium")
+        if pr == "high":
+            continue
+        if _ticket_age_hours(t) > SLA_HOURS.get(pr, 24) and pr in ESCALATE_NEXT:
+            # Bump priority WITHOUT touching updated_at (keeps the SLA clock honest).
+            await db.support_tickets.update_one({"id": t["id"]}, {"$set": {
+                "priority": ESCALATE_NEXT[pr], "auto_escalated": True, "escalated_at": now_iso()}})
+
+
 # ---------------- Service Desk (tickets) ----------------
 class TicketIn(BaseModel):
     subject: str
@@ -495,6 +551,7 @@ async def reply_ticket(tid: str, body: TicketReplyIn, user: dict = Depends(get_c
 
 @api_router.get("/admin/tickets")
 async def admin_tickets(status: Optional[str] = None, admin: dict = Depends(require_admin)):
+    await _auto_escalate_tickets()
     q = {"status": status} if status else {}
     return await db.support_tickets.find(q, {"_id": 0}).sort("updated_at", -1).to_list(500)
 
@@ -564,6 +621,7 @@ async def admin_run_digest(admin: dict = Depends(require_admin)):
 async def _digest_scheduler():
     while True:
         try:
+            await _auto_escalate_tickets()  # hourly SLA escalation pass
             now = datetime.now(timezone.utc)
             if now.weekday() == 0 and os.environ.get("GMAIL_APP_PASSWORD"):  # Monday
                 meta = await db.app_meta.find_one({"_id": "digest"})
@@ -571,7 +629,7 @@ async def _digest_scheduler():
                 if not last or last[:10] != now.strftime("%Y-%m-%d"):
                     await _send_weekly_digest()
         except Exception:
-            logger.exception("digest scheduler error")
+            logger.exception("scheduler error")
         await asyncio.sleep(3600)
 
 

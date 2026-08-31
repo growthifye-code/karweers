@@ -20,24 +20,27 @@ def _utc(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
-def build_ics(booking_id: str, summary: str, start: datetime, end: datetime, client_name: str, client_email: str, organizer: str) -> bytes:
+def build_ics(booking_id: str, summary: str, start: datetime, end: datetime, client_name: str, client_email: str, organizer: str, meeting_link: str = "") -> bytes:
+    location = meeting_link if meeting_link else "Online (video link to follow)"
     lines = [
         "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Sudarshan Karweer//Consultation//EN",
         "CALSCALE:GREGORIAN", "METHOD:REQUEST", "BEGIN:VEVENT",
         f"UID:{booking_id}@sudarshankarweer", f"DTSTAMP:{_utc(datetime.now(timezone.utc))}",
         f"DTSTART:{_utc(start)}", f"DTEND:{_utc(end)}",
         f"SUMMARY:{_ics_escape(summary)}",
-        f"DESCRIPTION:{_ics_escape('Premium 1:1 consultation with Sudarshan Karweer for ' + client_name)}",
-        "LOCATION:Online (video link to follow)",
+        f"DESCRIPTION:{_ics_escape('Premium 1:1 consultation with Sudarshan Karweer for ' + client_name + (chr(10) + 'Join: ' + meeting_link if meeting_link else ''))}",
+        f"LOCATION:{_ics_escape(location)}",
         f"ORGANIZER:mailto:{organizer}",
         f"ATTENDEE;CN={_ics_escape(client_name)}:mailto:{client_email}",
-        "END:VEVENT", "END:VCALENDAR", "",
     ]
+    if meeting_link:
+        lines.append(f"URL:{_ics_escape(meeting_link)}")
+    lines += ["END:VEVENT", "END:VCALENDAR", ""]
     return "\r\n".join(lines).encode("utf-8")
 
 
 def send_booking_email(booking_id: str, client_name: str, client_email: str, service: str,
-                       start: datetime, end: datetime) -> str:
+                       start: datetime, end: datetime, meeting_link: str = "") -> str:
     user = os.environ.get("GMAIL_USER")
     pwd = os.environ.get("GMAIL_APP_PASSWORD")
     admin = os.environ.get("BOOKING_ADMIN_EMAIL", user or "")
@@ -45,6 +48,7 @@ def send_booking_email(booking_id: str, client_name: str, client_email: str, ser
         log.warning("Email skipped for booking %s: Gmail app password not configured", booking_id)
         return "skipped"
 
+    join_line = f"Join here: {meeting_link}\n" if meeting_link else "A video link will follow before the session.\n"
     msg = EmailMessage(policy=SMTP)
     msg["Subject"] = f"Confirmed: {service} with Sudarshan Karweer"
     msg["From"] = user
@@ -53,11 +57,12 @@ def send_booking_email(booking_id: str, client_name: str, client_email: str, ser
     msg.set_content(
         f"Hello {client_name},\n\n"
         f"Your {service} is confirmed.\n"
-        f"When: {start.strftime('%A, %d %b %Y at %H:%M UTC')}\n\n"
-        "A calendar invite is attached. A video link will follow before the session.\n\n"
+        f"When: {start.strftime('%A, %d %b %Y at %H:%M UTC')}\n"
+        f"{join_line}\n"
+        "A calendar invite is attached.\n\n"
         "— Team Sudarshan Karweer\n"
     )
-    msg.add_attachment(build_ics(booking_id, service, start, end, client_name, client_email, user),
+    msg.add_attachment(build_ics(booking_id, service, start, end, client_name, client_email, user, meeting_link),
                        maintype="text", subtype="calendar", filename="consultation.ics",
                        params={"method": "REQUEST", "charset": "utf-8"})
     try:
@@ -282,24 +287,28 @@ def send_new_booking_alert_email(to_email: str, booking: dict) -> str:
     return _smtp_send(msg)
 
 
-def send_session_reminder_email(to_email: str, client_name: str, package: str, slot_date: str, slot_time: str) -> str:
-    """Remind the client ~24h before their confirmed session."""
+def send_session_reminder_email(to_email: str, client_name: str, package: str, slot_date: str, slot_time: str, when_label: str = "", meeting_link: str = "") -> str:
+    """Remind the client before their confirmed session (INERT until SMTP configured)."""
     user = os.environ.get("GMAIL_USER")
     pwd = os.environ.get("GMAIL_APP_PASSWORD")
     if not user or not pwd or not to_email:
         return "skipped"
+    when = when_label or "soon"
+    join = (f'<a href="{meeting_link}" style="display:inline-block;margin-top:14px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Join the session</a>'
+            if meeting_link else '<p style="font-size:13px;color:#6b7280;margin-top:12px;">A video link will follow shortly. If you need to reschedule, just reply to this email.</p>')
     inner = (
         f'<p style="font-size:15px;color:#111;">Hi {client_name},</p>'
-        f'<p style="font-size:14px;color:#374151;">This is a friendly reminder of your upcoming session with Sudarshan Karweer.</p>'
+        f'<p style="font-size:14px;color:#374151;">A reminder that your session with Sudarshan Karweer is {when}.</p>'
         f'<p style="font-size:15px;color:#111;margin-top:10px;font-weight:600;">{package}</p>'
         f'<p style="font-size:14px;color:#059669;font-weight:600;">{slot_date} at {slot_time} IST</p>'
-        f'<p style="font-size:13px;color:#6b7280;margin-top:12px;">A video link will follow before the session. If you need to reschedule, just reply to this email.</p>'
+        f'{join}'
         f'<p style="font-size:13px;color:#374151;margin-top:16px;">— Team Sudarshan Karweer</p>'
     )
     msg = EmailMessage()
-    msg["Subject"] = f"Reminder: your {package} is tomorrow at {slot_time} IST"
+    msg["Subject"] = f"Reminder: your {package} is {when} ({slot_time} IST)"
     msg["From"] = user
     msg["To"] = to_email
-    msg.set_content(f"Reminder: your {package} with Sudarshan Karweer is on {slot_date} at {slot_time} IST.")
+    msg.set_content(f"Reminder: your {package} with Sudarshan Karweer is {when} — {slot_date} at {slot_time} IST."
+                    + (f" Join: {meeting_link}" if meeting_link else ""))
     msg.add_alternative(_shell("Session reminder", inner), subtype="html")
     return _smtp_send(msg)

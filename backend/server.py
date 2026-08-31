@@ -2118,6 +2118,7 @@ async def _get_availability_meta():
         meta["published_week_start"] = _monday_of(datetime.now(timezone.utc).date()).isoformat()
     meta.setdefault("blocked", {})
     meta.setdefault("buffer_minutes", 0)
+    meta.setdefault("reminder_leads", [24])
     return meta
 
 
@@ -2260,7 +2261,8 @@ async def admin_availability(week_start: Optional[str] = None, admin: dict = Dep
         out_days.append({"date": ds, "label": d.strftime("%a, %d %b"), "slots": slots})
     return {"week_start": ws.isoformat(), "published_week_start": published,
             "is_published": ws.isoformat() == published, "days": out_days,
-            "slot_times": all_slots, "buffer_minutes": buffer_min}
+            "slot_times": all_slots, "buffer_minutes": buffer_min,
+            "reminder_leads": [int(h) for h in (meta.get("reminder_leads") or [])]}
 
 
 class BufferIn(BaseModel):
@@ -2275,6 +2277,20 @@ async def set_buffer(body: BufferIn, admin: dict = Depends(require_admin)):
         "buffer_minutes": mins, "published_week_start": meta["published_week_start"],
         "blocked": meta.get("blocked", {})}}, upsert=True)
     return {"success": True, "buffer_minutes": mins}
+
+
+class RemindersIn(BaseModel):
+    leads: list[int]
+
+
+@api_router.post("/admin/availability/reminders")
+async def set_reminders(body: RemindersIn, admin: dict = Depends(require_admin)):
+    leads = sorted({int(h) for h in body.leads if int(h) in (2, 24)})
+    meta = await _get_availability_meta()
+    await db.app_meta.update_one({"_id": "availability"}, {"$set": {
+        "reminder_leads": leads, "published_week_start": meta["published_week_start"],
+        "blocked": meta.get("blocked", {})}}, upsert=True)
+    return {"success": True, "reminder_leads": leads}
 
 
 class SlotToggleIn(BaseModel):
@@ -2341,6 +2357,7 @@ class BookingActionIn(BaseModel):
     date: Optional[str] = None
     time: Optional[str] = None
     reason: Optional[str] = ""
+    meeting_link: Optional[str] = None
 
 
 def _schedule_booking_email(booking, background_tasks):
@@ -2348,18 +2365,22 @@ def _schedule_booking_email(booking, background_tasks):
         start = _dt.fromisoformat(f"{booking['slot_date']}T{booking['slot_time']}:00+00:00")
         end = start + timedelta(minutes=booking.get("minutes", 60))
         background_tasks.add_task(send_booking_email, booking["id"], booking.get("name", "Client"),
-                                  booking.get("email", ""), booking.get("package", "Consultation"), start, end)
+                                  booking.get("email", ""), booking.get("package", "Consultation"),
+                                  start, end, booking.get("meeting_link", ""))
     except Exception:
         logger.exception("booking email schedule failed")
 
 
 @api_router.post("/admin/bookings/{bid}/confirm")
-async def confirm_booking(bid: str, request: Request, background_tasks: BackgroundTasks, admin: dict = Depends(require_admin)):
+async def confirm_booking(bid: str, body: BookingActionIn, request: Request, background_tasks: BackgroundTasks, admin: dict = Depends(require_admin)):
     b = await db.consultations.find_one({"id": bid})
     if not b:
         raise HTTPException(status_code=404, detail="Booking not found")
-    await db.consultations.update_one({"id": bid}, {"$set": {"status": "confirmed"}})
-    b["status"] = "confirmed"
+    upd = {"status": "confirmed"}
+    if body.meeting_link is not None:
+        upd["meeting_link"] = body.meeting_link.strip()
+    await db.consultations.update_one({"id": bid}, {"$set": upd})
+    b.update(upd)
     _schedule_booking_email(b, background_tasks)
     event_id = await sync_booking_to_calendar(b, "create")
     if event_id and not b.get("gcal_event_id"):
@@ -2390,10 +2411,12 @@ async def reschedule_booking(bid: str, body: BookingActionIn, request: Request, 
     if not body.date or not body.time or body.time not in _slot_times():
         raise HTTPException(status_code=400, detail="Provide a valid new date and time.")
     occupied = _occupied_slots(body.time, b.get("minutes", 60))
-    await db.consultations.update_one({"id": bid}, {"$set": {
-        "slot_date": body.date, "slot_time": body.time, "occupied": occupied,
-        "status": "confirmed", "reminder_sent": False}})
-    b.update({"slot_date": body.date, "slot_time": body.time})
+    upd = {"slot_date": body.date, "slot_time": body.time, "occupied": occupied,
+           "status": "confirmed", "reminders_sent": []}
+    if body.meeting_link:
+        upd["meeting_link"] = body.meeting_link.strip()
+    await db.consultations.update_one({"id": bid}, {"$set": upd, "$unset": {"reminder_sent": ""}})
+    b.update(upd)
     _schedule_booking_email(b, background_tasks)
     event_id = await sync_booking_to_calendar(b, "update" if b.get("gcal_event_id") else "create")
     if event_id and not b.get("gcal_event_id"):
@@ -2465,22 +2488,41 @@ IST_TZ = ZoneInfo("Asia/Kolkata")
 
 
 async def _send_session_reminders():
-    """Email confirmed clients ~24h before their session (INERT until SMTP configured)."""
+    """Email confirmed clients at the configured lead time(s) before their session (INERT until SMTP configured)."""
+    meta = await _get_availability_meta()
+    leads = sorted({int(h) for h in (meta.get("reminder_leads") or [])}, reverse=True)
+    if not leads:
+        return
     now = datetime.now(timezone.utc)
-    cur = db.consultations.find({"status": "confirmed", "slot_date": {"$exists": True},
-                                 "reminder_sent": {"$ne": True}},
-                                {"_id": 0, "id": 1, "name": 1, "email": 1, "package": 1,
-                                 "slot_date": 1, "slot_time": 1})
     loop = asyncio.get_event_loop()
+    cur = db.consultations.find({"status": "confirmed", "slot_date": {"$exists": True}},
+                                {"_id": 0, "id": 1, "name": 1, "email": 1, "package": 1,
+                                 "slot_date": 1, "slot_time": 1, "meeting_link": 1,
+                                 "reminders_sent": 1, "reminder_sent": 1})
     async for b in cur:
         try:
+            if not b.get("email"):
+                continue
+            sent = {int(h) for h in (b.get("reminders_sent") or [])}
+            if b.get("reminder_sent") is True:
+                sent.add(24)  # migrate legacy flag
             dt = datetime.fromisoformat(f"{b['slot_date']}T{b['slot_time']}:00").replace(tzinfo=IST_TZ)
             delta = (dt.astimezone(timezone.utc) - now).total_seconds()
-            if 23 * 3600 <= delta <= 25 * 3600 and b.get("email"):
-                await loop.run_in_executor(None, send_session_reminder_email, b["email"],
-                                           b.get("name", "there"), b.get("package", "session"),
-                                           b["slot_date"], b["slot_time"])
-                await db.consultations.update_one({"id": b["id"]}, {"$set": {"reminder_sent": True}})
+            fired = False
+            for h in leads:
+                if h in sent:
+                    continue
+                if (h - 1) * 3600 <= delta <= (h + 1) * 3600:
+                    label = "tomorrow" if h >= 24 else f"in about {h} hour" + ("s" if h != 1 else "")
+                    await loop.run_in_executor(None, send_session_reminder_email, b["email"],
+                                               b.get("name", "there"), b.get("package", "session"),
+                                               b["slot_date"], b["slot_time"], label, b.get("meeting_link", ""))
+                    sent.add(h)
+                    fired = True
+            if fired:
+                await db.consultations.update_one({"id": b["id"]},
+                                                  {"$set": {"reminders_sent": sorted(sent)},
+                                                   "$unset": {"reminder_sent": ""}})
         except Exception:
             logger.exception("reminder failed for %s", b.get("id"))
 
@@ -2551,14 +2593,19 @@ async def _gcal_service():
 def _event_body(booking: dict):
     start = f"{booking['slot_date']}T{booking['slot_time']}:00"
     end = f"{booking['slot_date']}T{_slot_end_hhmm(booking['slot_time'], booking.get('minutes', 60))}:00"
+    link = (booking.get("meeting_link") or "").strip()
     desc = (f"Client: {booking.get('name','')}\nEmail: {booking.get('email','')}\n"
             f"Phone: {booking.get('phone','')}\nFocus: {booking.get('area','')}\n\n{booking.get('message','')}")
+    if link:
+        desc += f"\n\nJoin: {link}"
     body = {
         "summary": f"{booking.get('package','Consultation')} — {booking.get('name','')}",
         "description": desc,
         "start": {"dateTime": start, "timeZone": GCAL_TZ},
         "end": {"dateTime": end, "timeZone": GCAL_TZ},
     }
+    if link:
+        body["location"] = link
     if booking.get("email"):
         body["attendees"] = [{"email": booking["email"]}]
     return body

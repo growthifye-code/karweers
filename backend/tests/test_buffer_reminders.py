@@ -47,9 +47,9 @@ async def main():
     await s._send_session_reminders()
     soon = await db.consultations.find_one({"id": "rem-soon"})
     far = await db.consultations.find_one({"id": "rem-far"})
-    assert soon.get("reminder_sent") is True, "soon should be marked reminded"
-    assert far.get("reminder_sent") is not True, "far should NOT be reminded"
-    print("PASS: reminder selects ~24h-out booking only")
+    assert 24 in (soon.get("reminders_sent") or []), f"soon should be reminded: {soon.get('reminders_sent')}"
+    assert 24 not in (far.get("reminders_sent") or []), "far should NOT be reminded"
+    print("PASS: reminder selects ~24h-out booking only (reminders_sent=%s)" % soon.get("reminders_sent"))
 
     # cleanup
     await db.consultations.delete_many({"id": {"$in": ["buf-1", "rem-soon", "rem-far"]}})

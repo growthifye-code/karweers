@@ -54,7 +54,9 @@ export default function AdminDashboard() {
   const [calStatus, setCalStatus] = useState(null);
   const [availWeek, setAvailWeek] = useState(null);
   const [reschedule, setReschedule] = useState(null);
+  const [confirming, setConfirming] = useState(null);
   const [bufferInput, setBufferInput] = useState("0");
+  const [reminderSel, setReminderSel] = useState("24");
 
   const [form, setForm] = useState({ title: "", category: "news", sector: SECTORS[0], summary: "", content: "", tags: "", image: DEFAULT_IMG, featured: false });
   const [aiTopic, setAiTopic] = useState("");
@@ -99,15 +101,21 @@ export default function AdminDashboard() {
     catch { toast.error("Could not disconnect."); }
   };
 
+  const leadsToKey = (l) => { const s = (l || []).slice().sort((a, b) => a - b).join(","); return s === "2,24" ? "both" : s === "24" ? "24" : s === "2" ? "2" : "off"; };
+  const keyToLeads = (k) => k === "both" ? [2, 24] : k === "24" ? [24] : k === "2" ? [2] : [];
   const loadAvailability = (ws) => {
     api.get("/admin/availability", { params: ws ? { week_start: ws } : {} })
-      .then((r) => { setAvailWeek(r.data); setBufferInput(String(r.data.buffer_minutes ?? 0)); }).catch(() => {});
+      .then((r) => { setAvailWeek(r.data); setBufferInput(String(r.data.buffer_minutes ?? 0)); setReminderSel(leadsToKey(r.data.reminder_leads)); }).catch(() => {});
   };
   useEffect(() => { loadAvailability(); }, []);
 
   const saveBuffer = async (mins) => {
     try { await api.post("/admin/availability/buffer", { minutes: Number(mins) }); toast.success(Number(mins) > 0 ? `Buffer set to ${mins} min between sessions.` : "Buffer removed."); loadAvailability(availWeek?.week_start); }
     catch { toast.error("Could not save buffer."); }
+  };
+  const saveReminders = async (key) => {
+    try { await api.post("/admin/availability/reminders", { leads: keyToLeads(key) }); toast.success(key === "off" ? "Client reminders turned off." : "Reminder timing saved."); loadAvailability(availWeek?.week_start); }
+    catch { toast.error("Could not save reminder timing."); }
   };
 
   const shiftWeek = (deltaDays) => {
@@ -140,6 +148,7 @@ export default function AdminDashboard() {
       await api.post(`/admin/bookings/${id}/${action}`, payload || {});
       toast.success(action === "confirm" ? "Booking confirmed — client notified." : action === "decline" ? "Booking declined." : "Rescheduled — client notified.");
       setReschedule(null);
+      setConfirming(null);
       api.get("/admin/bookings").then((r) => setBookings(r.data)).catch(() => {});
       loadAvailability(availWeek?.week_start);
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Action failed."); }
@@ -1153,6 +1162,7 @@ export default function AdminDashboard() {
                         <td className="p-4 text-muted-foreground">
                           <div className="font-medium text-foreground">{b.slot_date}</div>
                           <div className="text-xs">{b.slot_time} IST</div>
+                          {b.meeting_link && <a href={b.meeting_link} target="_blank" rel="noreferrer" data-testid={`booking-link-${b.id}`} className="mt-1 block text-xs font-medium text-[hsl(var(--primary))] underline truncate max-w-[180px]">🔗 Meeting link</a>}
                           {b.area && <div className="mt-1 text-xs">{b.area}</div>}
                         </td>
                         <td className="p-4"><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold capitalize ${badge}`} data-testid={`booking-status-${b.id}`}>{(b.status || "").replace(/_/g, " ")}</span></td>
@@ -1163,15 +1173,24 @@ export default function AdminDashboard() {
                               <select value={reschedule.time} onChange={(e) => setReschedule({ ...reschedule, time: e.target.value })} data-testid={`reschedule-time-${b.id}`} className="rounded-lg border border-border bg-background px-2 py-1 text-xs">
                                 {(availWeek?.slot_times || []).map((t) => <option key={t} value={t}>{t}</option>)}
                               </select>
+                              <input value={reschedule.link} onChange={(e) => setReschedule({ ...reschedule, link: e.target.value })} placeholder="Meeting link (optional)" data-testid={`reschedule-link-${b.id}`} className="w-44 rounded-lg border border-border bg-background px-2 py-1 text-xs" />
                               <div className="flex gap-2">
-                                <button onClick={() => bookingAction(b.id, "reschedule", { date: reschedule.date, time: reschedule.time })} data-testid={`reschedule-save-${b.id}`} className="rounded-full bg-[hsl(var(--primary))] px-3 py-1 text-xs font-semibold text-[hsl(var(--primary-foreground))]">Save</button>
+                                <button onClick={() => bookingAction(b.id, "reschedule", { date: reschedule.date, time: reschedule.time, meeting_link: reschedule.link })} data-testid={`reschedule-save-${b.id}`} className="rounded-full bg-[hsl(var(--primary))] px-3 py-1 text-xs font-semibold text-[hsl(var(--primary-foreground))]">Save</button>
                                 <button onClick={() => setReschedule(null)} className="rounded-full border border-border px-3 py-1 text-xs">Cancel</button>
+                              </div>
+                            </div>
+                          ) : confirming?.id === b.id ? (
+                            <div className="flex flex-col gap-2" data-testid={`confirm-form-${b.id}`}>
+                              <input value={confirming.link} onChange={(e) => setConfirming({ ...confirming, link: e.target.value })} placeholder="Meeting/video link (optional)" data-testid={`confirm-link-${b.id}`} className="w-48 rounded-lg border border-border bg-background px-2 py-1 text-xs" />
+                              <div className="flex gap-2">
+                                <button onClick={() => bookingAction(b.id, "confirm", { meeting_link: confirming.link })} data-testid={`confirm-save-${b.id}`} className="rounded-full bg-[hsl(var(--primary))] px-3 py-1 text-xs font-semibold text-[hsl(var(--primary-foreground))]">Confirm session</button>
+                                <button onClick={() => setConfirming(null)} className="rounded-full border border-border px-3 py-1 text-xs">Cancel</button>
                               </div>
                             </div>
                           ) : (
                             <div className="flex flex-wrap gap-2">
-                              {b.status !== "confirmed" && <button onClick={() => bookingAction(b.id, "confirm")} data-testid={`confirm-booking-${b.id}`} className="rounded-full bg-[hsl(var(--primary))] px-3 py-1 text-xs font-semibold text-[hsl(var(--primary-foreground))]">Confirm</button>}
-                              <button onClick={() => setReschedule({ id: b.id, date: b.slot_date, time: b.slot_time })} data-testid={`reschedule-booking-${b.id}`} className="rounded-full border border-border px-3 py-1 text-xs font-medium hover:bg-secondary">Reschedule</button>
+                              {b.status !== "confirmed" && <button onClick={() => setConfirming({ id: b.id, link: b.meeting_link || "" })} data-testid={`confirm-booking-${b.id}`} className="rounded-full bg-[hsl(var(--primary))] px-3 py-1 text-xs font-semibold text-[hsl(var(--primary-foreground))]">Confirm</button>}
+                              <button onClick={() => setReschedule({ id: b.id, date: b.slot_date, time: b.slot_time, link: b.meeting_link || "" })} data-testid={`reschedule-booking-${b.id}`} className="rounded-full border border-border px-3 py-1 text-xs font-medium hover:bg-secondary">Reschedule</button>
                               {b.status !== "declined" && <button onClick={() => bookingAction(b.id, "decline", { reason: "" })} data-testid={`decline-booking-${b.id}`} className="rounded-full border border-border px-3 py-1 text-xs font-medium text-red-500 hover:bg-secondary">Decline</button>}
                             </div>
                           )}
@@ -1202,6 +1221,16 @@ export default function AdminDashboard() {
                 {[0, 15, 30, 45, 60].map((m) => <option key={m} value={m}>{m === 0 ? "No buffer" : `${m} min`}</option>)}
               </select>
               <span className="text-xs text-muted-foreground">Automatically keeps a gap after each booked session so slots never sit back-to-back.</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card p-4" data-testid="reminder-control">
+              <span className="text-sm font-semibold">Client reminders</span>
+              <select value={reminderSel} onChange={(e) => { setReminderSel(e.target.value); saveReminders(e.target.value); }} data-testid="reminder-select" className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm">
+                <option value="24">1 day before</option>
+                <option value="2">2 hours before</option>
+                <option value="both">Both (1 day + 2 hours)</option>
+                <option value="off">Off</option>
+              </select>
+              <span className="text-xs text-muted-foreground">Confirmed clients get an automatic email reminder at the times you choose.</span>
             </div>
             <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
               <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded border border-border bg-background" /> Available</span>

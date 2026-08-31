@@ -505,6 +505,30 @@ def send_library_digest_email(to_email: str, name: str, books: list, site: str =
     return _smtp_send(msg)
 
 
+def send_score_beaten_email(to_email: str, name: str, game_title: str, rival: str,
+                            new_score: int, your_score: int, max_score: int, game_url: str) -> str:
+    """Nudge a dethroned strategist to reclaim their #1 spot (INERT until SMTP configured)."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email:
+        return "skipped"
+    msg = EmailMessage()
+    msg["Subject"] = f"Someone just beat your top score on \u201c{game_title}\u201d"
+    msg["From"] = user
+    msg["To"] = to_email
+    inner = (
+        f'<p style="font-size:15px;color:#111;">Hi {name or "there"},</p>'
+        f'<p style="font-size:14px;color:#374151;">Your #1 spot on the <strong>{game_title}</strong> strategy simulation just got taken. '
+        f'{rival or "A rival"} scored <strong>{new_score}/{max_score}</strong> — edging past your <strong>{your_score}/{max_score}</strong>.</p>'
+        f'<p style="font-size:14px;color:#374151;">Think you can reclaim the top of the War Room? One better run is all it takes.</p>'
+        f'<a href="{game_url}" style="display:inline-block;margin-top:8px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Reclaim your spot</a>'
+        f'<p style="font-size:13px;color:#374151;margin-top:16px;">— Team Sudarshan Karweer</p>'
+    )
+    msg.set_content(f"{rival} beat your top score on {game_title} ({new_score}/{max_score} vs your {your_score}/{max_score}). Reclaim it: {game_url}")
+    msg.add_alternative(_shell("You've been dethroned", inner), subtype="html")
+    return _smtp_send(msg)
+
+
 
 def render_sector_digest_html(name: str, groups: list, site: str = "https://www.sudarshankarweer.com", unsubscribe_url: str = "", prefs_url: str = "") -> str:
     blocks = ""

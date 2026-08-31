@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Swords, Shield, Users, UserCheck, Wallet, Truck, ArrowUpRight, Gamepad2 } from "lucide-react";
+import { Swords, Shield, Users, UserCheck, Wallet, Truck, ArrowUpRight, Gamepad2, Trophy } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import Seo from "@/components/Seo";
@@ -28,6 +28,11 @@ export default function GamesPage() {
           </span>
           <h1 className="mt-6 max-w-4xl font-display text-4xl font-bold leading-[1.05] md:text-6xl">Rehearse the <span className="text-[hsl(var(--primary))]">hard calls.</span></h1>
           <p className="mt-5 max-w-2xl text-base text-muted-foreground md:text-lg">Scenario-based decision games for senior leaders. Every choice scores and explains itself — then you get a debrief in Sudarshan's voice and the key lessons to take back to your own boardroom.</p>
+          <div className="mt-7">
+            <Link to="/leaderboard" data-testid="games-leaderboard-link" className="inline-flex items-center gap-2 rounded-full border border-[hsl(var(--primary))] px-5 py-2.5 text-sm font-semibold text-[hsl(var(--primary))] transition-colors hover:bg-[hsl(var(--primary))]/10">
+              <Trophy className="h-4 w-4" /> War-Room Leaderboard
+            </Link>
+          </div>
         </div>
       </section>
       <section className="py-14">

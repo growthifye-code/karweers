@@ -23,6 +23,7 @@ import LibraryPage from "@/pages/LibraryPage";
 import BookPage from "@/pages/BookPage";
 import GamesPage from "@/pages/GamesPage";
 import GamePlayPage from "@/pages/GamePlayPage";
+import GamesLeaderboardPage from "@/pages/GamesLeaderboardPage";
 import AssessmentPage from "@/pages/AssessmentPage";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
@@ -65,6 +66,7 @@ function AppRoutes() {
       <Route path="/library/:slug" element={<BookPage />} />
       <Route path="/games" element={<GamesPage />} />
       <Route path="/games/:slug" element={<GamePlayPage />} />
+      <Route path="/leaderboard" element={<GamesLeaderboardPage />} />
       <Route path="/assessment" element={<AssessmentPage />} />
       <Route path="/signals" element={<SignalsArchivePage />} />
       <Route path="/signals/:date" element={<SignalsArchivePage />} />

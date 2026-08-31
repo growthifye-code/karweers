@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ChevronLeft, CheckCircle2, XCircle, Trophy, RotateCcw, ArrowRight, Sparkles, MessageSquare, Medal, LogIn } from "lucide-react";
+import { ChevronLeft, CheckCircle2, XCircle, Trophy, RotateCcw, ArrowRight, Sparkles, MessageSquare, Medal, LogIn, Share2, Download, Link2 } from "lucide-react";
+import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import Seo from "@/components/Seo";
 import { useAuth } from "@/context/AuthContext";
-import api, { track } from "@/lib/api";
+import api, { API, track } from "@/lib/api";
 
 export default function GamePlayPage() {
   const { slug } = useParams();
@@ -142,6 +143,46 @@ export default function GamePlayPage() {
                   <p className="mx-auto mt-4 max-w-xl text-sm leading-relaxed text-muted-foreground">{result.note}</p>
                 </div>
 
+                {/* Shareable score card */}
+                {(() => {
+                  const who = user?.name ? encodeURIComponent(user.name) : "";
+                  const cardUrl = `${API}/games/${slug}/score-card.png?score=${result.score}${who ? `&name=${who}` : ""}`;
+                  const shareUrl = `${window.location.origin}/games/${slug}`;
+                  const copyLink = async () => {
+                    try { await navigator.clipboard.writeText(shareUrl); toast.success("Share link copied — challenge a peer to beat your score."); }
+                    catch { toast.error("Couldn't copy the link."); }
+                  };
+                  const nativeShare = async () => {
+                    if (navigator.share) {
+                      try { await navigator.share({ title: `${game.title} — my strategy score`, text: `I scored ${result.score}/${result.max_score} on "${game.title}". Can you beat it?`, url: shareUrl }); }
+                      catch { /* cancelled */ }
+                    } else { copyLink(); }
+                  };
+                  return (
+                    <div className="mt-6 rounded-2xl border border-border bg-card p-6" data-testid="game-share">
+                      <h3 className="flex items-center gap-2 font-display text-lg font-bold"><Share2 className="h-5 w-5 text-[hsl(var(--primary))]" /> Share your result</h3>
+                      <p className="mt-1 text-sm text-muted-foreground">Post your branded score card and challenge a peer to beat it.</p>
+                      <div className="mt-4 overflow-hidden rounded-xl border border-border">
+                        <img src={cardUrl} alt={`${game.title} score card`} loading="lazy" className="w-full" data-testid="game-share-card" />
+                      </div>
+                      <div className="mt-4 flex flex-wrap gap-3">
+                        <a href={cardUrl} download={`${slug}-score-card.png`} target="_blank" rel="noopener noreferrer" data-testid="game-share-download"
+                          className="inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-5 py-2.5 text-sm font-semibold text-[hsl(var(--primary-foreground))] transition-transform hover:-translate-y-0.5">
+                          <Download className="h-4 w-4" /> Download image
+                        </a>
+                        <button onClick={nativeShare} data-testid="game-share-btn"
+                          className="inline-flex items-center gap-2 rounded-full border border-[hsl(var(--primary))] px-5 py-2.5 text-sm font-semibold text-[hsl(var(--primary))] transition-colors hover:bg-[hsl(var(--primary))]/10">
+                          <Share2 className="h-4 w-4" /> Share
+                        </button>
+                        <button onClick={copyLink} data-testid="game-share-copy"
+                          className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-sm font-semibold text-foreground transition-colors hover:border-[hsl(var(--primary))]">
+                          <Link2 className="h-4 w-4" /> Copy link
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 <div className="mt-6 rounded-2xl border border-border bg-card p-6">
                   <h3 className="font-display text-lg font-bold">Key lessons — {result.framework}</h3>
                   <ul className="mt-3 space-y-2.5">
@@ -153,7 +194,10 @@ export default function GamePlayPage() {
 
                 {/* Leaderboard */}
                 <div className="mt-6 rounded-2xl border border-border bg-card p-6" data-testid="game-leaderboard">
-                  <h3 className="flex items-center gap-2 font-display text-lg font-bold"><Medal className="h-5 w-5 text-[hsl(var(--primary))]" /> Top scores</h3>
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="flex items-center gap-2 font-display text-lg font-bold"><Medal className="h-5 w-5 text-[hsl(var(--primary))]" /> Top scores</h3>
+                    <Link to="/leaderboard" data-testid="game-full-leaderboard" className="inline-flex items-center gap-1 text-sm font-semibold text-[hsl(var(--primary))] hover:underline">Full leaderboard <ArrowRight className="h-3.5 w-3.5" /></Link>
+                  </div>
                   {user ? (
                     <p className="mt-1 text-xs text-muted-foreground" data-testid="game-mybest">
                       {result.saved ? "Run saved. " : ""}Your best: <span className="font-semibold text-[hsl(var(--primary))]">{board?.my_best ?? result.score}/{result.max_score}</span> · {board?.plays ?? 1} play{(board?.plays ?? 1) === 1 ? "" : "s"}

@@ -35,7 +35,7 @@ from emailer import send_security_alert_email
 from emailer import send_new_booking_alert_email, send_session_reminder_email, send_weekly_agenda_email, send_waitlist_opening_email
 from emailer import send_consent_receipt_email
 from emailer import send_signals_digest_email, render_signals_digest_html, send_test_email
-from emailer import send_library_digest_email
+from emailer import send_library_digest_email, send_score_beaten_email
 from emailer import send_sector_digest_email
 from emailer import send_payment_receipt_email, send_refund_email
 from emailer import send_gst_invoice_email, send_abandoned_nudge_email
@@ -2319,14 +2319,14 @@ HOME_FACTS = (
 )
 
 HOME_FALLBACK = {
-    "hero_headline": "Turning ambition into *bankable*, enduring businesses.",
+    "hero_headline": "Turning complexity into your *competitive advantage*.",
     "hero_subtext": ("I'm Sudarshan Karweer — a business coach and strategic advisor, and a former EY (Big 4) management "
-                     "consultant. Across 60+ projects with leading corporates, I help founders and CXOs win at strategy, "
-                     "transformation, financial management and scaling."),
+                     "consultant. Across 60+ projects I help founders and CXOs win at strategy, transformation, financial "
+                     "management, fundraising and scaling — including renewable energy, BESS, green hydrogen and climate finance."),
     "insights": [
+        "Great strategy is subtraction — decide what you won't do before you chase what you will.",
         "Bankability starts long before the term sheet — de-risk the model, then court capital.",
-        "Storage economics now hinge on cycle life and offtake certainty, not just cell prices.",
-        "Green hydrogen scales where cheap renewables and firm demand meet — everything else is a pilot.",
+        "Scaling breaks on systems, not ambition — build the operating rhythm first.",
     ],
     "feed": [],
 }
@@ -2337,13 +2337,18 @@ async def _generate_home_content() -> dict:
         "You write the daily homepage copy for Sudarshan Karweer's advisory platform. "
         "ONLY use these verified facts — never invent credentials, awards, client names, prices, or specific current market numbers:\n"
         f"{HOME_FACTS}\n\n"
-        "Produce fresh, timely, factual thought-leadership framed around the energy transition, climate finance, strategy and scaling. "
+        "Produce fresh, timely, factual thought-leadership at an OVERALL business-leadership level — strategy, "
+        "transformation, financial management, fundraising, new business development and scaling — with renewable energy, "
+        "storage (BESS), green hydrogen and climate finance treated as focus SECTORS among others. Do NOT make the headline "
+        "or subtext exclusively about the energy transition; keep the positioning broad and sector-agnostic. "
         "Return STRICT JSON only (no markdown, no code fences) with keys:\n"
-        "  hero_headline: string, 8-12 words, punchy and confident, first-person brand voice. Wrap exactly ONE key word or short phrase in *asterisks* for emphasis.\n"
-        "  hero_subtext: string, 35-55 words, first person as Sudarshan, grounded in the verified facts.\n"
+        "  hero_headline: string, 8-12 words, punchy and confident, first-person brand voice, positioned at an overall "
+        "business-leadership level (NOT limited to energy). Wrap exactly ONE key word or short phrase in *asterisks* for emphasis.\n"
+        "  hero_subtext: string, 35-55 words, first person as Sudarshan, grounded in the verified facts, framing the breadth "
+        "of his advisory (strategy, transformation, financial management, fundraising, scaling) with energy/climate as example sectors.\n"
         "  insights: array of exactly 3 strings, each a sharp 14-22 word advisory take (no fabricated statistics).\n"
         "  feed: array of exactly 5 objects, each {title: 6-10 words, take: 30-45 word factual commentary, tag: one of "
-        "['Energy Transition','Climate Finance','Storage','Green Hydrogen','Strategy','Macro']}. "
+        "['Strategy','Leadership','Scaling','Fundraising','Climate Finance','Energy Transition','Storage','Green Hydrogen','Macro']}. "
         "Keep every 'take' general and evergreen-factual — do NOT present invented figures as live data.\n"
         "Output JSON only."
     )
@@ -2529,6 +2534,123 @@ async def signals_og_image(day: str):
         _og_cache[cache_key] = await asyncio.to_thread(_render_signal_card, day, nice, top, accent)
     return Response(content=_og_cache[cache_key], media_type="image/png",
                     headers={"Cache-Control": "public, max-age=3600"})
+
+
+_score_card_cache: dict = {}
+
+
+def _render_score_card(title: str, framework: str, score: int, max_score: int,
+                       band_title: str, name: str, accent=(198, 241, 53)) -> bytes:
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter
+    W, H = 1200, 630
+    fonts_dir = Path(__file__).parent / "assets" / "fonts"
+    f_bold = lambda s: ImageFont.truetype(str(fonts_dir / "VeraBd.ttf"), s)
+    f_reg = lambda s: ImageFont.truetype(str(fonts_dir / "Vera.ttf"), s)
+    img = Image.new("RGB", (W, H), (5, 5, 5))
+    glow = Image.new("RGB", (W, H), (5, 5, 5))
+    gd = ImageDraw.Draw(glow)
+    gd.ellipse([W - 420, -240, W + 180, 340], fill=tuple(int(c * 0.6) for c in accent))
+    glow = glow.filter(ImageFilter.GaussianBlur(120))
+    img = Image.blend(img, glow, 0.5)
+    d = ImageDraw.Draw(img)
+    PAD = 70
+    d.text((PAD, 56), "SK", font=f_bold(40), fill=(255, 255, 255))
+    sk_w = d.textlength("SK", font=f_bold(40))
+    d.text((PAD + sk_w, 56), ".", font=f_bold(40), fill=accent)
+    d.text((PAD, 142), "STRATEGY SIMULATION", font=f_bold(24), fill=accent)
+    # Game title (wrap up to 2 lines).
+    hf = f_bold(56)
+    words, lines, cur = (title or "").split(), [], ""
+    for w in words:
+        trial = (cur + " " + w).strip()
+        if d.textlength(trial, font=hf) <= W - 2 * PAD:
+            cur = trial
+        else:
+            lines.append(cur); cur = w
+    if cur:
+        lines.append(cur)
+    y = 196
+    for ln in lines[:2]:
+        d.text((PAD, y), ln, font=hf, fill=(245, 245, 245))
+        y += 66
+    d.text((PAD, y + 8), framework or "", font=f_reg(26), fill=(160, 160, 160))
+    # Big score.
+    score_str = f"{score}"
+    sf = f_bold(150)
+    d.text((PAD, H - 250), score_str, font=sf, fill=accent)
+    sw = d.textlength(score_str, font=sf)
+    d.text((PAD + sw + 14, H - 150), f"/ {max_score}", font=f_bold(48), fill=(200, 200, 200))
+    d.text((PAD, H - 96), (band_title or "").upper(), font=f_bold(30), fill=(245, 245, 245))
+    who = (name or "").strip()
+    if who:
+        d.text((PAD, H - 56), f"{who}'s result", font=f_reg(24), fill=(160, 160, 160))
+    tag = "sudarshankarweer.com/games"
+    tw = d.textlength(tag, font=f_reg(22))
+    d.text((W - PAD - tw, H - 56), tag, font=f_reg(22), fill=accent)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _safe_name(n: str) -> str:
+    n = "".join(c for c in (n or "") if c.isalnum() or c in " -'.").strip()
+    return (n.split(" ")[0] if n else "")[:24]
+
+
+@api_router.get("/games/{slug}/score-card.png")
+async def game_score_card(slug: str, score: int = 0, name: str = ""):
+    g = GAMES_BY_SLUG.get(slug)
+    if not g:
+        raise HTTPException(status_code=404, detail="Unknown game")
+    max_score = sum(max(o["score"] for o in r["options"]) for r in g["rounds"])
+    score = max(0, min(int(score or 0), max_score))
+    band = _game_debrief(g, score)
+    who = _safe_name(name)
+    accent = await _card_accent()
+    key = f"{slug}:{score}:{who}:{accent}"
+    if key not in _score_card_cache:
+        if len(_score_card_cache) > 500:
+            _score_card_cache.clear()
+        _score_card_cache[key] = await asyncio.to_thread(
+            _render_score_card, g["title"], g["framework"], score, max_score, band["title"], who, accent)
+    return Response(content=_score_card_cache[key], media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=3600"})
+
+
+@api_router.get("/games/leaderboard/global")
+async def global_leaderboard(user: Optional[dict] = Depends(get_optional_user)):
+    """Standalone War-Room board: best-per-(user,game) rolled up per strategist."""
+    rows = await db.game_scores.aggregate([
+        {"$sort": {"score": -1, "created_at": 1}},
+        {"$group": {"_id": {"u": "$user_id", "g": "$game_slug"},
+                    "name": {"$first": "$name"}, "best": {"$max": "$score"}}},
+    ]).to_list(5000)
+    by_user, champs = {}, {}
+    for r in rows:
+        uid = r["_id"]["u"]
+        gslug = r["_id"]["g"]
+        u = by_user.setdefault(uid, {"user_id": uid, "name": _first_name(r.get("name")), "total": 0, "games_played": 0})
+        u["total"] += r["best"]
+        u["games_played"] += 1
+        c = champs.get(gslug)
+        if not c or r["best"] > c["score"]:
+            champs[gslug] = {"name": _first_name(r.get("name")), "score": r["best"]}
+    ranked = sorted(by_user.values(), key=lambda x: (x["total"], x["games_played"]), reverse=True)[:20]
+    for i, u in enumerate(ranked):
+        u["rank"] = i + 1
+        u.pop("user_id", None)
+    total_possible = sum(sum(max(o["score"] for o in r["options"]) for r in g["rounds"]) for g in GAMES)
+    champions = [{"slug": g["slug"], "title": g["title"], "tag": g["tag"],
+                 "max_score": sum(max(o["score"] for o in r["options"]) for r in g["rounds"]),
+                 **(champs.get(g["slug"]) or {"name": None, "score": None})} for g in GAMES]
+    out = {"top": ranked, "total_possible": total_possible, "games": len(GAMES), "champions": champions}
+    if user:
+        me = by_user.get(user["id"])
+        if me:
+            all_ranked = sorted(by_user.values(), key=lambda x: (x["total"], x["games_played"]), reverse=True)
+            my_rank = next((i + 1 for i, u in enumerate(all_ranked) if u["user_id"] == user["id"]), None)
+            out["me"] = {"name": me["name"], "total": me["total"], "games_played": me["games_played"], "rank": my_rank}
+    return out
 
 
 # ---------------- Sector deep-dive pages (tech, OEMs, competition, videos, SK insights, news) ----------------
@@ -3230,14 +3352,25 @@ async def score_game(slug: str, body: GameScoreIn, user: Optional[dict] = Depend
     result = {**_game_debrief(g, total), "breakdown": breakdown}
     result["saved"] = False
     if user:
-        prev_best = await db.game_scores.find({"user_id": user["id"], "game_slug": slug}).sort("score", -1).limit(1).to_list(1)
-        result["personal_best_before"] = prev_best[0]["score"] if prev_best else None
+        prev_top = await db.game_scores.find({"game_slug": slug}).sort("score", -1).limit(1).to_list(1)
+        prev_holder = prev_top[0] if prev_top else None
+        prev_max = prev_holder["score"] if prev_holder else -1
+        my_prev = await db.game_scores.find({"user_id": user["id"], "game_slug": slug}).sort("score", -1).limit(1).to_list(1)
+        result["personal_best_before"] = my_prev[0]["score"] if my_prev else None
         await db.game_scores.insert_one({
             "id": str(uuid.uuid4()), "game_slug": slug, "game_title": g["title"],
             "user_id": user["id"], "name": user.get("name", "Anonymous"),
             "email": user.get("email", ""), "score": total,
             "max_score": result["max_score"], "band": result["band"], "created_at": now_iso()})
         result["saved"] = True
+        # Dethrone nudge: if this run beats the previous #1 held by someone else, notify them.
+        if (total > prev_max and prev_holder and prev_holder.get("user_id") != user["id"]
+                and prev_holder.get("email") and os.environ.get("GMAIL_APP_PASSWORD")):
+            loop = asyncio.get_event_loop()
+            game_url = f"{PUBLIC_SITE}/games/{slug}"
+            loop.run_in_executor(None, lambda: send_score_beaten_email(
+                prev_holder["email"], _first_name(prev_holder.get("name")), g["title"],
+                _first_name(user.get("name")), total, prev_max, result["max_score"], game_url))
     return result
 
 

@@ -19,8 +19,8 @@ function Headline({ text }) {
   );
 }
 
-const DEFAULT_HEADLINE = "Turning ambition into *bankable*, enduring *businesses*.";
-const DEFAULT_SUBTEXT = "I'm Sudarshan Karweer — a business coach and strategic advisor, and a former EY (Big 4) management consultant. Across 60+ projects with leading corporates in India and globally, I help founders and CXOs win at strategy, supply chain & cost optimisation, business & digital transformation, financial management and scaling.";
+const DEFAULT_HEADLINE = "Turning complexity into your *competitive advantage*.";
+const DEFAULT_SUBTEXT = "I'm Sudarshan Karweer — a business coach and strategic advisor, and a former EY (Big 4) management consultant. Across 60+ projects with leading corporates in India and globally, I help founders and CXOs win at strategy, transformation, financial management, fundraising and scaling — including renewable energy, BESS, green hydrogen and climate finance.";
 
 export default function Hero({ content }) {
   const headline = content?.hero_headline || DEFAULT_HEADLINE;

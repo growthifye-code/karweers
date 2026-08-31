@@ -2569,7 +2569,7 @@ def _gcal_build_service_sync(conn: dict):
         token_uri=GCAL_TOKEN_URI, client_id=GCAL_CLIENT_ID, client_secret=GCAL_CLIENT_SECRET,
         scopes=GCAL_SCOPES)
     refreshed = None
-    if creds.expired and creds.refresh_token:
+    if creds.refresh_token and (creds.expired or not creds.expiry):
         creds.refresh(GRequest())
         refreshed = creds.token
     return build("calendar", "v3", credentials=creds, cache_discovery=False), refreshed
@@ -2584,6 +2584,16 @@ async def _gcal_service():
     if refreshed:
         await db.app_meta.update_one({"_id": "google_calendar"}, {"$set": {"token_enc": _enc(refreshed)}})
     return service
+
+
+async def _gcal_mark_healthy():
+    await db.app_meta.update_one({"_id": "google_calendar"},
+                                 {"$unset": {"needs_reconnect": "", "last_error": ""}})
+
+
+async def _gcal_mark_unhealthy(err: str):
+    await db.app_meta.update_one({"_id": "google_calendar"},
+                                 {"$set": {"needs_reconnect": True, "last_error": (err or "")[:300]}})
 
 
 def _event_body(booking: dict, want_meet: bool = False):
@@ -2641,8 +2651,12 @@ async def sync_booking_to_calendar(booking: dict, action: str):
         else:
             ev = await loop.run_in_executor(None, lambda: service.events().insert(
                 calendarId="primary", body=body, conferenceDataVersion=1).execute())
+        await _gcal_mark_healthy()
         return {"event_id": ev.get("id", event_id), "meet_link": _extract_meet_link(ev)}
-    except Exception:
+    except Exception as e:
+        from google.auth.exceptions import RefreshError
+        if isinstance(e, RefreshError):
+            await _gcal_mark_unhealthy(str(e))
         logger.exception("Google Calendar sync failed (%s)", action)
         return None
 
@@ -2666,8 +2680,24 @@ async def _apply_calendar_sync(bid: str, booking: dict, action: str):
 @api_router.get("/admin/calendar/status")
 async def calendar_status(admin: dict = Depends(require_admin)):
     conn = await _gcal_get_conn()
+    healthy = True
+    if conn:
+        healthy = not conn.get("needs_reconnect")
+        try:
+            svc = await _gcal_service()
+            if svc:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, lambda: svc.calendars().get(calendarId="primary").execute())
+                await _gcal_mark_healthy()
+                healthy = True
+        except Exception as e:
+            from google.auth.exceptions import RefreshError
+            if isinstance(e, RefreshError):
+                await _gcal_mark_unhealthy(str(e))
+                healthy = False
     return {"configured": _gcal_configured(),
             "connected": bool(conn),
+            "healthy": healthy,
             "email": (conn or {}).get("email"),
             "connected_at": (conn or {}).get("connected_at")}
 

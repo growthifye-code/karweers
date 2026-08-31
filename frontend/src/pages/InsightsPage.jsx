@@ -35,7 +35,7 @@ export default function InsightsPage() {
           </h1>
           <p className="mt-5 max-w-2xl text-muted-foreground">
             Curated intelligence across renewable energy, storage, green hydrogen, climate & green financing,
-            sustainability and business strategy — powered by the Karweer AI engine.
+            sustainability and business strategy — powered by the Karweer insight engine.
           </p>
         </div>
       </section>

@@ -5,7 +5,26 @@ import EYBadge from "@/components/EYBadge";
 const COACH = "https://static.prod-images.emergentagent.com/jobs/69d54eb7-07e1-4ffd-ad08-8725f9f9829e/images/5b2f94a6fd021cc779249c997e2a7e9f42370d01aeb0897c98fa6f1010e0dcce.jpeg";
 const BG_VIDEO = "/hero-coaching.mp4";
 
-export default function Hero() {
+// Renders a headline where *asterisk-wrapped* text is highlighted in the brand accent.
+function Headline({ text }) {
+  const parts = text.split(/(\*[^*]+\*)/g).filter(Boolean);
+  return (
+    <>
+      {parts.map((p, i) =>
+        p.startsWith("*") && p.endsWith("*")
+          ? <span key={i} className="text-[hsl(var(--primary))]">{p.slice(1, -1)}</span>
+          : <span key={i}>{p}</span>
+      )}
+    </>
+  );
+}
+
+const DEFAULT_HEADLINE = "Turning ambition into *bankable*, enduring *businesses*.";
+const DEFAULT_SUBTEXT = "I'm Sudarshan Karweer — a business coach and strategic advisor, and a former EY (Big 4) management consultant. Across 60+ projects with leading corporates in India and globally, I help founders and CXOs win at strategy, supply chain & cost optimisation, business & digital transformation, financial management and scaling.";
+
+export default function Hero({ content }) {
+  const headline = content?.hero_headline || DEFAULT_HEADLINE;
+  const subtext = content?.hero_subtext || DEFAULT_SUBTEXT;
   return (
     <section className="grain relative overflow-hidden bg-background pt-40 lg:pt-48" data-testid="hero">
       <video autoPlay muted loop playsInline preload="auto" poster={COACH} aria-hidden="true"
@@ -27,15 +46,15 @@ export default function Hero() {
             </span>
             <EYBadge />
           </motion.div>
-          <motion.h1 initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.1 }}
+          <motion.h1 key={headline} initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.1 }}
+            data-testid="hero-headline"
             className="mt-6 font-display text-4xl font-extrabold leading-[1.02] tracking-tight sm:text-5xl lg:text-[4.2rem]">
-            Turning ambition into <span className="text-[hsl(var(--primary))]">bankable</span>, enduring <span className="text-[hsl(var(--accent))]">businesses</span>.
+            <Headline text={headline} />
           </motion.h1>
-          <motion.p initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.2 }}
+          <motion.p key={subtext} initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.2 }}
+            data-testid="hero-subtext"
             className="mt-6 max-w-xl text-base leading-relaxed text-muted-foreground sm:text-lg">
-            I'm Sudarshan Karweer — a business coach and strategic advisor, and a former EY (Big 4) management consultant.
-            Across 60+ projects with leading corporates in India and globally, I help founders and CXOs win at strategy,
-            supply chain &amp; cost optimisation, business &amp; digital transformation, financial management and scaling.
+            {subtext}
           </motion.p>
           <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.3 }}
             className="mt-9 flex flex-wrap items-center gap-4">
@@ -47,6 +66,18 @@ export default function Hero() {
               Explore Services
             </a>
           </motion.div>
+
+          {content?.insights?.length > 0 && (
+            <motion.ul initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.4 }}
+              data-testid="hero-insights" className="mt-10 space-y-2.5 border-l-2 border-[hsl(var(--primary))]/40 pl-5">
+              <li className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[hsl(var(--primary))]">Today's takes</li>
+              {content.insights.map((t, i) => (
+                <li key={i} data-testid={`hero-insight-${i}`} className="text-sm leading-relaxed text-muted-foreground">
+                  {t}
+                </li>
+              ))}
+            </motion.ul>
+          )}
         </div>
 
         <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.8, delay: 0.2 }} className="relative">

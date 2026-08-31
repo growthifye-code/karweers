@@ -5,6 +5,7 @@ import { Logo } from "@/components/Navbar";
 import { useAuth, formatApiErrorDetail } from "@/context/AuthContext";
 import { SK_PHOTOS } from "@/lib/assets";
 import Captcha from "@/components/Captcha";
+import ConsentGate from "@/components/ConsentGate";
 
 function GoogleIcon() {
   return (
@@ -22,16 +23,18 @@ export default function Register() {
   const navigate = useNavigate();
   const [form, setForm] = useState({ name: "", email: "", password: "" });
   const [captcha, setCaptcha] = useState("");
+  const [agreed, setAgreed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const submit = async (e) => {
     e.preventDefault();
     if (!captcha) { setError("Please complete the captcha."); return; }
+    if (!agreed) { setError("Please read and agree to the Terms & Conditions and Privacy Policy."); return; }
     setBusy(true);
     setError("");
     try {
-      await register(form.name, form.email, form.password, captcha);
+      await register(form.name, form.email, form.password, captcha, agreed);
       toast.success("Account created!");
       navigate("/dashboard");
     } catch (err) {
@@ -45,10 +48,11 @@ export default function Register() {
 
   const googleRegister = async () => {
     if (!captcha) { setError("Please complete the captcha before continuing with Google."); return; }
+    if (!agreed) { setError("Please read and agree to the Terms & Conditions and Privacy Policy."); return; }
     setBusy(true);
     setError("");
     try {
-      await loginWithGoogle(captcha);
+      await loginWithGoogle(captcha, agreed);
     } catch (err) {
       setError(formatApiErrorDetail(err.response?.data?.detail) || "Google sign-in failed");
       setBusy(false);
@@ -68,7 +72,8 @@ export default function Register() {
             <input value={form.password} onChange={set("password")} type="password" placeholder="Password" data-testid="register-password" className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]" />
             {error && <p className="text-sm text-[hsl(var(--destructive))]" data-testid="register-error">{error}</p>}
             <Captcha onVerify={setCaptcha} onExpire={() => setCaptcha("")} />
-            <button type="submit" disabled={busy} data-testid="register-submit" className="w-full rounded-full bg-[hsl(var(--accent))] px-6 py-3.5 font-semibold text-[hsl(var(--accent-foreground))] transition-transform hover:-translate-y-0.5 disabled:opacity-60">
+            <ConsentGate agreed={agreed} setAgreed={setAgreed} />
+            <button type="submit" disabled={busy || !agreed} data-testid="register-submit" className="w-full rounded-full bg-[hsl(var(--accent))] px-6 py-3.5 font-semibold text-[hsl(var(--accent-foreground))] transition-transform hover:-translate-y-0.5 disabled:opacity-60">
               {busy ? "Creating…" : "Create account"}
             </button>
           </form>
@@ -78,11 +83,11 @@ export default function Register() {
             <span className="text-xs uppercase tracking-widest text-muted-foreground">or</span>
             <span className="h-px flex-1 bg-border" />
           </div>
-          <button onClick={googleRegister} type="button" disabled={busy || !captcha} data-testid="google-register-btn"
+          <button onClick={googleRegister} type="button" disabled={busy || !captcha || !agreed} data-testid="google-register-btn"
             className="flex w-full items-center justify-center gap-3 rounded-full border border-border bg-background px-6 py-3.5 text-sm font-semibold transition-colors hover:bg-secondary disabled:opacity-60 disabled:cursor-not-allowed">
             <GoogleIcon /> Continue with Google
           </button>
-          <p className="mt-3 text-center text-xs text-muted-foreground">{captcha ? "Google sign-in unlocks personalised recommendations & your Learning Hub." : "Complete the captcha above to continue with Google."}</p>
+          <p className="mt-3 text-center text-xs text-muted-foreground">{!agreed ? "Agree to the Terms & Privacy above to continue." : !captcha ? "Complete the captcha above to continue with Google." : "Google sign-in unlocks personalised recommendations & your Learning Hub."}</p>
           <p className="mt-6 text-sm text-muted-foreground">
             Already have an account? <Link to="/login" className="font-semibold text-[hsl(var(--primary))]">Sign in</Link>
           </p>

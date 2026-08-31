@@ -46,8 +46,8 @@ export default function LearningPage() {
 
   return (
     <div className="min-h-screen bg-background text-left text-foreground">
-      <Seo title="Learning Hub — Curated Economy, Energy & AI Videos | Sudarshan Karweer"
-        description="A curated, always-fresh library of the best videos on global & India economy, energy transition, climate finance, AI, technology, fundraising and leadership." />
+      <Seo title="Learning Hub — Curated Economy, Energy & Technology Videos | Sudarshan Karweer"
+        description="A curated, always-fresh library of the best videos on global & India economy, energy transition, climate finance, technology, fundraising and leadership." />
       <Navbar />
 
       <section className="border-b border-border bg-secondary/30 py-16 md:py-24">
@@ -59,7 +59,7 @@ export default function LearningPage() {
             Best-in-class ideas, <span className="text-[hsl(var(--primary))]">curated for you.</span>
           </h1>
           <p className="mt-5 max-w-2xl text-base text-muted-foreground md:text-lg">
-            Hand-picked videos from the world's leading institutions on the economy, energy, climate finance, AI, technology, fundraising and leadership — always fresh, always relevant. All videos are embedded with full credit to their original creators.
+            Hand-picked videos from the world's leading institutions on the economy, energy, climate finance, technology, fundraising and leadership — always fresh, always relevant. All videos are embedded with full credit to their original creators.
           </p>
         </div>
       </section>

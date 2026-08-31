@@ -188,7 +188,7 @@ export default function ClientDashboard() {
           <Link to="/learning" className="group rounded-2xl border border-[hsl(var(--primary))]/40 bg-[hsl(var(--primary))]/5 p-8 transition-transform hover:-translate-y-1" data-testid="client-learning">
             <GraduationCap className="h-8 w-8 text-[hsl(var(--primary))]" />
             <h3 className="mt-4 font-display text-lg font-bold">Learning Hub</h3>
-            <p className="mt-2 text-sm text-muted-foreground">Curated videos on economy, energy, AI & leadership — always fresh.</p>
+            <p className="mt-2 text-sm text-muted-foreground">Curated videos on economy, energy, technology & leadership — always fresh.</p>
           </Link>
           <Link to="/#consult" className="group rounded-2xl border border-border bg-card p-8 transition-transform hover:-translate-y-1" data-testid="client-book">
             <Calendar className="h-8 w-8 text-[hsl(var(--accent))]" />

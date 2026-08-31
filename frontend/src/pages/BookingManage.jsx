@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { CalendarClock, XCircle, CheckCircle2, RefreshCw } from "lucide-react";
 import api from "@/lib/api";
 import { formatApiErrorDetail } from "@/context/AuthContext";
+import { CONTACT } from "@/lib/assets";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 
@@ -70,7 +71,9 @@ export default function BookingManage() {
                 {!showResched ? (
                   <div className="flex flex-wrap gap-3">
                     <button onClick={() => setShowResched(true)} disabled={busy} data-testid="request-reschedule-btn" className="inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-5 py-3 text-sm font-semibold text-[hsl(var(--primary-foreground))] disabled:opacity-60"><RefreshCw className="h-4 w-4" /> Request a reschedule</button>
-                    <button onClick={cancel} disabled={busy} data-testid="cancel-booking-btn" className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-3 text-sm font-semibold text-red-500 hover:bg-secondary disabled:opacity-60"><XCircle className="h-4 w-4" /> Cancel session</button>
+                    {booking.can_cancel !== false
+                      ? <button onClick={cancel} disabled={busy} data-testid="cancel-booking-btn" className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-3 text-sm font-semibold text-red-500 hover:bg-secondary disabled:opacity-60"><XCircle className="h-4 w-4" /> Cancel session</button>
+                      : <p className="w-full text-xs text-muted-foreground" data-testid="cancel-blocked">Cancellations within {booking.cancel_cutoff_hours}h of the session can't be made online — please email <a href={`mailto:${CONTACT.email}`} className="text-[hsl(var(--primary))] underline">{CONTACT.email}</a> or request a reschedule above.</p>}
                   </div>
                 ) : (
                   <div>

@@ -3,7 +3,7 @@ import { Play, ExternalLink } from "lucide-react";
 
 const TOPIC_LABELS = {
   "global-macro": "Global Macro", "india-economy": "India", "energy": "Energy",
-  "climate-finance": "Green Finance", "ai": "AI", "technology": "Tech",
+  "climate-finance": "Green Finance", "ai": "Machine Intel", "technology": "Tech",
   "fundraising": "Fundraising", "leadership": "Leadership", "geopolitics": "Geopolitics",
 };
 

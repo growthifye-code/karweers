@@ -42,24 +42,24 @@ export function AuthProvider({ children }) {
     };
   }, [user, logout]);
 
-  const login = async (email, password, captchaToken) => {
-    const { data } = await api.post("/auth/login", { email, password, captcha_token: captchaToken });
+  const login = async (email, password, captchaToken, consent = false) => {
+    const { data } = await api.post("/auth/login", { email, password, captcha_token: captchaToken, consent });
     localStorage.setItem("sk_token", data.token);
     setUser(data.user);
     return data.user;
   };
 
-  const register = async (name, email, password, captchaToken) => {
-    const { data } = await api.post("/auth/register", { name, email, password, captcha_token: captchaToken });
+  const register = async (name, email, password, captchaToken, consent = false) => {
+    const { data } = await api.post("/auth/register", { name, email, password, captcha_token: captchaToken, consent });
     localStorage.setItem("sk_token", data.token);
     setUser(data.user);
     return data.user;
   };
 
   // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
-  const loginWithGoogle = async (captchaToken) => {
-    // hCaptcha must be solved first; backend sets a short-lived gate cookie required by /auth/session.
-    await api.post("/auth/captcha-gate", { captcha_token: captchaToken });
+  const loginWithGoogle = async (captchaToken, consent = false) => {
+    // hCaptcha + consent must be captured first; backend sets a short-lived gate cookie required by /auth/session.
+    await api.post("/auth/captcha-gate", { captcha_token: captchaToken, consent });
     const redirectUrl = window.location.origin + "/dashboard";
     window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
   };

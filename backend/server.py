@@ -28,7 +28,7 @@ import curator
 from services_data import SERVICES as SERVICE_PAGES
 from emailer import send_booking_email
 from emailer import send_security_alert_email
-from emailer import send_new_booking_alert_email, send_session_reminder_email, send_weekly_agenda_email
+from emailer import send_new_booking_alert_email, send_session_reminder_email, send_weekly_agenda_email, send_waitlist_opening_email
 import xml.etree.ElementTree as ET
 from datetime import datetime as _dt
 
@@ -80,22 +80,52 @@ def verify_captcha(token, ip=None):
 # Short-lived signed cookie proving a captcha was solved just before a Google OAuth redirect.
 CAPTCHA_GATE_TTL = 600  # 10 minutes
 
+# ---------------- Legal consent (T&C + Privacy) ----------------
+CONSENT_POLICY_VERSION = os.environ.get("CONSENT_POLICY_VERSION", "2026-06-01")
 
-def issue_captcha_gate() -> str:
-    payload = {"purpose": "captcha_gate",
+
+async def record_consent(request: Request, email: str, name: str, action: str, user_id: str = ""):
+    """Persist a tamper-evident record that the user agreed to T&C + Privacy at sign-in/up."""
+    ts = now_iso()
+    doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": user_id or "",
+        "email": (email or "").lower(),
+        "name": name or "",
+        "action": action,  # register | login | google
+        "agreed": True,
+        "terms_version": CONSENT_POLICY_VERSION,
+        "privacy_version": CONSENT_POLICY_VERSION,
+        "ip": _client_ip(request),
+        "user_agent": (request.headers.get("user-agent", "") or "")[:400],
+        "created_at": ts,
+    }
+    await db.consent_logs.insert_one(dict(doc))
+    if user_id:
+        await db.users.update_one({"id": user_id}, {"$set": {
+            "consent": {"agreed": True, "version": CONSENT_POLICY_VERSION, "at": ts, "action": action}}})
+
+
+def issue_captcha_gate(consent: bool = False) -> str:
+    payload = {"purpose": "captcha_gate", "consent": bool(consent),
                "exp": datetime.now(timezone.utc) + timedelta(seconds=CAPTCHA_GATE_TTL)}
     return pyjwt.encode(payload, get_jwt_secret(), algorithm="HS256")
 
 
-def verify_captcha_gate(token) -> bool:
+def read_captcha_gate(token) -> Optional[dict]:
     if not token:
-        return False
+        return None
     try:
         data = pyjwt.decode(token, get_jwt_secret(), algorithms=["HS256"])
-        return data.get("purpose") == "captcha_gate"
+        if data.get("purpose") == "captcha_gate":
+            return data
     except Exception:
-        return False
-    return True
+        return None
+    return None
+
+
+def verify_captcha_gate(token) -> bool:
+    return read_captcha_gate(token) is not None
 
 app = FastAPI(title="Sudarshan Karweer Advisory")
 api_router = APIRouter(prefix="/api")
@@ -114,12 +144,14 @@ class RegisterIn(BaseModel):
     email: EmailStr
     password: str
     captcha_token: Optional[str] = None
+    consent: bool = False
 
 
 class LoginIn(BaseModel):
     email: EmailStr
     password: str
     captcha_token: Optional[str] = None
+    consent: bool = False
 
 
 class ConsultationIn(BaseModel):
@@ -220,6 +252,8 @@ async def require_admin(user: dict = Depends(get_current_user)) -> dict:
 @api_router.post("/auth/register")
 async def register(body: RegisterIn, request: Request):
     verify_captcha(body.captcha_token, _client_ip(request))
+    if not body.consent:
+        raise HTTPException(status_code=400, detail="You must read and agree to the Terms & Conditions and Privacy Policy to continue.")
     email = body.email.lower()
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -232,6 +266,7 @@ async def register(body: RegisterIn, request: Request):
         "created_at": now_iso(),
     }
     await db.users.insert_one(doc)
+    await record_consent(request, email, body.name, "register", user_id=uid)
     token = create_access_token(uid, email, role)
     return {"token": token, "user": {"id": uid, "email": email, "name": body.name, "role": role, "client_code": cc}}
 
@@ -569,6 +604,8 @@ async def country_should_block(request: Request):
 async def login(body: LoginIn, request: Request):
     client_ip = _client_ip(request)
     verify_captcha(body.captcha_token, client_ip)
+    if not body.consent:
+        raise HTTPException(status_code=400, detail="You must read and agree to the Terms & Conditions and Privacy Policy to continue.")
     email = body.email.lower()
     identifier = _login_identifier(request, email)
     await check_login_lockout(identifier)
@@ -577,6 +614,7 @@ async def login(body: LoginIn, request: Request):
         await register_failed_login(identifier, client_ip, email)
         raise HTTPException(status_code=401, detail="Invalid email or password")
     await clear_login_attempts(identifier)
+    await record_consent(request, email, user.get("name", ""), "login", user_id=user["id"])
     # Enforce allowlist: role always reflects the allowlist, never drifts.
     role = role_for(email)
     if user.get("role") != role:
@@ -596,22 +634,28 @@ class SessionIn(BaseModel):
 
 class CaptchaGateIn(BaseModel):
     captcha_token: Optional[str] = None
+    consent: bool = False
 
 
 @api_router.post("/auth/captcha-gate")
 async def captcha_gate(body: CaptchaGateIn, request: Request, response: Response):
-    """Verify a solved hCaptcha, then set a short-lived cookie that gates the Google OAuth redirect."""
+    """Verify a solved hCaptcha + consent, then set a short-lived cookie that gates the Google OAuth redirect."""
     verify_captcha(body.captcha_token, _client_ip(request))
-    response.set_cookie("captcha_gate", issue_captcha_gate(), httponly=True, secure=True,
+    if not body.consent:
+        raise HTTPException(status_code=400, detail="You must read and agree to the Terms & Conditions and Privacy Policy to continue.")
+    response.set_cookie("captcha_gate", issue_captcha_gate(consent=True), httponly=True, secure=True,
                         samesite="none", path="/", max_age=CAPTCHA_GATE_TTL)
     return {"ok": True}
 
 
 @api_router.post("/auth/session")
 async def create_session(body: SessionIn, request: Request, response: Response):
-    # hCaptcha must have been solved on the login/register page before the Google redirect.
-    if not verify_captcha_gate(request.cookies.get("captcha_gate")):
+    # hCaptcha + consent must have been captured on the login/register page before the Google redirect.
+    gate = read_captcha_gate(request.cookies.get("captcha_gate"))
+    if not gate:
         raise HTTPException(status_code=403, detail="Captcha verification required")
+    if not gate.get("consent"):
+        raise HTTPException(status_code=400, detail="You must read and agree to the Terms & Conditions and Privacy Policy to continue.")
     session_id = body.session_id or request.headers.get("X-Session-ID")
     if not session_id:
         raise HTTPException(status_code=400, detail="Missing session id")
@@ -648,6 +692,7 @@ async def create_session(body: SessionIn, request: Request, response: Response):
     response.set_cookie("session_token", session_token, httponly=True, secure=True,
                         samesite="none", path="/", max_age=7 * 24 * 3600)
     response.delete_cookie("captcha_gate", path="/")
+    await record_consent(request, email, data.get("name") or "", "google", user_id=uid)
     return {"user": {"id": uid, "email": email, "name": data.get("name"), "role": role,
                      "picture": data.get("picture", "")}}
 
@@ -1001,6 +1046,29 @@ async def admin_unblock_country(body: CountryIn, request: Request, admin: dict =
 async def admin_audit_log(admin: dict = Depends(require_admin)):
     logs = await db.audit_log.find({}, {"_id": 0, "expire_at": 0}).sort("at", -1).to_list(100)
     return {"logs": logs, "retention_days": _audit_retention_days}
+
+
+@api_router.get("/admin/consent-logs")
+async def admin_consent_logs(admin: dict = Depends(require_admin)):
+    """Every recorded T&C + Privacy agreement — for super-admin compliance review."""
+    logs = await db.consent_logs.find({}, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    return {"logs": logs, "policy_version": CONSENT_POLICY_VERSION, "total": len(logs)}
+
+
+@api_router.get("/admin/consent-logs/export")
+async def admin_consent_export(admin: dict = Depends(require_admin)):
+    import csv as _csv
+    import io as _io
+    logs = await db.consent_logs.find({}, {"_id": 0}).sort("created_at", -1).to_list(20000)
+    buf = _io.StringIO()
+    w = _csv.writer(buf)
+    w.writerow(["Timestamp (UTC)", "Name", "Email", "Action", "Agreed", "Terms Version", "Privacy Version", "IP", "User Agent"])
+    for l in logs:
+        w.writerow([l.get("created_at", ""), l.get("name", ""), l.get("email", ""), l.get("action", ""),
+                    "Yes" if l.get("agreed") else "No", l.get("terms_version", ""), l.get("privacy_version", ""),
+                    l.get("ip", ""), l.get("user_agent", "")])
+    return Response(content=buf.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=consent-log.csv"})
 
 
 class RetentionIn(BaseModel):
@@ -1823,6 +1891,7 @@ async def _digest_scheduler():
     while True:
         try:
             await _auto_escalate_tickets()  # hourly SLA escalation pass
+            await _refresh_home_content()   # daily AI homepage copy (self-guards on 24h staleness)
             now = datetime.now(timezone.utc)
             # Every Saturday, publish (roll forward) availability to the coming week.
             if now.weekday() == 5:  # Saturday
@@ -1945,7 +2014,7 @@ async def admin_stats(admin: dict = Depends(require_admin)):
 
 # ---------------- AI engine ----------------
 AI_SYSTEM = (
-    "You are 'Karweer AI', the intelligent advisory engine on Sudarshan Karweer's platform. "
+    "You are 'Ask SK', the advisory assistant on Sudarshan Karweer's platform. "
     "Sudarshan Karweer is a renowned business coach and strategic advisor with 23+ years of experience and "
     "60+ projects across corporates and CXOs. His expertise spans renewable energy, energy storage (BESS), "
     "green hydrogen, green & climate financing, fundraising, strategy, new business development, scaling businesses, "
@@ -2004,6 +2073,134 @@ async def ai_generate(body: GenerateIn, admin: dict = Depends(require_admin)):
         data = json.loads(text)
     except Exception:
         data = {"title": body.topic, "summary": text[:200], "content": text, "tags": [body.category]}
+    return data
+
+
+# ---------------- Dynamic AI homepage content engine ----------------
+HOME_REFRESH_HOURS = 24
+_home_lock = asyncio.Lock()
+
+# Hard factual guardrails — the model must NOT invent anything beyond these.
+HOME_FACTS = (
+    "Sudarshan Karweer is a business coach and strategic advisor, and a former EY (Big 4) management consultant. "
+    "23+ years of experience, 60+ projects with leading corporates in India and globally, and $2B+ of debt syndication "
+    "across Maharashtra government authorities. He advises founders and CXOs on strategy, supply chain & cost optimisation, "
+    "business & digital transformation, financial management, scaling, fundraising, new business development, and "
+    "government asset monetisation (e.g. MSRTC bus depot monetisation). Focus sectors: renewable energy, energy storage (BESS), "
+    "green hydrogen, green & climate financing, plus M&A, aviation, metals & mining, cement, steel, telecom, agriculture and start-up funding."
+)
+
+HOME_FALLBACK = {
+    "hero_headline": "Turning ambition into *bankable*, enduring businesses.",
+    "hero_subtext": ("I'm Sudarshan Karweer — a business coach and strategic advisor, and a former EY (Big 4) management "
+                     "consultant. Across 60+ projects with leading corporates, I help founders and CXOs win at strategy, "
+                     "transformation, financial management and scaling."),
+    "insights": [
+        "Bankability starts long before the term sheet — de-risk the model, then court capital.",
+        "Storage economics now hinge on cycle life and offtake certainty, not just cell prices.",
+        "Green hydrogen scales where cheap renewables and firm demand meet — everything else is a pilot.",
+    ],
+    "feed": [],
+}
+
+
+async def _generate_home_content() -> dict:
+    prompt = (
+        "You write the daily homepage copy for Sudarshan Karweer's advisory platform. "
+        "ONLY use these verified facts — never invent credentials, awards, client names, prices, or specific current market numbers:\n"
+        f"{HOME_FACTS}\n\n"
+        "Produce fresh, timely, factual thought-leadership framed around the energy transition, climate finance, strategy and scaling. "
+        "Return STRICT JSON only (no markdown, no code fences) with keys:\n"
+        "  hero_headline: string, 8-12 words, punchy and confident, first-person brand voice. Wrap exactly ONE key word or short phrase in *asterisks* for emphasis.\n"
+        "  hero_subtext: string, 35-55 words, first person as Sudarshan, grounded in the verified facts.\n"
+        "  insights: array of exactly 3 strings, each a sharp 14-22 word advisory take (no fabricated statistics).\n"
+        "  feed: array of exactly 5 objects, each {title: 6-10 words, take: 30-45 word factual commentary, tag: one of "
+        "['Energy Transition','Climate Finance','Storage','Green Hydrogen','Strategy','Macro']}. "
+        "Keep every 'take' general and evergreen-factual — do NOT present invented figures as live data.\n"
+        "Output JSON only."
+    )
+    chat = new_chat("home-" + str(uuid.uuid4())).with_model("anthropic", "claude-sonnet-4-6")
+    text = ""
+    async for ev in chat.stream_message(UserMessage(text=prompt)):
+        if isinstance(ev, TextDelta):
+            text += ev.content
+        elif isinstance(ev, StreamDone):
+            break
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.startswith("json"):
+            text = text[4:]
+    data = json.loads(text)
+    # Validate / coerce shape.
+    out = {
+        "hero_headline": str(data.get("hero_headline") or HOME_FALLBACK["hero_headline"]).strip(),
+        "hero_subtext": str(data.get("hero_subtext") or HOME_FALLBACK["hero_subtext"]).strip(),
+        "insights": [str(x).strip() for x in (data.get("insights") or []) if str(x).strip()][:3],
+        "feed": [],
+    }
+    for f in (data.get("feed") or []):
+        if not isinstance(f, dict):
+            continue
+        out["feed"].append({
+            "title": str(f.get("title") or "").strip(),
+            "take": str(f.get("take") or "").strip(),
+            "tag": str(f.get("tag") or "Strategy").strip(),
+        })
+    out["feed"] = [f for f in out["feed"] if f["title"] and f["take"]][:5]
+    if not out["insights"]:
+        out["insights"] = HOME_FALLBACK["insights"]
+    return out
+
+
+def _home_is_stale(doc: Optional[dict]) -> bool:
+    if not doc or not doc.get("generated_at"):
+        return True
+    try:
+        gen = datetime.fromisoformat(doc["generated_at"])
+        if gen.tzinfo is None:
+            gen = gen.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - gen) >= timedelta(hours=HOME_REFRESH_HOURS)
+    except Exception:
+        return True
+
+
+async def _refresh_home_content(force: bool = False) -> Optional[dict]:
+    doc = await db.app_meta.find_one({"_id": "home_content"})
+    if not force and not _home_is_stale(doc):
+        return doc
+    async with _home_lock:
+        doc = await db.app_meta.find_one({"_id": "home_content"})
+        if not force and not _home_is_stale(doc):
+            return doc
+        try:
+            data = await _generate_home_content()
+        except Exception:
+            logger.exception("home content generation failed")
+            return doc  # keep last-known-good (may be None → frontend uses fallback)
+        data["_id"] = "home_content"
+        data["generated_at"] = now_iso()
+        await db.app_meta.replace_one({"_id": "home_content"}, data, upsert=True)
+        logger.info("home content regenerated")
+        return data
+
+
+@api_router.get("/home/content")
+async def home_content():
+    doc = await db.app_meta.find_one({"_id": "home_content"}, {"_id": 0})
+    if _home_is_stale(doc):
+        asyncio.create_task(_refresh_home_content())  # refresh in background; serve current instantly
+    return doc or {}
+
+
+@api_router.post("/admin/home/regenerate")
+async def admin_home_regenerate(request: Request, admin: dict = Depends(require_admin)):
+    data = await _refresh_home_content(force=True)
+    if not data:
+        raise HTTPException(status_code=502, detail="Content generation failed — please try again in a moment.")
+    await audit(request, admin.get("email"), "home_content_regenerated")
+    data = dict(data)
+    data.pop("_id", None)
     return data
 
 
@@ -2126,6 +2323,7 @@ async def _get_availability_meta():
     meta.setdefault("blocked", {})
     meta.setdefault("buffer_minutes", 0)
     meta.setdefault("reminder_leads", [24])
+    meta.setdefault("cancel_cutoff_hours", 24)
     return meta
 
 
@@ -2184,7 +2382,12 @@ async def public_availability():
         if avail:
             out_days.append({"date": ds, "weekday": d.strftime("%A"),
                              "label": d.strftime("%a, %d %b"), "slots": avail})
-    return {"week_start": ws.isoformat(), "days": out_days,
+    out_dates = {x["date"] for x in out_days}
+    today = now.date()
+    full_days = [{"date": d.isoformat(), "label": d.strftime("%a, %d %b")}
+                 for d in days if d.isoformat() not in out_dates and d > today]
+    return {"week_start": ws.isoformat(), "days": out_days, "full_days": full_days,
+            "cancel_cutoff_hours": int(meta.get("cancel_cutoff_hours", 24) or 0),
             "hours": "09:30\u201319:00", "days_label": "Mon\u2013Fri"}
 
 
@@ -2269,7 +2472,8 @@ async def admin_availability(week_start: Optional[str] = None, admin: dict = Dep
     return {"week_start": ws.isoformat(), "published_week_start": published,
             "is_published": ws.isoformat() == published, "days": out_days,
             "slot_times": all_slots, "buffer_minutes": buffer_min,
-            "reminder_leads": [int(h) for h in (meta.get("reminder_leads") or [])]}
+            "reminder_leads": [int(h) for h in (meta.get("reminder_leads") or [])],
+            "cancel_cutoff_hours": int(meta.get("cancel_cutoff_hours", 24) or 0)}
 
 
 class BufferIn(BaseModel):
@@ -2298,6 +2502,62 @@ async def set_reminders(body: RemindersIn, admin: dict = Depends(require_admin))
         "reminder_leads": leads, "published_week_start": meta["published_week_start"],
         "blocked": meta.get("blocked", {})}}, upsert=True)
     return {"success": True, "reminder_leads": leads}
+
+
+class CancelWindowIn(BaseModel):
+    hours: int
+
+
+@api_router.post("/admin/availability/cancel-window")
+async def set_cancel_window(body: CancelWindowIn, admin: dict = Depends(require_admin)):
+    hours = max(0, min(168, body.hours))
+    meta = await _get_availability_meta()
+    await db.app_meta.update_one({"_id": "availability"}, {"$set": {
+        "cancel_cutoff_hours": hours, "published_week_start": meta["published_week_start"],
+        "blocked": meta.get("blocked", {})}}, upsert=True)
+    return {"success": True, "cancel_cutoff_hours": hours}
+
+
+class WaitlistIn(BaseModel):
+    name: str
+    email: EmailStr
+    package_id: Optional[str] = ""
+    date: str
+    captcha_token: Optional[str] = None
+
+
+@api_router.post("/consultation/waitlist")
+async def join_waitlist(body: WaitlistIn, request: Request):
+    verify_captcha(body.captcha_token, _client_ip(request))
+    pkg = PACKAGES.get(body.package_id) if body.package_id else None
+    existing = await db.waitlist.find_one({"email": body.email.lower(), "date": body.date, "notified": {"$ne": True}})
+    if existing:
+        return {"success": True, "message": "You're already on the waitlist for that day."}
+    await db.waitlist.insert_one({
+        "id": str(uuid.uuid4()), "name": body.name, "email": body.email.lower(),
+        "package_id": body.package_id or "", "package": (pkg or {}).get("name", ""),
+        "date": body.date, "notified": False, "created_at": now_iso()})
+    return {"success": True, "message": "You're on the waitlist \u2014 we'll email you if a slot opens for that day."}
+
+
+@api_router.get("/admin/waitlist")
+async def admin_waitlist(admin: dict = Depends(require_admin)):
+    return await db.waitlist.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
+
+
+async def _notify_waitlist(date_str: str):
+    if not os.environ.get("GMAIL_APP_PASSWORD"):
+        return  # keep entries un-notified until SMTP is live
+    front = os.environ.get("WEBAUTHN_ORIGIN", "")
+    book_url = f"{front}/#consult" if front else ""
+    loop = asyncio.get_event_loop()
+    entries = await db.waitlist.find({"date": date_str, "notified": {"$ne": True}}).to_list(100)
+    for w in entries:
+        if not w.get("email"):
+            continue
+        await loop.run_in_executor(None, send_waitlist_opening_email, w["email"],
+                                   w.get("name", "there"), w.get("package", ""), date_str, book_url)
+        await db.waitlist.update_one({"id": w["id"]}, {"$set": {"notified": True, "notified_at": now_iso()}})
 
 
 class SlotToggleIn(BaseModel):
@@ -2463,6 +2723,14 @@ async def booking_manage(token: str):
          "meeting_link": 1, "reschedule_requested": 1})
     if not b:
         raise HTTPException(status_code=404, detail="Booking not found.")
+    meta = await _get_availability_meta()
+    cutoff = int(meta.get("cancel_cutoff_hours", 24) or 0)
+    can_cancel = True
+    if cutoff > 0 and b.get("slot_date") and b.get("slot_time") and b.get("status") == "confirmed":
+        dt = datetime.fromisoformat(f"{b['slot_date']}T{b['slot_time']}:00").replace(tzinfo=IST_TZ)
+        can_cancel = (dt.astimezone(timezone.utc) - datetime.now(timezone.utc)).total_seconds() >= cutoff * 3600
+    b["can_cancel"] = can_cancel
+    b["cancel_cutoff_hours"] = cutoff
     return b
 
 
@@ -2476,11 +2744,19 @@ async def booking_cancel(body: TokenIn, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=404, detail="Booking not found.")
     if b.get("status") == "cancelled":
         return {"success": True, "status": "cancelled"}
+    meta = await _get_availability_meta()
+    cutoff = int(meta.get("cancel_cutoff_hours", 24) or 0)
+    if cutoff > 0 and b.get("slot_date") and b.get("slot_time") and b.get("status") == "confirmed":
+        dt = datetime.fromisoformat(f"{b['slot_date']}T{b['slot_time']}:00").replace(tzinfo=IST_TZ)
+        if (dt.astimezone(timezone.utc) - datetime.now(timezone.utc)).total_seconds() < cutoff * 3600:
+            raise HTTPException(status_code=400, detail=f"Cancellations within {cutoff} hours of the session can't be made online. Please contact us directly and we'll help.")
     await db.consultations.update_one({"id": bid}, {"$set": {"status": "cancelled"}})
     if b.get("gcal_event_id"):
         b["status"] = "cancelled"
         await sync_booking_to_calendar(b, "delete")
         await db.consultations.update_one({"id": bid}, {"$unset": {"gcal_event_id": ""}})
+    if b.get("slot_date"):
+        await _notify_waitlist(b["slot_date"])
     admin_to = os.environ.get("BOOKING_ADMIN_EMAIL") or os.environ.get("ADMIN_EMAIL")
     if admin_to:
         note = dict(b); note["message"] = f"CLIENT CANCELLED this session ({b.get('slot_date')} {b.get('slot_time')} IST)."
@@ -2955,6 +3231,8 @@ async def startup():
     await db.login_attempts.create_index("ip")
     await db.blocked_ips.create_index("ip", unique=True)
     await db.security_alerts.create_index("created_at")
+    await db.consent_logs.create_index("created_at")
+    await db.consent_logs.create_index("email")
     await db.audit_log.create_index("at")
     await db.audit_log.create_index("expire_at", expireAfterSeconds=0)
     _meta = await db.app_meta.find_one({"_id": "audit_retention"})
@@ -3007,6 +3285,7 @@ async def startup():
             d.update({"id": str(uuid.uuid4()), "author": "Sudarshan Karweer", "created_at": now_iso()})
             await db.articles.insert_one(d)
     logger.info("Articles ensured")
+    asyncio.create_task(_refresh_home_content())  # warm the AI homepage cache
     asyncio.create_task(_digest_scheduler())
 
 

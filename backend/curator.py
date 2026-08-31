@@ -25,7 +25,7 @@ TOPICS = [
     {"id": "india-economy", "label": "India Economy", "blurb": "Markets, policy and business intelligence from India."},
     {"id": "energy", "label": "Energy & Renewables", "blurb": "The energy transition — solar, storage, hydrogen and power markets."},
     {"id": "climate-finance", "label": "Climate & Green Finance", "blurb": "Financing decarbonisation and the road to net-zero."},
-    {"id": "ai", "label": "AI & Its Impact", "blurb": "Frontier AI and how it is reshaping industry and strategy."},
+    {"id": "ai", "label": "Machine Intelligence", "blurb": "How machine intelligence is reshaping industry and strategy."},
     {"id": "technology", "label": "Emerging Technology", "blurb": "Deep tech, innovation and the ideas moving fastest."},
     {"id": "fundraising", "label": "Fundraising & Startups", "blurb": "Raising capital, building and scaling ventures."},
     {"id": "leadership", "label": "Leadership & Coaching", "blurb": "Strategy, decision-making and world-class leadership."},

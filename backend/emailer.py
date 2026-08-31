@@ -289,6 +289,30 @@ def send_weekly_agenda_email(to_email: str, sessions: list) -> str:
     return _smtp_send(msg)
 
 
+def send_waitlist_opening_email(to_email: str, name: str, package: str, date_str: str, book_url: str = "") -> str:
+    """Tell a waitlisted client that a slot opened up on their requested day."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email:
+        return "skipped"
+    cta = (f'<a href="{book_url}" style="display:inline-block;margin-top:14px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Book your slot</a>'
+           if book_url else "")
+    inner = (
+        f'<p style="font-size:15px;color:#111;">Hi {name},</p>'
+        f'<p style="font-size:14px;color:#374151;">Good news — a slot has just opened up on <strong>{date_str}</strong>'
+        f'{(" for " + package) if package else ""}. These fill quickly, so book soon to secure it.</p>'
+        f'{cta}'
+        f'<p style="font-size:13px;color:#374151;margin-top:16px;">— Team Sudarshan Karweer</p>'
+    )
+    msg = EmailMessage()
+    msg["Subject"] = f"A slot opened up on {date_str}"
+    msg["From"] = user
+    msg["To"] = to_email
+    msg.set_content(f"A slot opened up on {date_str}{(' for ' + package) if package else ''}. Book soon: {book_url}")
+    msg.add_alternative(_shell("Waitlist — slot available", inner), subtype="html")
+    return _smtp_send(msg)
+
+
 def send_new_booking_alert_email(to_email: str, booking: dict) -> str:
     """Alert the advisor the moment a new session booking lands (pending confirmation)."""
     user = os.environ.get("GMAIL_USER")

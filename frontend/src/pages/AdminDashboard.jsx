@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useAuth, formatApiErrorDetail } from "@/context/AuthContext";
 import { Logo } from "@/components/Navbar";
 import ThemeToggle from "@/components/ThemeToggle";
-import { Users, FileText, Inbox, Sparkles, Trash2, Wand2, Mail, LifeBuoy, UserCircle, ChevronDown, Tag, AlertTriangle, Star, Target, Package, Pencil, TrendingUp, TrendingDown, ShieldAlert, Unlock, CalendarCheck, CalendarX } from "lucide-react";
+import { Users, FileText, Inbox, Sparkles, Trash2, Wand2, Mail, LifeBuoy, UserCircle, ChevronDown, Tag, AlertTriangle, Star, Target, Package, Pencil, TrendingUp, TrendingDown, ShieldAlert, Unlock, CalendarCheck, CalendarX, RefreshCw, ClipboardCheck } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from "recharts";
 import api from "@/lib/api";
 import VaultPanel from "@/pages/VaultPanel";
@@ -57,6 +57,9 @@ export default function AdminDashboard() {
   const [confirming, setConfirming] = useState(null);
   const [bufferInput, setBufferInput] = useState("0");
   const [reminderSel, setReminderSel] = useState("24");
+  const [cancelWin, setCancelWin] = useState("24");
+  const [consentLogs, setConsentLogs] = useState(null);
+  const [regenBusy, setRegenBusy] = useState(false);
 
   const [form, setForm] = useState({ title: "", category: "news", sector: SECTORS[0], summary: "", content: "", tags: "", image: DEFAULT_IMG, featured: false });
   const [aiTopic, setAiTopic] = useState("");
@@ -83,8 +86,30 @@ export default function AdminDashboard() {
     api.get("/admin/audit-log").then((r) => setAuditLog(r.data.logs || [])).catch(() => {});
     api.get("/admin/bookings").then((r) => setBookings(r.data)).catch(() => {});
     api.get("/admin/calendar/status").then((r) => setCalStatus(r.data)).catch(() => {});
+    api.get("/admin/consent-logs").then((r) => setConsentLogs(r.data)).catch(() => {});
   };
   useEffect(load, []);
+
+  const regenerateHome = async () => {
+    setRegenBusy(true);
+    try {
+      await api.post("/admin/home/regenerate");
+      toast.success("Homepage content regenerated. Refresh the site to see it.");
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Could not regenerate — try again shortly.");
+    } finally {
+      setRegenBusy(false);
+    }
+  };
+  const exportConsent = async () => {
+    try {
+      const res = await api.get("/admin/consent-logs/export", { responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement("a");
+      a.href = url; a.download = "consent-log.csv"; a.click();
+      window.URL.revokeObjectURL(url);
+    } catch { toast.error("Could not export consent log."); }
+  };
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search).get("calendar");
@@ -114,9 +139,14 @@ export default function AdminDashboard() {
   const keyToLeads = (k) => k === "both" ? [2, 24] : k === "24" ? [24] : k === "2" ? [2] : [];
   const loadAvailability = (ws) => {
     api.get("/admin/availability", { params: ws ? { week_start: ws } : {} })
-      .then((r) => { setAvailWeek(r.data); setBufferInput(String(r.data.buffer_minutes ?? 0)); setReminderSel(leadsToKey(r.data.reminder_leads)); }).catch(() => {});
+      .then((r) => { setAvailWeek(r.data); setBufferInput(String(r.data.buffer_minutes ?? 0)); setReminderSel(leadsToKey(r.data.reminder_leads)); setCancelWin(String(r.data.cancel_cutoff_hours ?? 24)); }).catch(() => {});
   };
   useEffect(() => { loadAvailability(); }, []);
+
+  const saveCancelWindow = async (hours) => {
+    try { await api.post("/admin/availability/cancel-window", { hours: Number(hours) }); toast.success(Number(hours) > 0 ? `Clients can't cancel online within ${hours}h of a session.` : "Online cancellation window removed."); loadAvailability(availWeek?.week_start); }
+    catch { toast.error("Could not save cancellation window."); }
+  };
 
   const saveBuffer = async (mins) => {
     try { await api.post("/admin/availability/buffer", { minutes: Number(mins) }); toast.success(Number(mins) > 0 ? `Buffer set to ${mins} min between sessions.` : "Buffer removed."); loadAvailability(availWeek?.week_start); }
@@ -376,7 +406,7 @@ export default function AdminDashboard() {
   const filteredLeads = leadSource === "all" ? leads : leads.filter((l) => (l.source || "") === leadSource);
 
   const generate = async () => {
-    if (!aiTopic.trim()) { toast.error("Enter a topic for the AI to write about."); return; }
+    if (!aiTopic.trim()) { toast.error("Enter a topic to draft an article about."); return; }
     setAiBusy(true);
     try {
       const { data } = await api.post("/ai/generate", { topic: aiTopic, category: form.category });
@@ -387,9 +417,9 @@ export default function AdminDashboard() {
         content: data.content || f.content,
         tags: Array.isArray(data.tags) ? data.tags.join(", ") : f.tags,
       }));
-      toast.success("AI draft generated — review and publish.");
+      toast.success("Draft generated — review and publish.");
     } catch (err) {
-      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "AI generation failed");
+      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Generation failed");
     } finally {
       setAiBusy(false);
     }
@@ -467,10 +497,10 @@ export default function AdminDashboard() {
         <p className="mt-1 text-sm text-muted-foreground">Signed in as {user?.email}</p>
 
         <div className="mt-8 flex flex-wrap gap-2 border-b border-border pb-4">
-          {["overview", "crm", "leads", "bookings", "availability", "tickets", "articles", "create", "subscribers", "vault"].map((t) => (
+          {["overview", "crm", "leads", "bookings", "availability", "tickets", "articles", "create", "subscribers", "consent", "vault"].map((t) => (
             <button key={t} onClick={() => setTab(t)} data-testid={`admin-tab-${t}`}
               className={`rounded-full px-4 py-2 text-sm font-medium capitalize transition-colors ${tab === t ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]" : "border border-border text-muted-foreground hover:bg-secondary"}`}>
-              {t === "create" ? "Create + AI" : t === "crm" ? "CRM" : t === "tickets" ? "Service Desk" : t}
+              {t === "create" ? "Create" : t === "crm" ? "CRM" : t === "tickets" ? "Service Desk" : t === "consent" ? "Consent Log" : t}
               {t === "bookings" && upcomingCount > 0 && <span data-testid="bookings-badge" className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold normal-case ${tab === t ? "bg-[hsl(var(--primary-foreground))] text-[hsl(var(--primary))]" : "bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]"}`}>{upcomingCount} in 48h</span>}
             </button>
           ))}
@@ -479,6 +509,19 @@ export default function AdminDashboard() {
         {tab === "overview" && (
           <div className="mt-8 space-y-8" data-testid="admin-overview">
             {renderAgenda()}
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card p-5" data-testid="ai-home-card">
+              <div className="flex items-start gap-3">
+                <Sparkles className="mt-0.5 h-5 w-5 text-[hsl(var(--primary))]" />
+                <div>
+                  <p className="font-display text-base font-bold">Homepage Content</p>
+                  <p className="text-xs text-muted-foreground">Hero copy, insight blurbs & the Market Signals feed refresh automatically every 24h. Force a fresh set anytime.</p>
+                </div>
+              </div>
+              <button onClick={regenerateHome} disabled={regenBusy} data-testid="regenerate-home"
+                className="inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-5 py-2.5 text-sm font-semibold text-[hsl(var(--primary-foreground))] transition-transform hover:-translate-y-0.5 disabled:opacity-60">
+                <RefreshCw className={`h-4 w-4 ${regenBusy ? "animate-spin" : ""}`} /> {regenBusy ? "Regenerating…" : "Regenerate now"}
+              </button>
+            </div>
             <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
               {statCards.map((s) => (
                 <div key={s.label} className="rounded-2xl border border-border bg-card p-6">
@@ -1128,9 +1171,9 @@ export default function AdminDashboard() {
             <div className="rounded-2xl border border-border bg-card p-6">
               <div className="flex items-center gap-2">
                 <Wand2 className="h-5 w-5 text-[hsl(var(--accent))]" />
-                <h3 className="font-display text-lg font-bold">AI Content Engine</h3>
+                <h3 className="font-display text-lg font-bold">Article Studio</h3>
               </div>
-              <p className="mt-2 text-sm text-muted-foreground">Describe a topic — Karweer AI (Claude) drafts a full article for you to review and publish.</p>
+              <p className="mt-2 text-sm text-muted-foreground">Describe a topic — Karweer's writing engine drafts a full article for you to review and publish.</p>
               <input value={aiTopic} onChange={(e) => setAiTopic(e.target.value)} data-testid="ai-topic" placeholder="e.g. India's green hydrogen export opportunity" className="mt-4 w-full rounded-lg border border-border bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]" />
               <p className="mt-3 text-xs text-muted-foreground">Category: <span className="font-semibold">{CATS.find((c) => c.key === form.category)?.label}</span> (set on the right)</p>
               <button onClick={generate} disabled={aiBusy} data-testid="ai-generate" className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-full bg-[hsl(var(--primary))] px-6 py-3 font-semibold text-[hsl(var(--primary-foreground))] transition-transform hover:-translate-y-0.5 disabled:opacity-60">
@@ -1176,6 +1219,47 @@ export default function AdminDashboard() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {tab === "consent" && (
+          <div className="mt-8 space-y-4" data-testid="admin-consent">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="flex items-center gap-2 font-display text-xl font-bold"><ClipboardCheck className="h-5 w-5 text-[hsl(var(--primary))]" /> Consent Log</h2>
+                <p className="text-sm text-muted-foreground">
+                  Every Terms &amp; Conditions + Privacy Policy agreement captured at sign-in / sign-up.
+                  {consentLogs?.policy_version && <> Current policy version <span className="font-medium text-foreground">{consentLogs.policy_version}</span>.</>}
+                </p>
+              </div>
+              <button onClick={exportConsent} data-testid="export-consent"
+                className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2.5 text-sm font-medium hover:bg-secondary">
+                <FileText className="h-4 w-4" /> Export CSV
+              </button>
+            </div>
+            <div className="overflow-x-auto rounded-2xl border border-border">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-card text-muted-foreground">
+                  <tr>
+                    <th className="p-4">When (UTC)</th><th className="p-4">Name</th><th className="p-4">Email</th>
+                    <th className="p-4">Method</th><th className="p-4">Agreed</th><th className="p-4">Version</th><th className="p-4">IP</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(!consentLogs || consentLogs.logs.length === 0) && <tr><td colSpan="7" className="p-8 text-center text-muted-foreground">No consent records yet.</td></tr>}
+                  {consentLogs?.logs.map((l) => (
+                    <tr key={l.id} className="border-t border-border" data-testid={`consent-row-${l.id}`}>
+                      <td className="p-4 text-muted-foreground">{l.created_at ? new Date(l.created_at).toLocaleString() : "—"}</td>
+                      <td className="p-4 font-medium">{l.name || "—"}</td>
+                      <td className="p-4">{l.email}</td>
+                      <td className="p-4"><span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-medium capitalize">{l.action}</span></td>
+                      <td className="p-4"><span className="inline-flex items-center gap-1 text-xs font-semibold text-[hsl(var(--primary))]"><ClipboardCheck className="h-3.5 w-3.5" /> {l.agreed ? "Yes" : "No"}</span></td>
+                      <td className="p-4 text-xs text-muted-foreground">T&amp;C {l.terms_version} · Privacy {l.privacy_version}</td>
+                      <td className="p-4 text-xs text-muted-foreground">{l.ip}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
         {tab === "bookings" && (
@@ -1287,6 +1371,13 @@ export default function AdminDashboard() {
                 <option value="off">Off</option>
               </select>
               <span className="text-xs text-muted-foreground">Confirmed clients get an automatic email reminder at the times you choose.</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card p-4" data-testid="cancel-window-control">
+              <span className="text-sm font-semibold">No online cancellations within</span>
+              <select value={cancelWin} onChange={(e) => { setCancelWin(e.target.value); saveCancelWindow(e.target.value); }} data-testid="cancel-window-select" className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm">
+                {[0, 12, 24, 48].map((h) => <option key={h} value={h}>{h === 0 ? "Always allowed" : `${h} hours`}</option>)}
+              </select>
+              <span className="text-xs text-muted-foreground">Within this window clients must contact you directly instead of cancelling online.</span>
             </div>
             <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
               <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded border border-border bg-background" /> Available</span>

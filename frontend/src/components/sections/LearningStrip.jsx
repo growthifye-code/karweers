@@ -25,7 +25,7 @@ export default function LearningStrip() {
             </span>
             <h2 className="mt-5 font-display text-4xl font-bold leading-tight md:text-5xl">The Curator's Watchlist</h2>
             <p className="mt-4 text-base text-muted-foreground">
-              A hand-picked set of the sharpest new videos on the economy, energy, AI and leadership — refreshed daily, so there is always something new to learn.
+              A hand-picked set of the sharpest new videos on the economy, energy, technology and leadership — refreshed daily, so there is always something new to learn.
             </p>
           </div>
           <Link

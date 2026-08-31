@@ -19,6 +19,7 @@ export default function Consultation({ testimonials = [] }) {
   const [avail, setAvail] = useState({ days: [], hours: "", days_label: "" });
   const [selDate, setSelDate] = useState("");
   const [selTime, setSelTime] = useState("");
+  const [wlDate, setWlDate] = useState("");
   const [form, setForm] = useState({ name: "", email: "", phone: "", company: "", area: AREAS[0], message: "" });
   const [captcha, setCaptcha] = useState("");
   const [busy, setBusy] = useState(false);
@@ -31,6 +32,21 @@ export default function Consultation({ testimonials = [] }) {
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const dayObj = avail.days.find((d) => d.date === selDate);
   const selectedPkg = packages.find((p) => p.id === selected);
+
+  const joinWaitlist = async () => {
+    if (!form.name || !form.email) { toast.error("Please add your name and email above first."); return; }
+    if (!captcha) { toast.error("Please complete the captcha."); return; }
+    setBusy(true);
+    try {
+      const { data } = await api.post("/consultation/waitlist", { name: form.name, email: form.email, package_id: selected, date: wlDate, captcha_token: captcha });
+      toast.success(data.message || "You're on the waitlist.");
+      setWlDate("");
+    } catch (err) {
+      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Could not join the waitlist.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -164,6 +180,23 @@ export default function Consultation({ testimonials = [] }) {
                       </div>
                     )}
                   </>
+                )}
+                {avail.full_days?.length > 0 && (
+                  <div className="mt-4 border-t border-border pt-4" data-testid="waitlist-box">
+                    <p className="text-xs font-semibold">Fully booked days — join the waitlist</p>
+                    <p className="text-[11px] text-muted-foreground">We'll email you (using the name &amp; email above) if a slot opens up.</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {avail.full_days.map((d) => (
+                        <button type="button" key={d.date} onClick={() => setWlDate(d.date)} data-testid={`waitlist-date-${d.date}`}
+                          className={`rounded-xl border px-3 py-2 text-xs font-medium ${wlDate === d.date ? "border-[hsl(var(--accent))] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]" : "border-border hover:bg-secondary"}`}>
+                          {d.label}
+                        </button>
+                      ))}
+                    </div>
+                    {wlDate && (
+                      <button type="button" onClick={joinWaitlist} disabled={busy} data-testid="join-waitlist-btn" className="mt-3 rounded-full border border-[hsl(var(--accent))] px-4 py-2 text-xs font-semibold text-[hsl(var(--accent))] hover:bg-[hsl(var(--accent))]/10 disabled:opacity-60">Notify me if a slot opens</button>
+                    )}
+                  </div>
                 )}
               </div>
             )}

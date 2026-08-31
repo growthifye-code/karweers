@@ -84,3 +84,20 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - Confirm real contact details (email/phone/WhatsApp are placeholders: sudarshan@karweers.com, +91 99999 99999)
 - Decide on paid vs free consultation model
 - Provide news source APIs if live feeds desired
+
+---
+
+## Iteration 4 (Aug 31, 2026)
+- **Logo**: Redesigned to an elegant text wordmark — white **S** + lime **K.** (serif, no box), matching favicon.
+- **hCaptcha STRICT**: real secret key wired in (`HCAPTCHA_SECRET`); backend now rejects invalid tokens (403), missing (400). Applies to login/register/newsletter/consultation/checkout.
+- **Google Login (Emergent-managed)**: "Continue with Google" on /login & /register. Backend `/api/auth/session` exchanges Emergent session → httpOnly `session_token` cookie (also accepted as Bearer); `/api/auth/logout`. `get_current_user` resolves Google session OR JWT. AuthCallback route handles `#session_id`.
+- **Admin Allowlist (strict)**: ONLY `sudarshan@karweers.com` and `sudarshan.karweer@gmail.com` can ever be admin (`ADMIN_ALLOWLIST` env, case-insensitive). Enforced on register, login, Google session, and startup (promotes allowlisted, demotes all others). Everyone else = client.
+- **Learning Hub** (`/learning` + home "The Curator's Watchlist" section + navbar link): curated YouTube videos via 14 reputable channels' public RSS feeds (NO API key), always fresh. Topic filters (9 topics), embedded click-to-play players with source credit. Home strip = daily rotation (max ~8-10). `curator.py` handles fetch/cache(6h)/rotation/interleave.
+- **Recommendation engine**: `/api/track {kind, ref}` logs client browsing (service views, video plays, topic clicks). `/api/learning/recommended` weights by topic interest × recency (0.94^days). Personalised sections on ClientDashboard + LearningPage.
+- Verified: backend 20/20 new tests pass (iteration_4.json); frontend 14/15 (1 flaky non-bug). Admin allowlist self-verified.
+
+## Backlog / Remaining (updated)
+- **P1**: Go-live Stripe keys + Gmail App Password (real payments & booking emails) — still test/dummy, awaiting user credentials
+- **P2**: Advisory hardening from iteration_4 review — split server.py into routers (~790 lines), tighten CORS to explicit origin, TTL/retention on activity_events, thread-safe curator pool warm, channel-health check
+- **P2**: Replace AI coaching hero with real transparent video when user provides asset
+- **P2**: Object storage for admin image uploads

@@ -16,6 +16,7 @@ export const SERVICE_LINKS = [
 const NAV = [
   { label: "About", to: "/about" },
   { label: "Insights", to: "/insights" },
+  { label: "Learning", to: "/learning" },
   { label: "Case Studies", to: "/case-studies" },
   { label: "Market", to: "/market" },
   { label: "Deals", to: "/deals" },

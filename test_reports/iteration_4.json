@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 4 covers the NEW features: strict hCaptcha enforcement, Google/Emergent session auth (Bearer + cookie), Learning Hub RSS-driven APIs, activity tracking + personalised recommendations, and their frontend surfaces (/learning, home 'Curator's Watchlist' strip, Navbar 'Learning' link, Google login/register buttons, Client Dashboard learning card + recommendations). New pytest suite /app/backend/tests/test_learning_and_captcha.py — 20/20 pass. Frontend E2E via Playwright — 14/15 checks pass (1 flaky visibility check on topic-energy chip that later clicked successfully). All expected data-testid hooks are present and wired correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_learning_and_captcha.py",
+    "/app/test_reports/pytest/pytest_iteration4.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py verify_captcha() still contains a dead-code branch that bypasses verification when HCAPTCHA_SECRET equals the hCaptcha test secret 0x000...0. With the real secret now set this is unused, but the branch should be removed for clarity or gated behind an explicit env flag so it can't be re-enabled accidentally.",
+    "learning_recommended (line 325) dereferences user['id'] inside an inline conditional — safe now, but if get_optional_user ever returns a user dict without 'id' (e.g. malformed session) this would 500. Consider guarding with user.get('id').",
+    "/api/track accepts arbitrary 'kind' strings and stores them; curator.derive_topics silently returns [] for unknown kinds. Consider Pydantic Literal validation of kind ∈ {service, video, topic, market, deals, insight, casestudy} to avoid junk analytics rows.",
+    "activity_events collection has no TTL / retention policy — will grow unbounded per user. Consider a TTL index on created_at (e.g. 180 days) so recommendations use a rolling window and Mongo doesn't accumulate.",
+    "curator._pool() is not thread-safe on cache write and can be re-entered by concurrent /learning/videos requests on cold cache — leading to 10× concurrent RSS storms on first hit after 6h expiry. Wrap the refresh in a threading.Lock or an asyncio-level singleflight.",
+    "curator.CHANNELS uses hardcoded YouTube channel IDs; several verified today (IEA, IMF, Bloomberg, WEF, TED) but no health check. If any channel is renamed/removed, _fetch_channel silently logs and returns []; consider surfacing a /api/learning/health endpoint that reports per-channel status for ops.",
+    "server.py is now ~790 lines (Learning + Google auth added on top of iteration-3's 627). Exceeds the 700-line guideline — split into routers (auth, learning, payments, content, market) for maintainability.",
+    "CORS still uses '*' with allow_credentials=True (browsers ignore credentials with wildcard). Now that Google session cookies are in play, this MUST be tightened to an explicit origin list (REACT_APP_BACKEND_URL host + preview host) or the cookie flow will break in browsers that enforce it.",
+    "/api/auth/session sets cookie with samesite='none' and secure=True — correct for prod HTTPS, but there is no re-use / rotation of session_token if the same Emergent session_id is exchanged twice; each call inserts a new user_sessions row (unbounded growth). Upsert by session_token.",
+    "AuthContext / frontend fetches /auth/me on load — but there's no logout for JWT users clearing the httpOnly cookie side (only localStorage sk_token is dropped). Confirm logout also calls /api/auth/logout so any lingering Google session_token cookie is invalidated."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_learning_and_captcha.py"
+  ],
+  "success_rate": {
+    "backend": "100% (20/20 new; iteration 1-3 suites unchanged)",
+    "frontend": "93% (14/15) — 1 flaky visibility assertion, not a functional bug"
+  },
+  "test_credentials": "Admin sudarshan@karweers.com / Sudarshan@2026 (JWT login now requires a real hCaptcha token — strict). For Google/session-authed API tests, inject a user_sessions doc per /app/auth_testing.md and send as Bearer or cookie.",
+  "seed_data_creation": "Pytest fixtures create/delete their own tst_ users, sessions, and activity_events. Playwright run seeded 1 tst_fe_ user + session + 3 activity_events; cleaned up after.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "hCaptcha is now STRICT with real secret ES_00de18ca93ef4aba83687008761be1aa. Missing token => 400, invalid token => 403. There is NO longer any bypass token — you cannot programmatically POST to /newsletter, /auth/login, /auth/register, /consultations, or /payments/checkout without solving hCaptcha or mocking. Use Google-session Bearer tokens for authed API tests (see /app/auth_testing.md). Learning endpoints hit YouTube RSS live; first cold call after 6h can take up to ~30s while the pool warms — subsequent calls served from _CACHE. Frontend testids: learning-topic-filters, topic-all/topic-<id>, learning-grid, video-card-<id>, video-play-<id>, video-source-<id>, home-learning-strip, home-learning-viewall, nav-learning, google-login-btn, google-register-btn, client-learning, dashboard-recommended.",
+  "rca of the issue": "N/A — no failing tests. The one Playwright miss was a race on is_visible against topic-energy immediately after topic-filters container appeared; the element existed (the subsequent click on the same selector succeeded and returned energy-only cards). Add a short wait_for_selector before is_visible in future runs."
+}

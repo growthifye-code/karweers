@@ -10,6 +10,7 @@ import MarketPulse from "@/components/sections/MarketPulse";
 import InsightsPreview from "@/components/sections/InsightsPreview";
 import CaseStudies from "@/components/sections/CaseStudies";
 import Consultation from "@/components/sections/Consultation";
+import LearningStrip from "@/components/sections/LearningStrip";
 import NewsletterSignup from "@/components/NewsletterSignup";
 import DealsTicker from "@/components/DealsTicker";
 import Seo from "@/components/Seo";
@@ -48,6 +49,7 @@ export default function Home() {
       <DealsTicker />
       <InsightsPreview articles={articles} />
       <CaseStudies cases={cases} />
+      <LearningStrip />
       <Consultation testimonials={meta.testimonials} />
       <NewsletterSignup />
       <Footer />

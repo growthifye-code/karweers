@@ -1,5 +1,5 @@
 import "@/App.css";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider } from "@/context/AuthContext";
 import Home from "@/pages/Home";
@@ -12,8 +12,10 @@ import MarketPage from "@/pages/MarketPage";
 import DealsPage from "@/pages/DealsPage";
 import InsightsPage from "@/pages/InsightsPage";
 import ArticleDetail from "@/pages/ArticleDetail";
+import LearningPage from "@/pages/LearningPage";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
+import AuthCallback from "@/pages/AuthCallback";
 import AdminDashboard from "@/pages/AdminDashboard";
 import ClientDashboard from "@/pages/ClientDashboard";
 import PaymentSuccess from "@/pages/PaymentSuccess";
@@ -21,32 +23,42 @@ import PaymentCancel from "@/pages/PaymentCancel";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AIChatWidget from "@/components/AIChatWidget";
 
+function AppRoutes() {
+  const location = useLocation();
+  // Process Google OAuth callback FIRST (session_id in URL fragment).
+  if (location.hash?.includes("session_id=")) return <AuthCallback />;
+  return (
+    <Routes>
+      <Route path="/" element={<Home />} />
+      <Route path="/about" element={<AboutPage />} />
+      <Route path="/services" element={<ServicesIndex />} />
+      <Route path="/services/:slug" element={<ServicePage />} />
+      <Route path="/services/:slug/:phase" element={<ServicePage />} />
+      <Route path="/privacy" element={<LegalPage doc="privacy" />} />
+      <Route path="/terms" element={<LegalPage doc="terms" />} />
+      <Route path="/refund" element={<LegalPage doc="refund" />} />
+      <Route path="/insights" element={<InsightsPage />} />
+      <Route path="/case-studies" element={<CaseStudiesPage />} />
+      <Route path="/market" element={<MarketPage />} />
+      <Route path="/deals" element={<DealsPage />} />
+      <Route path="/learning" element={<LearningPage />} />
+      <Route path="/insights/:slug" element={<ArticleDetail />} />
+      <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
+      <Route path="/dashboard" element={<ProtectedRoute><ClientDashboard /></ProtectedRoute>} />
+      <Route path="/admin" element={<ProtectedRoute admin><AdminDashboard /></ProtectedRoute>} />
+      <Route path="/payment/success" element={<PaymentSuccess />} />
+      <Route path="/payment/cancel" element={<PaymentCancel />} />
+    </Routes>
+  );
+}
+
 function App() {
   return (
     <div className="App">
       <AuthProvider>
         <BrowserRouter>
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/about" element={<AboutPage />} />
-            <Route path="/services" element={<ServicesIndex />} />
-            <Route path="/services/:slug" element={<ServicePage />} />
-            <Route path="/services/:slug/:phase" element={<ServicePage />} />
-            <Route path="/privacy" element={<LegalPage doc="privacy" />} />
-            <Route path="/terms" element={<LegalPage doc="terms" />} />
-            <Route path="/refund" element={<LegalPage doc="refund" />} />
-            <Route path="/insights" element={<InsightsPage />} />
-            <Route path="/case-studies" element={<CaseStudiesPage />} />
-            <Route path="/market" element={<MarketPage />} />
-            <Route path="/deals" element={<DealsPage />} />
-            <Route path="/insights/:slug" element={<ArticleDetail />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/dashboard" element={<ProtectedRoute><ClientDashboard /></ProtectedRoute>} />
-            <Route path="/admin" element={<ProtectedRoute admin><AdminDashboard /></ProtectedRoute>} />
-            <Route path="/payment/success" element={<PaymentSuccess />} />
-            <Route path="/payment/cancel" element={<PaymentCancel />} />
-          </Routes>
+          <AppRoutes />
           <AIChatWidget />
           <Toaster position="top-center" richColors />
         </BrowserRouter>

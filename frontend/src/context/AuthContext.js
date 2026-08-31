@@ -10,8 +10,9 @@ export function AuthProvider({ children }) {
   const idleTimer = useRef(null);
 
   useEffect(() => {
-    const token = localStorage.getItem("sk_token");
-    if (!token) { setLoading(false); return; }
+    // Returning from Google OAuth — let AuthCallback exchange the session first.
+    if (window.location.hash?.includes("session_id=")) { setLoading(false); return; }
+    // /auth/me resolves either a JWT (bearer) or a Google session cookie.
     api.get("/auth/me")
       .then((r) => setUser(r.data))
       .catch(() => { localStorage.removeItem("sk_token"); })
@@ -19,6 +20,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   const logout = useCallback((redirect = false) => {
+    api.post("/auth/logout").catch(() => {});
     localStorage.removeItem("sk_token");
     setUser(null);
     if (redirect) window.location.href = "/login";
@@ -54,8 +56,14 @@ export function AuthProvider({ children }) {
     return data.user;
   };
 
+  // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
+  const loginWithGoogle = () => {
+    const redirectUrl = window.location.origin + "/dashboard";
+    window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, loginWithGoogle }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Request, HTTPException, Depends, BackgroundTasks
+from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -14,13 +14,14 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from pydantic import BaseModel, EmailStr, Field
 from typing import List, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 from auth import hash_password, verify_password, create_access_token, decode_token
 from seed_data import ARTICLES, SERVICES, STATS, MARKET_PULSE, TESTIMONIALS
+import curator
 from services_data import SERVICES as SERVICE_PAGES
 from emailer import send_booking_email
 import xml.etree.ElementTree as ET
@@ -37,6 +38,13 @@ EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
 HCAPTCHA_SECRET = os.environ.get('HCAPTCHA_SECRET', '')
 HCAPTCHA_SITEKEY = os.environ.get('HCAPTCHA_SITEKEY', '')
 _HCAPTCHA_TEST_SECRET = "0x0000000000000000000000000000000000000000"
+
+# Strict admin allowlist — ONLY these emails may ever hold the admin role.
+ADMIN_ALLOWLIST = {e.strip().lower() for e in os.environ.get('ADMIN_ALLOWLIST', '').split(',') if e.strip()}
+
+
+def role_for(email: str) -> str:
+    return "admin" if (email or "").lower() in ADMIN_ALLOWLIST else "client"
 
 
 def verify_captcha(token, ip=None):
@@ -117,22 +125,60 @@ class GenerateIn(BaseModel):
 
 
 # ---------------- Auth helpers ----------------
+EMERGENT_AUTH_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
+
+
+async def _user_from_session(token: Optional[str]) -> Optional[dict]:
+    if not token:
+        return None
+    sess = await db.user_sessions.find_one({"session_token": token})
+    if not sess:
+        return None
+    exp = sess.get("expires_at")
+    if isinstance(exp, str):
+        try:
+            exp = datetime.fromisoformat(exp)
+        except Exception:
+            exp = None
+    if exp is not None:
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if exp < datetime.now(timezone.utc):
+            return None
+    return await db.users.find_one({"id": sess["user_id"]}, {"_id": 0, "password_hash": 0})
+
+
 async def get_current_user(request: Request) -> dict:
-    token = request.cookies.get("access_token")
-    if not token:
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
-            token = auth_header[7:]
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    session_token = request.cookies.get("session_token")
+    access_token = request.cookies.get("access_token")
+    bearer = None
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        bearer = auth_header[7:]
+    # 1) Google (Emergent) session tokens
+    for t in (session_token, bearer):
+        u = await _user_from_session(t)
+        if u:
+            return u
+    # 2) JWT tokens (email/password auth)
+    for t in (access_token, bearer):
+        if not t:
+            continue
+        try:
+            payload = decode_token(t)
+        except Exception:
+            continue
+        u = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
+        if u:
+            return u
+    raise HTTPException(status_code=401, detail="Not authenticated")
+
+
+async def get_optional_user(request: Request) -> Optional[dict]:
     try:
-        payload = decode_token(token)
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    return user
+        return await get_current_user(request)
+    except HTTPException:
+        return None
 
 
 async def require_admin(user: dict = Depends(get_current_user)) -> dict:
@@ -149,14 +195,15 @@ async def register(body: RegisterIn, request: Request):
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Email already registered")
     uid = str(uuid.uuid4())
+    role = role_for(email)
     doc = {
         "id": uid, "email": email, "name": body.name,
-        "password_hash": hash_password(body.password), "role": "client",
+        "password_hash": hash_password(body.password), "role": role,
         "created_at": now_iso(),
     }
     await db.users.insert_one(doc)
-    token = create_access_token(uid, email, "client")
-    return {"token": token, "user": {"id": uid, "email": email, "name": body.name, "role": "client"}}
+    token = create_access_token(uid, email, role)
+    return {"token": token, "user": {"id": uid, "email": email, "name": body.name, "role": role}}
 
 
 @api_router.post("/auth/login")
@@ -166,13 +213,131 @@ async def login(body: LoginIn, request: Request):
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    token = create_access_token(user["id"], email, user["role"])
-    return {"token": token, "user": {"id": user["id"], "email": email, "name": user["name"], "role": user["role"]}}
+    # Enforce allowlist: role always reflects the allowlist, never drifts.
+    role = role_for(email)
+    if user.get("role") != role:
+        await db.users.update_one({"id": user["id"]}, {"$set": {"role": role}})
+    token = create_access_token(user["id"], email, role)
+    return {"token": token, "user": {"id": user["id"], "email": email, "name": user["name"], "role": role}}
 
 
 @api_router.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
     return user
+
+
+class SessionIn(BaseModel):
+    session_id: Optional[str] = None
+
+
+@api_router.post("/auth/session")
+async def create_session(body: SessionIn, request: Request, response: Response):
+    session_id = body.session_id or request.headers.get("X-Session-ID")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="Missing session id")
+    try:
+        r = requests.get(EMERGENT_AUTH_URL, headers={"X-Session-ID": session_id}, timeout=10)
+    except Exception:
+        raise HTTPException(status_code=503, detail="Auth service unavailable")
+    if r.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid session")
+    data = r.json()
+    email = (data.get("email") or "").lower()
+    if not email:
+        raise HTTPException(status_code=401, detail="Invalid session data")
+    existing = await db.users.find_one({"email": email})
+    role = role_for(email)  # allowlist decides admin; everyone else is a client
+    if existing:
+        uid = existing["id"]
+        await db.users.update_one({"id": uid}, {"$set": {
+            "name": data.get("name") or existing.get("name"),
+            "picture": data.get("picture", ""), "auth": "google", "role": role}})
+    else:
+        uid = str(uuid.uuid4())
+        await db.users.insert_one({
+            "id": uid, "email": email, "name": data.get("name") or email.split("@")[0],
+            "picture": data.get("picture", ""), "role": role, "auth": "google", "created_at": now_iso()})
+    session_token = data["session_token"]
+    expires = datetime.now(timezone.utc) + timedelta(days=7)
+    await db.user_sessions.insert_one({
+        "user_id": uid, "session_token": session_token,
+        "expires_at": expires.isoformat(), "created_at": now_iso()})
+    response.set_cookie("session_token", session_token, httponly=True, secure=True,
+                        samesite="none", path="/", max_age=7 * 24 * 3600)
+    return {"user": {"id": uid, "email": email, "name": data.get("name"), "role": role,
+                     "picture": data.get("picture", "")}}
+
+
+@api_router.post("/auth/logout")
+async def logout_route(request: Request, response: Response):
+    stoken = request.cookies.get("session_token")
+    if stoken:
+        await db.user_sessions.delete_one({"session_token": stoken})
+    response.delete_cookie("session_token", path="/")
+    return {"success": True}
+
+
+# ---------------- Learning / curation + recommendations ----------------
+class TrackIn(BaseModel):
+    kind: str
+    ref: Optional[str] = ""
+
+
+@api_router.get("/learning/topics")
+async def learning_topics():
+    return curator.TOPICS
+
+
+@api_router.get("/learning/videos")
+async def learning_videos(topic: Optional[str] = None, limit: int = 60):
+    loop = asyncio.get_event_loop()
+    data = await loop.run_in_executor(None, lambda: curator.library(topic, limit))
+    return {"videos": data}
+
+
+@api_router.get("/learning/daily")
+async def learning_daily(limit: int = 10):
+    loop = asyncio.get_event_loop()
+    data = await loop.run_in_executor(None, lambda: curator.daily(min(limit, 10)))
+    return {"videos": data}
+
+
+@api_router.post("/track")
+async def track_activity(body: TrackIn, user: Optional[dict] = Depends(get_optional_user)):
+    if not user:
+        return {"tracked": False}
+    topics = curator.derive_topics(body.kind, body.ref)
+    await db.activity_events.insert_one({
+        "user_id": user["id"], "kind": body.kind, "ref": body.ref or "",
+        "topics": topics, "created_at": now_iso()})
+    return {"tracked": True, "topics": topics}
+
+
+async def _topic_weights(user_id: str) -> dict:
+    events = await db.activity_events.find({"user_id": user_id}).sort("created_at", -1).to_list(300)
+    weights = {}
+    now = datetime.now(timezone.utc)
+    for ev in events:
+        try:
+            ts = datetime.fromisoformat(ev["created_at"])
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            days = max((now - ts).total_seconds() / 86400.0, 0)
+        except Exception:
+            days = 30
+        recency = 0.94 ** days  # recent activity weighs more
+        for t in ev.get("topics", []):
+            weights[t] = weights.get(t, 0) + recency
+    return weights
+
+
+@api_router.get("/learning/recommended")
+async def learning_recommended(limit: int = 12, user: Optional[dict] = Depends(get_optional_user)):
+    weights = await _topic_weights(user["id"]) if user else {}
+    loop = asyncio.get_event_loop()
+    data = await loop.run_in_executor(None, lambda: curator.recommended(weights, limit))
+    top = sorted(weights.items(), key=lambda kv: kv[1], reverse=True)[:3]
+    return {"videos": data, "interests": [t for t, _ in top], "personalised": bool(weights)}
 
 
 # ---------------- Content routes ----------------
@@ -605,6 +770,8 @@ async def security_headers(request: Request, call_next):
 async def startup():
     await db.users.create_index("email", unique=True)
     await db.users.create_index("id")
+    await db.user_sessions.create_index("session_token")
+    await db.activity_events.create_index("user_id")
     await db.articles.create_index("slug", unique=True)
     # Seed admin
     admin_email = os.environ["ADMIN_EMAIL"].lower()
@@ -618,6 +785,13 @@ async def startup():
         logger.info("Admin seeded")
     elif not verify_password(admin_password, existing["password_hash"]):
         await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": hash_password(admin_password)}})
+    # Enforce admin allowlist strictly: promote allowlisted users, demote everyone else.
+    if ADMIN_ALLOWLIST:
+        await db.users.update_many(
+            {"email": {"$in": list(ADMIN_ALLOWLIST)}}, {"$set": {"role": "admin"}})
+        await db.users.update_many(
+            {"role": "admin", "email": {"$nin": list(ADMIN_ALLOWLIST)}}, {"$set": {"role": "client"}})
+        logger.info("Admin allowlist enforced: %s", ", ".join(sorted(ADMIN_ALLOWLIST)))
     # Seed articles
     # Seed / ensure articles (upsert by slug, non-destructive)
     for a in ARTICLES:

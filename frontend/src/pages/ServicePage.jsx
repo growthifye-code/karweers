@@ -17,6 +17,7 @@ export default function ServicePage() {
     window.scrollTo(0, 0);
     setSvc(null); setNotFound(false);
     api.get(`/services/${slug}`).then((r) => setSvc(r.data)).catch(() => setNotFound(true));
+    import("@/lib/api").then((m) => m.track("service", slug));
   }, [slug]);
 
   if (notFound) return (

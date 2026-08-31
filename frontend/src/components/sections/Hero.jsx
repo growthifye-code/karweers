@@ -3,10 +3,18 @@ import { ArrowUpRight, Sparkles } from "lucide-react";
 import EYBadge from "@/components/EYBadge";
 
 const COACH = "https://static.prod-images.emergentagent.com/jobs/69d54eb7-07e1-4ffd-ad08-8725f9f9829e/images/5b2f94a6fd021cc779249c997e2a7e9f42370d01aeb0897c98fa6f1010e0dcce.jpeg";
+const BG_VIDEO = "/hero-coaching.mp4";
 
 export default function Hero() {
   return (
     <section className="grain relative overflow-hidden bg-background pt-40 lg:pt-48" data-testid="hero">
+      <video autoPlay muted loop playsInline preload="auto" poster={COACH} aria-hidden="true"
+        className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-[0.14]"
+        data-testid="hero-bg-video">
+        <source src="/hero-coaching.webm" type="video/webm" />
+        <source src={BG_VIDEO} type="video/mp4" />
+      </video>
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-background/70 via-background/90 to-background" />
       <div className="pointer-events-none absolute -right-40 top-24 h-[30rem] w-[30rem] rounded-full bg-[hsl(var(--primary))] opacity-20 blur-[140px]" />
       <div className="pointer-events-none absolute -left-40 bottom-0 h-96 w-96 rounded-full bg-[hsl(var(--accent))] opacity-10 blur-[120px]" />
       <div className="relative mx-auto grid max-w-7xl items-center gap-12 px-6 pb-24 lg:grid-cols-[1.1fr_0.9fr] lg:px-10">

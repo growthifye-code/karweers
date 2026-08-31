@@ -201,3 +201,7 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 ## PENDING — Phase 2 (Super-Admin vault + MFA), agreed with user
 - Reuse admin allowlist as super-admin. MFA layers: TOTP + WebAuthn passkey (device Face ID/Windows Hello); email OTP deferred (SMTP inert).
 - Master vault of integration API keys (Stripe, vpnapi, LLM, etc.), revealed ONLY after passing all MFA layers. Encrypt secrets at rest (Fernet, add ENCRYPTION_KEY to .env).
+
+## Iteration 5.19 (Jun 2026) — Hero background coaching video
+- Added a subtle, semi-transparent (opacity 0.14) autoplay/muted/loop background coaching b-roll to the Hero section for a premium "in motion" feel; Sudarshan's photo card kept unchanged. Dark gradient overlay keeps copy readable.
+- Sources self-hosted in /app/frontend/public: hero-coaching.webm (VP9, 4.5MB) + hero-coaching.mp4 (H.264, 12MB) [free-license Mixkit clip 4809]; poster = existing COACH image. Same-origin (served by frontend) to avoid Mixkit hotlink protection. testid hero-bg-video. Verified playing via screenshot (readyState 4). NOTE: automation Chromium lacks H.264, so WebM source is what makes it verifiable there; real browsers use either. Placeholder to be swapped for Sudarshan's own clip later.

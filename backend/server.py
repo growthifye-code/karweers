@@ -31,7 +31,7 @@ from emailer import send_booking_email
 from emailer import send_security_alert_email
 from emailer import send_new_booking_alert_email, send_session_reminder_email, send_weekly_agenda_email, send_waitlist_opening_email
 from emailer import send_consent_receipt_email
-from emailer import send_signals_digest_email
+from emailer import send_signals_digest_email, render_signals_digest_html, send_test_email
 import xml.etree.ElementTree as ET
 from datetime import datetime as _dt
 
@@ -1090,7 +1090,9 @@ class PolicyVersionIn(BaseModel):
 async def admin_get_policy_version(admin: dict = Depends(require_admin)):
     total = await db.users.count_documents({})
     current = await db.users.count_documents({"consent.agreed": True, "consent.version": CONSENT_POLICY_VERSION})
-    return {"version": CONSENT_POLICY_VERSION, "users_total": total, "users_on_current": current}
+    pol = await db.app_meta.find_one({"_id": "policy"}) or {}
+    return {"version": CONSENT_POLICY_VERSION, "users_total": total, "users_on_current": current,
+            "history": list(reversed(pol.get("history", [])))[:50]}
 
 
 @api_router.post("/admin/policy-version")
@@ -1100,10 +1102,59 @@ async def admin_set_policy_version(body: PolicyVersionIn, request: Request, admi
     v = (body.version or "").strip()
     if not v:
         raise HTTPException(status_code=400, detail="Version cannot be empty.")
+    entry = {"version": v, "at": now_iso(), "by": admin.get("email", "")}
     CONSENT_POLICY_VERSION = v
-    await db.app_meta.update_one({"_id": "policy"}, {"$set": {"version": v, "updated_at": now_iso()}}, upsert=True)
+    await db.app_meta.update_one({"_id": "policy"},
+                                 {"$set": {"version": v, "updated_at": entry["at"]},
+                                  "$push": {"history": entry}}, upsert=True)
     await audit(request, admin.get("email"), "policy_version_bumped", v)
     return {"version": v}
+
+
+class CardStyleIn(BaseModel):
+    accent: str
+
+
+@api_router.get("/admin/card-style")
+async def admin_get_card_style(admin: dict = Depends(require_admin)):
+    doc = await db.app_meta.find_one({"_id": "card_style"}) or {}
+    return {"accent": doc.get("accent", "#C6F135")}
+
+
+@api_router.post("/admin/card-style")
+async def admin_set_card_style(body: CardStyleIn, request: Request, admin: dict = Depends(require_admin)):
+    """Set the accent colour used on the auto-generated daily signals share cards."""
+    accent = (body.accent or "").strip()
+    if not accent.startswith("#") or len(accent) not in (4, 7):
+        raise HTTPException(status_code=400, detail="Enter a valid hex colour, e.g. #C6F135.")
+    await db.app_meta.update_one({"_id": "card_style"}, {"$set": {"accent": accent}}, upsert=True)
+    _og_cache.clear()  # force cards to re-render with the new accent
+    await audit(request, admin.get("email"), "card_style_updated", accent)
+    return {"accent": accent}
+
+
+class TestEmailIn(BaseModel):
+    to: EmailStr
+
+
+@api_router.post("/admin/email/test")
+async def admin_send_test_email(body: TestEmailIn, admin: dict = Depends(require_admin)):
+    if not os.environ.get("GMAIL_APP_PASSWORD"):
+        return {"sent": False, "skipped": "email_not_configured"}
+    res = await asyncio.to_thread(send_test_email, body.to)
+    return {"sent": res == "sent", "result": res, "to": body.to}
+
+
+@api_router.get("/admin/signals-digest/preview", response_class=HTMLResponse)
+async def admin_signals_digest_preview(admin: dict = Depends(require_admin)):
+    """Render the weekly digest exactly as subscribers would receive it (no send)."""
+    week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).date().isoformat()
+    signals = await db.signals_archive.find({"date": {"$gte": week_ago}}, {"_id": 0}).sort("date", -1).to_list(14)
+    items = _collect_top_signal_items(signals, 6)
+    if not items:
+        return HTMLResponse('<div style="font-family:Arial;padding:40px;color:#374151;">No Market Signals in the last 7 days yet — the preview will populate as daily signals are generated.</div>')
+    html = render_signals_digest_html("there", items, PUBLIC_SITE, PUBLIC_SITE + "/api/newsletter/unsubscribe?token=PREVIEW")
+    return HTMLResponse(html)
 
 
 
@@ -2334,27 +2385,35 @@ async def signals_archive_day(day: str):
 _og_cache: dict = {}
 
 
-def _render_signal_card(date: str, eyebrow_date: str, headline: str) -> bytes:
+def _hex_to_rgb(h: str, default=(198, 241, 53)):
+    try:
+        h = (h or "").lstrip("#")
+        if len(h) == 3:
+            h = "".join(c * 2 for c in h)
+        return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+    except Exception:
+        return default
+
+
+def _render_signal_card(date: str, eyebrow_date: str, headline: str, accent=(198, 241, 53)) -> bytes:
     from PIL import Image, ImageDraw, ImageFont, ImageFilter
     W, H = 1200, 630
     fonts_dir = Path(__file__).parent / "assets" / "fonts"
     f_bold = lambda s: ImageFont.truetype(str(fonts_dir / "VeraBd.ttf"), s)
     f_reg = lambda s: ImageFont.truetype(str(fonts_dir / "Vera.ttf"), s)
     img = Image.new("RGB", (W, H), (5, 5, 5))
-    # Lime glow, top-right.
+    # Accent glow, top-right (dimmed accent so it reads on black).
     glow = Image.new("RGB", (W, H), (5, 5, 5))
     gd = ImageDraw.Draw(glow)
-    gd.ellipse([W - 380, -220, W + 160, 320], fill=(120, 150, 40))
+    gd.ellipse([W - 380, -220, W + 160, 320], fill=tuple(int(c * 0.6) for c in accent))
     glow = glow.filter(ImageFilter.GaussianBlur(120))
     img = Image.blend(img, glow, 0.5)
     d = ImageDraw.Draw(img)
     PAD = 70
-    # Monogram + eyebrow.
     d.text((PAD, 60), "SK", font=f_bold(40), fill=(255, 255, 255))
     sk_w = d.textlength("SK", font=f_bold(40))
-    d.text((PAD + sk_w, 60), ".", font=f_bold(40), fill=(198, 241, 53))
-    d.text((PAD, 150), "MARKET SIGNALS", font=f_bold(26), fill=(198, 241, 53))
-    # Headline, wrapped.
+    d.text((PAD + sk_w, 60), ".", font=f_bold(40), fill=accent)
+    d.text((PAD, 150), "MARKET SIGNALS", font=f_bold(26), fill=accent)
     text = (headline or "Today's read on the energy transition & capital.").strip()
     hf = f_bold(58)
     words, lines, cur = text.split(), [], ""
@@ -2373,14 +2432,18 @@ def _render_signal_card(date: str, eyebrow_date: str, headline: str) -> bytes:
     for ln in lines:
         d.text((PAD, y), ln, font=hf, fill=(245, 245, 245))
         y += 74
-    # Footer date + tagline.
     d.text((PAD, H - 90), eyebrow_date or date, font=f_reg(24), fill=(160, 160, 160))
     tag = "sudarshankarweer.com/signals"
     tw = d.textlength(tag, font=f_reg(22))
-    d.text((W - PAD - tw, H - 88), tag, font=f_reg(22), fill=(198, 241, 53))
+    d.text((W - PAD - tw, H - 88), tag, font=f_reg(22), fill=accent)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
+
+
+async def _card_accent() -> tuple:
+    doc = await db.app_meta.find_one({"_id": "card_style"})
+    return _hex_to_rgb((doc or {}).get("accent", "#C6F135"))
 
 
 @api_router.get("/signals/og/{day}.png")
@@ -2396,11 +2459,12 @@ async def signals_og_image(day: str):
         nice = datetime.fromisoformat((item or {}).get("generated_at", day)).strftime("%B %-d, %Y")
     except Exception:
         nice = day
-    cache_key = f"{day}:{hash(top)}"
+    accent = await _card_accent()
+    cache_key = f"{day}:{hash(top)}:{accent}"
     if cache_key not in _og_cache:
-        _og_cache[cache_key] = await asyncio.to_thread(_render_signal_card, day, nice, top)
+        _og_cache[cache_key] = await asyncio.to_thread(_render_signal_card, day, nice, top, accent)
     return Response(content=_og_cache[cache_key], media_type="image/png",
-                    headers={"Cache-Control": "public, max-age=86400"})
+                    headers={"Cache-Control": "public, max-age=3600"})
 
 
 @api_router.post("/admin/home/regenerate")

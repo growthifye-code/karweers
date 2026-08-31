@@ -408,12 +408,7 @@ def send_consent_receipt_email(to_email: str, name: str, action: str, version: s
     return _smtp_send(msg)
 
 
-def send_signals_digest_email(to_email: str, name: str, items: list, site: str = "https://www.sudarshankarweer.com", unsubscribe_url: str = "") -> str:
-    """Weekly round-up of the best Market Signals to a subscriber (INERT until SMTP configured)."""
-    user = os.environ.get("GMAIL_USER")
-    pwd = os.environ.get("GMAIL_APP_PASSWORD")
-    if not user or not pwd or not to_email or not items:
-        return "skipped"
+def render_signals_digest_html(name: str, items: list, site: str = "https://www.sudarshankarweer.com", unsubscribe_url: str = "") -> str:
     cards = ""
     for it in items:
         cards += (
@@ -434,6 +429,15 @@ def send_signals_digest_email(to_email: str, name: str, items: list, site: str =
         f'<p style="font-size:13px;color:#374151;margin-top:16px;">— Team Sudarshan Karweer</p>'
         f'{unsub}'
     )
+    return _shell("Weekly Market Signals", inner)
+
+
+def send_signals_digest_email(to_email: str, name: str, items: list, site: str = "https://www.sudarshankarweer.com", unsubscribe_url: str = "") -> str:
+    """Weekly round-up of the best Market Signals to a subscriber (INERT until SMTP configured)."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email or not items:
+        return "skipped"
     msg = EmailMessage()
     msg["Subject"] = "This week in Market Signals"
     msg["From"] = user
@@ -444,6 +448,27 @@ def send_signals_digest_email(to_email: str, name: str, items: list, site: str =
     msg.set_content("This week's Market Signals: " + " | ".join(i.get("title", "") for i in items)
                     + f"  Read more: {site}/signals"
                     + (f"  Unsubscribe: {unsubscribe_url}" if unsubscribe_url else ""))
-    msg.add_alternative(_shell("Weekly Market Signals", inner), subtype="html")
+    msg.add_alternative(render_signals_digest_html(name, items, site, unsubscribe_url), subtype="html")
+    return _smtp_send(msg)
+
+
+def send_test_email(to_email: str) -> str:
+    """Send a simple deliverability test email (used to check SPF/DKIM/DMARC via a mail tester)."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email:
+        return "skipped"
+    inner = (
+        '<p style="font-size:15px;color:#111;">This is a deliverability test from the Sudarshan Karweer platform.</p>'
+        '<p style="font-size:14px;color:#374151;">If you can read this, outbound email is working. '
+        'Run it through a tool like mail-tester.com to confirm SPF, DKIM and DMARC all pass.</p>'
+        '<p style="font-size:13px;color:#374151;margin-top:16px;">— Team Sudarshan Karweer</p>'
+    )
+    msg = EmailMessage()
+    msg["Subject"] = "Deliverability test — Sudarshan Karweer"
+    msg["From"] = user
+    msg["To"] = to_email
+    msg.set_content("Deliverability test from the Sudarshan Karweer platform. If you can read this, outbound email works.")
+    msg.add_alternative(_shell("Deliverability test", inner), subtype="html")
     return _smtp_send(msg)
 

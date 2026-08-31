@@ -6,7 +6,7 @@ import { Logo } from "@/components/Navbar";
 import ThemeToggle from "@/components/ThemeToggle";
 import { Users, FileText, Inbox, Sparkles, Trash2, Wand2, Mail, LifeBuoy, UserCircle, ChevronDown, Tag, AlertTriangle, Star, Target, Package, Pencil, TrendingUp, TrendingDown, ShieldAlert, Unlock, CalendarCheck, CalendarX, RefreshCw, ClipboardCheck } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from "recharts";
-import api from "@/lib/api";
+import api, { API } from "@/lib/api";
 import VaultPanel from "@/pages/VaultPanel";
 
 const CATS = [
@@ -61,6 +61,9 @@ export default function AdminDashboard() {
   const [consentLogs, setConsentLogs] = useState(null);
   const [policyInfo, setPolicyInfo] = useState(null);
   const [newVersion, setNewVersion] = useState("");
+  const [testTo, setTestTo] = useState("");
+  const [cardAccent, setCardAccent] = useState("#C6F135");
+  const [cardBust, setCardBust] = useState(Date.now());
   const [regenBusy, setRegenBusy] = useState(false);
 
   const [form, setForm] = useState({ title: "", category: "news", sector: SECTORS[0], summary: "", content: "", tags: "", image: DEFAULT_IMG, featured: false });
@@ -90,8 +93,42 @@ export default function AdminDashboard() {
     api.get("/admin/calendar/status").then((r) => setCalStatus(r.data)).catch(() => {});
     api.get("/admin/consent-logs").then((r) => setConsentLogs(r.data)).catch(() => {});
     api.get("/admin/policy-version").then((r) => { setPolicyInfo(r.data); setNewVersion(r.data.version || ""); }).catch(() => {});
+    api.get("/admin/card-style").then((r) => setCardAccent(r.data.accent || "#C6F135")).catch(() => {});
   };
   useEffect(load, []);
+
+  const sendTestEmail = async () => {
+    const to = (testTo || "").trim();
+    if (!to) { toast.error("Enter an email address."); return; }
+    try {
+      const { data } = await api.post("/admin/email/test", { to });
+      if (data.sent) toast.success(`Test email sent to ${to}.`);
+      else toast.error(data.skipped === "email_not_configured" ? "Email is not configured yet." : "Could not send test email.");
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Could not send test email."); }
+  };
+  const previewDigest = async () => {
+    try {
+      const { data } = await api.get("/admin/signals-digest/preview");
+      const w = window.open("", "_blank");
+      if (w) { w.document.open(); w.document.write(data); w.document.close(); }
+    } catch { toast.error("Could not load the digest preview."); }
+  };
+  const sendDigestNow = async () => {
+    if (!window.confirm("Send the weekly Market Signals digest to all subscribers now?")) return;
+    try {
+      const { data } = await api.post("/admin/signals-digest/run");
+      if (data.sent) toast.success(`Digest sent to ${data.subscribers} subscriber(s).`);
+      else toast.error("Email is not configured yet.");
+    } catch { toast.error("Could not send the digest."); }
+  };
+  const saveCardAccent = async (accent) => {
+    try {
+      await api.post("/admin/card-style", { accent });
+      setCardAccent(accent);
+      setCardBust(Date.now());
+      toast.success("Share card accent updated.");
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Could not update accent."); }
+  };
 
   const bumpPolicy = async () => {
     const v = (newVersion || "").trim();
@@ -538,6 +575,44 @@ export default function AdminDashboard() {
                 className="inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-5 py-2.5 text-sm font-semibold text-[hsl(var(--primary-foreground))] transition-transform hover:-translate-y-0.5 disabled:opacity-60">
                 <RefreshCw className={`h-4 w-4 ${regenBusy ? "animate-spin" : ""}`} /> {regenBusy ? "Regenerating…" : "Regenerate now"}
               </button>
+            </div>
+
+            <div className="grid gap-6 lg:grid-cols-2" data-testid="email-share-tools">
+              <div className="rounded-2xl border border-border bg-card p-5">
+                <p className="flex items-center gap-2 font-display text-base font-bold"><Mail className="h-4 w-4 text-[hsl(var(--primary))]" /> Email & deliverability</p>
+                <p className="mt-1 text-xs text-muted-foreground">Send a test email (run it through mail-tester.com to check SPF/DKIM/DMARC).</p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <input value={testTo} onChange={(e) => setTestTo(e.target.value)} data-testid="test-email-input" placeholder="you@example.com"
+                    className="min-w-[200px] flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))]" />
+                  <button onClick={sendTestEmail} data-testid="send-test-email" className="rounded-full bg-[hsl(var(--primary))] px-4 py-2 text-sm font-semibold text-[hsl(var(--primary-foreground))] transition-transform hover:-translate-y-0.5">Send test</button>
+                </div>
+                <div className="mt-5 border-t border-border pt-4">
+                  <p className="text-sm font-semibold">Weekly signals digest</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Preview it exactly as subscribers see it, or send it now.</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button onClick={previewDigest} data-testid="preview-digest" className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium hover:bg-secondary"><FileText className="h-4 w-4" /> Preview</button>
+                    <button onClick={sendDigestNow} data-testid="send-digest" className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium hover:bg-secondary"><Mail className="h-4 w-4" /> Send now</button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-card p-5" data-testid="card-style-tool">
+                <p className="flex items-center gap-2 font-display text-base font-bold"><Sparkles className="h-4 w-4 text-[hsl(var(--primary))]" /> Signals share card</p>
+                <p className="mt-1 text-xs text-muted-foreground">Pick the accent colour for the auto-generated daily share images.</p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {["#C6F135", "#22D3EE", "#F59E0B", "#A78BFA", "#34D399", "#F87171"].map((c) => (
+                    <button key={c} onClick={() => saveCardAccent(c)} data-testid={`accent-${c.slice(1)}`} title={c}
+                      className={`h-8 w-8 rounded-full border-2 transition-transform hover:scale-110 ${cardAccent.toLowerCase() === c.toLowerCase() ? "border-white" : "border-transparent"}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                  <input type="color" value={cardAccent} onChange={(e) => setCardAccent(e.target.value)} onBlur={(e) => saveCardAccent(e.target.value)}
+                    data-testid="accent-picker" className="h-8 w-10 cursor-pointer rounded border border-border bg-transparent" />
+                </div>
+                <div className="mt-4 overflow-hidden rounded-xl border border-border">
+                  <img src={`${API}/signals/og/${new Date().toISOString().slice(0, 10)}.png?v=${cardBust}`} alt="Share card preview"
+                    data-testid="card-preview" className="w-full" />
+                </div>
+              </div>
             </div>
             <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
               {statCards.map((s) => (
@@ -1270,6 +1345,19 @@ export default function AdminDashboard() {
                 </button>
               </div>
             </div>
+            {policyInfo?.history?.length > 0 && (
+              <div className="rounded-2xl border border-border bg-card p-5" data-testid="policy-history">
+                <p className="text-sm font-semibold">Version history</p>
+                <ul className="mt-3 space-y-2">
+                  {policyInfo.history.map((h, i) => (
+                    <li key={i} className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2 text-xs text-muted-foreground last:border-0 last:pb-0">
+                      <span className="font-semibold text-foreground">v{h.version}</span>
+                      <span>{h.at ? new Date(h.at).toLocaleString() : ""}{h.by ? ` · ${h.by}` : ""}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <div className="overflow-x-auto rounded-2xl border border-border">
               <table className="w-full text-left text-sm">
                 <thead className="bg-card text-muted-foreground">

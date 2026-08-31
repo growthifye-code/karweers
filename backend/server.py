@@ -9,6 +9,7 @@ import asyncio
 import logging
 import uuid
 import time
+import io
 import requests
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -2305,6 +2306,78 @@ async def signals_archive_day(day: str):
     return item
 
 
+_og_cache: dict = {}
+
+
+def _render_signal_card(date: str, eyebrow_date: str, headline: str) -> bytes:
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter
+    W, H = 1200, 630
+    fonts_dir = Path(__file__).parent / "assets" / "fonts"
+    f_bold = lambda s: ImageFont.truetype(str(fonts_dir / "VeraBd.ttf"), s)
+    f_reg = lambda s: ImageFont.truetype(str(fonts_dir / "Vera.ttf"), s)
+    img = Image.new("RGB", (W, H), (5, 5, 5))
+    # Lime glow, top-right.
+    glow = Image.new("RGB", (W, H), (5, 5, 5))
+    gd = ImageDraw.Draw(glow)
+    gd.ellipse([W - 380, -220, W + 160, 320], fill=(120, 150, 40))
+    glow = glow.filter(ImageFilter.GaussianBlur(120))
+    img = Image.blend(img, glow, 0.5)
+    d = ImageDraw.Draw(img)
+    PAD = 70
+    # Monogram + eyebrow.
+    d.text((PAD, 60), "SK", font=f_bold(40), fill=(255, 255, 255))
+    sk_w = d.textlength("SK", font=f_bold(40))
+    d.text((PAD + sk_w, 60), ".", font=f_bold(40), fill=(198, 241, 53))
+    d.text((PAD, 150), "MARKET SIGNALS", font=f_bold(26), fill=(198, 241, 53))
+    # Headline, wrapped.
+    text = (headline or "Today's read on the energy transition & capital.").strip()
+    hf = f_bold(58)
+    words, lines, cur = text.split(), [], ""
+    for w in words:
+        trial = (cur + " " + w).strip()
+        if d.textlength(trial, font=hf) <= W - 2 * PAD:
+            cur = trial
+        else:
+            lines.append(cur); cur = w
+        if len(lines) >= 4:
+            break
+    if cur and len(lines) < 5:
+        lines.append(cur)
+    lines = lines[:5]
+    y = 235
+    for ln in lines:
+        d.text((PAD, y), ln, font=hf, fill=(245, 245, 245))
+        y += 74
+    # Footer date + tagline.
+    d.text((PAD, H - 90), eyebrow_date or date, font=f_reg(24), fill=(160, 160, 160))
+    tag = "sudarshankarweer.com/signals"
+    tw = d.textlength(tag, font=f_reg(22))
+    d.text((W - PAD - tw, H - 88), tag, font=f_reg(22), fill=(198, 241, 53))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+@api_router.get("/signals/og/{day}.png")
+async def signals_og_image(day: str):
+    """Auto-generated per-day social share card featuring that day's top headline."""
+    item = await db.signals_archive.find_one({"date": day}, {"_id": 0})
+    top = ""
+    if item:
+        feed = item.get("feed") or []
+        top = (feed[0].get("title") if feed else "") or item.get("hero_headline", "")
+    top = (top or "").replace("*", "")
+    try:
+        nice = datetime.fromisoformat((item or {}).get("generated_at", day)).strftime("%B %-d, %Y")
+    except Exception:
+        nice = day
+    cache_key = f"{day}:{hash(top)}"
+    if cache_key not in _og_cache:
+        _og_cache[cache_key] = await asyncio.to_thread(_render_signal_card, day, nice, top)
+    return Response(content=_og_cache[cache_key], media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
 @api_router.post("/admin/home/regenerate")
 async def admin_home_regenerate(request: Request, admin: dict = Depends(require_admin)):
     data = await _refresh_home_content(force=True)
@@ -2399,40 +2472,63 @@ def _unsub_token(email: str) -> str:
                         get_jwt_secret(), algorithm="HS256")
 
 
+def _resub_token(email: str) -> str:
+    return pyjwt.encode({"purpose": "resubscribe", "email": (email or "").lower()},
+                        get_jwt_secret(), algorithm="HS256")
+
+
 def _unsub_url(email: str) -> str:
     return f"{PUBLIC_SITE}/api/newsletter/unsubscribe?token={_unsub_token(email)}"
+
+
+def _decode_email(token: str, purpose: str) -> str:
+    try:
+        data = pyjwt.decode(token, get_jwt_secret(), algorithms=["HS256"])
+        if data.get("purpose") == purpose:
+            return data.get("email", "")
+    except Exception:
+        pass
+    return ""
+
+
+def _mail_page(heading: str, body_html: str, cta_label: str = "Back to site", cta_href: str = PUBLIC_SITE) -> str:
+    return (
+        '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
+        f'<title>{heading}</title></head>'
+        '<body style="margin:0;background:#050505;color:#fff;font-family:Arial,sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center;">'
+        '<div style="max-width:480px;padding:40px;text-align:center;">'
+        '<div style="font-size:26px;font-weight:800;">S<span style="color:#C6F135;">K.</span></div>'
+        f'<h1 style="font-size:22px;margin-top:24px;">{heading}</h1>{body_html}'
+        f'<a href="{cta_href}" style="display:inline-block;margin-top:20px;background:#C6F135;color:#0A0A0A;padding:10px 22px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">{cta_label}</a>'
+        '</div></body></html>'
+    )
 
 
 @api_router.get("/newsletter/unsubscribe")
 async def newsletter_unsubscribe(token: str = ""):
     """One-click unsubscribe from the email footer link (no login needed)."""
-    email = ""
-    try:
-        data = pyjwt.decode(token, get_jwt_secret(), algorithms=["HS256"])
-        if data.get("purpose") == "unsubscribe":
-            email = data.get("email", "")
-    except Exception:
-        email = ""
-    ok = False
+    email = _decode_email(token, "unsubscribe")
     if email:
-        res = await db.subscribers.delete_many({"email": email})
-        ok = res.deleted_count > 0
-    body = (
-        '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
-        '<title>Unsubscribed</title></head>'
-        '<body style="margin:0;background:#050505;color:#fff;font-family:Arial,sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center;">'
-        '<div style="max-width:480px;padding:40px;text-align:center;">'
-        '<div style="font-size:26px;font-weight:800;">S<span style="color:#C6F135;">K.</span></div>'
-        + (f'<h1 style="font-size:22px;margin-top:24px;">You\'re unsubscribed</h1>'
-           f'<p style="color:#9ca3af;font-size:14px;">{email} will no longer receive the weekly Market Signals digest. '
-           f'Changed your mind? You can resubscribe anytime on the site.</p>'
-           if (ok or email) else
-           '<h1 style="font-size:22px;margin-top:24px;">Link expired</h1>'
-           '<p style="color:#9ca3af;font-size:14px;">This unsubscribe link is invalid or has already been used.</p>')
-        + f'<a href="{PUBLIC_SITE}" style="display:inline-block;margin-top:20px;background:#C6F135;color:#0A0A0A;padding:10px 22px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Back to site</a>'
-        '</div></body></html>'
-    )
-    return HTMLResponse(content=body)
+        await db.subscribers.delete_many({"email": email})
+        resub = f"{PUBLIC_SITE}/api/newsletter/resubscribe?token={_resub_token(email)}"
+        body = (f'<p style="color:#9ca3af;font-size:14px;">{email} will no longer receive the weekly Market Signals digest.</p>'
+                f'<p style="color:#9ca3af;font-size:13px;">Changed your mind?</p>')
+        return HTMLResponse(content=_mail_page("You're unsubscribed", body, "Resubscribe with one click", resub))
+    return HTMLResponse(content=_mail_page("Link expired",
+        '<p style="color:#9ca3af;font-size:14px;">This unsubscribe link is invalid or has already been used.</p>'))
+
+
+@api_router.get("/newsletter/resubscribe")
+async def newsletter_resubscribe(token: str = ""):
+    """One-click opt back in from the unsubscribe confirmation page."""
+    email = _decode_email(token, "resubscribe")
+    if email:
+        if not await db.subscribers.find_one({"email": email}):
+            await db.subscribers.insert_one({"id": str(uuid.uuid4()), "email": email, "created_at": now_iso()})
+        body = f'<p style="color:#9ca3af;font-size:14px;">Welcome back — {email} will receive the weekly Market Signals digest again.</p>'
+        return HTMLResponse(content=_mail_page("You're resubscribed", body))
+    return HTMLResponse(content=_mail_page("Link expired",
+        '<p style="color:#9ca3af;font-size:14px;">This link is invalid or has expired.</p>'))
 
 
 # ---------------- Consultation packages, availability & booking ----------------

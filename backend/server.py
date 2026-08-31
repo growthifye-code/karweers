@@ -1098,14 +1098,28 @@ class WACredIn(BaseModel):
     authenticatorAttachment: Optional[str] = None
 
 
+def _vault_seconds_left(token) -> int:
+    if not token:
+        return 0
+    try:
+        d = pyjwt.decode(token, get_jwt_secret(), algorithms=["HS256"])
+        if d.get("purpose") == "vault" and d.get("stage") == "unlocked":
+            return max(0, int(d["exp"] - datetime.now(timezone.utc).timestamp()))
+    except Exception:
+        return 0
+    return 0
+
+
 @api_router.get("/admin/vault/status")
 async def vault_status(request: Request, admin: dict = Depends(require_admin)):
     email = admin.get("email")
     mfa = await db.superadmin_mfa.find_one({"email": email})
     pk = await db.webauthn_credentials.count_documents({"user_id": email})
+    left = _vault_seconds_left(request.cookies.get("vault_unlock")) if _read_vault_jwt(request.cookies.get("vault_unlock"), "unlocked") == email else 0
     return {"totp_enrolled": bool(mfa and mfa.get("totp_enrolled")),
             "passkey_enrolled": pk > 0,
-            "unlocked": _read_vault_jwt(request.cookies.get("vault_unlock"), "unlocked") == email,
+            "unlocked": left > 0,
+            "unlock_seconds_left": left,
             "ready": bool(_fernet and WEBAUTHN_RP_ID),
             "key_count": await db.vault_secrets.count_documents({})}
 

@@ -14,16 +14,31 @@ export default function VaultPanel() {
   const [label, setLabel] = useState("");
   const [value, setValue] = useState("");
   const [reveal, setReveal] = useState({});
+  const [secsLeft, setSecsLeft] = useState(0);
 
   const load = async () => {
     const { data } = await api.get("/admin/vault/status");
     setStatus(data);
+    setSecsLeft(data.unlock_seconds_left || 0);
     if (data.unlocked) {
       const r = await api.get("/admin/vault/keys");
       setKeys(r.data.keys || []);
     }
   };
   useEffect(() => { load().catch(() => {}); }, []);
+
+  useEffect(() => {
+    if (!status?.unlocked || secsLeft <= 0) return;
+    const t = setInterval(() => {
+      setSecsLeft((s) => {
+        if (s <= 1) { clearInterval(t); setKeys([]); load().catch(() => {}); return 0; }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, [status?.unlocked, secsLeft > 0]);
+
+  const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
   const enrollTotp = async () => {
     const { data } = await api.post("/admin/vault/enroll/totp");
@@ -84,7 +99,7 @@ export default function VaultPanel() {
             <p className="text-sm text-muted-foreground">Encrypted API-key vault. Unlock requires your authenticator code <span className="font-semibold">and</span> a device passkey.</p>
           </div>
           <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${status.unlocked ? "bg-[hsl(var(--primary))]/15 text-[hsl(var(--primary))]" : "bg-secondary text-muted-foreground"}`} data-testid="vault-state">
-            {status.unlocked ? <><Unlock className="h-3.5 w-3.5" /> Unlocked</> : <><Lock className="h-3.5 w-3.5" /> Locked</>}
+            {status.unlocked ? <><Unlock className="h-3.5 w-3.5" /> Unlocked · auto-locks in <span className="font-mono tabular-nums" data-testid="vault-countdown">{mmss(secsLeft)}</span></> : <><Lock className="h-3.5 w-3.5" /> Locked</>}
           </span>
         </div>
 

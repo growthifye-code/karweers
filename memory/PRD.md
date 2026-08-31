@@ -212,3 +212,6 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - **Audit retention**: audit_log entries now carry expire_at (BSON Date) + TTL index (auto-purge). POST /admin/audit-retention {days} (1–3650, default 90) re-bases existing entries; persisted in app_meta; loaded on startup.
 - Verified: TOTP enroll/verify/unlock (curl); vault CRUD encrypted-at-rest (curl, plaintext absent in DB); FULL passkey flow end-to-end via Playwright CDP virtual authenticator (screenshot: enroll→register passkey→unlock→"Unlocked" + secrets panel); retention set to 30/90 (curl). Test MFA data cleared afterward.
 - NOTE: IPQS fallback still needs the user's IPQualityScore key (IPQS_API_KEY empty). Email OTP deferred (SMTP inert).
+
+## Iteration 5.21 (Jun 2026) — Vault auto-lock countdown
+- vault_status now returns unlock_seconds_left (decoded from the vault_unlock JWT exp). VaultPanel shows a live "auto-locks in M:SS" countdown in the Unlocked badge (testid vault-countdown); at 0 it auto-locks the UI and refetches status. Verified via CDP full-flow screenshot (4:57 → 4:54 ticking).

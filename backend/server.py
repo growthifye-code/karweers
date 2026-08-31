@@ -393,16 +393,19 @@ async def my_blogs(limit: int = 6, user: dict = Depends(get_current_user)):
 @api_router.get("/admin/clients")
 async def admin_clients(admin: dict = Depends(require_admin)):
     users = await db.users.find({"role": "client"}, {"_id": 0, "password_hash": 0}).sort("created_at", -1).to_list(2000)
+    # Aggregate counts in a handful of queries (avoids per-user N+1).
+    act = {d["_id"]: d for d in await db.activity_events.aggregate(
+        [{"$group": {"_id": "$user_id", "n": {"$sum": 1}, "last": {"$max": "$created_at"}}}]).to_list(10000)}
+    tk = {d["_id"]: d["n"] for d in await db.support_tickets.aggregate(
+        [{"$group": {"_id": "$user_id", "n": {"$sum": 1}}}]).to_list(10000)}
+    bk = {d["_id"]: d["n"] for d in await db.consultations.aggregate(
+        [{"$group": {"_id": "$email", "n": {"$sum": 1}}}]).to_list(10000)}
     out = []
     for u in users:
-        acts = await db.activity_events.count_documents({"user_id": u["id"]})
-        last = await db.activity_events.find_one({"user_id": u["id"]}, {"_id": 0, "created_at": 1}, sort=[("created_at", -1)])
-        bookings = await db.consultations.count_documents({"email": u["email"]})
-        tickets = await db.support_tickets.count_documents({"user_id": u["id"]})
-        weights = await _topic_weights(u["id"])
-        top = [t for t, _ in sorted(weights.items(), key=lambda kv: kv[1], reverse=True)[:3]]
-        out.append({**u, "activity_count": acts, "last_activity": last["created_at"] if last else None,
-                    "booking_count": bookings, "ticket_count": tickets, "interests_computed": top})
+        a = act.get(u["id"], {})
+        out.append({**u, "activity_count": a.get("n", 0), "last_activity": a.get("last"),
+                    "booking_count": bk.get(u["email"], 0), "ticket_count": tk.get(u["id"], 0),
+                    "interests_computed": (u.get("interests") or [])[:3]})
     return out
 
 
@@ -495,33 +498,61 @@ async def _auto_escalate_tickets():
 
 
 @api_router.get("/admin/lead-analytics")
-async def admin_lead_analytics(weeks: int = 8, admin: dict = Depends(require_admin)):
-    """Lead volume by source over the last N weeks (for the Overview chart)."""
-    leads = await db.consultations.find({}, {"_id": 0, "source": 1, "created_at": 1}).to_list(5000)
+async def admin_lead_analytics(period: str = "8w", admin: dict = Depends(require_admin)):
+    """Lead volume by source over a selectable period, plus per-source conversion."""
+    leads = await db.consultations.find({}, {"_id": 0, "source": 1, "created_at": 1, "status": 1}).to_list(10000)
     now = datetime.now(timezone.utc)
-    buckets = []
-    for i in range(weeks - 1, -1, -1):
-        start = (now - timedelta(days=now.weekday() + 7 * i)).replace(hour=0, minute=0, second=0, microsecond=0)
-        buckets.append(start)
-    labels = [b.strftime("%d %b") for b in buckets]
     SOURCES = ["booking-form", "ask-sk-chatbot", "consultation-checkout", "whatsapp", "other"]
-    rows = [{"week": labels[i], **{s: 0 for s in SOURCES}} for i in range(weeks)]
+    PAID_STATUSES = {"paid", "won", "scheduled"}
+
+    # Build time buckets by period.
+    buckets, labels = [], []
+    if period == "12m":
+        granularity = "monthly"
+        first = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        starts = []
+        y, m = first.year, first.month
+        for _ in range(12):
+            starts.append(datetime(y, m, 1, tzinfo=timezone.utc))
+            m -= 1
+            if m == 0:
+                m = 12; y -= 1
+        starts.reverse()
+        for i, s in enumerate(starts):
+            end = starts[i + 1] if i + 1 < len(starts) else (now + timedelta(days=1))
+            buckets.append((s, end)); labels.append(s.strftime("%b %y"))
+    else:
+        n = 13 if period == "3m" else 8
+        granularity = "weekly"
+        for i in range(n - 1, -1, -1):
+            s = (now - timedelta(days=now.weekday() + 7 * i)).replace(hour=0, minute=0, second=0, microsecond=0)
+            buckets.append((s, s + timedelta(days=7))); labels.append(s.strftime("%d %b"))
+
+    rows = [{"week": labels[i], **{s: 0 for s in SOURCES}} for i in range(len(buckets))]
+    conversion = {s: {"total": 0, "paid": 0} for s in SOURCES}
     for l in leads:
+        src = l.get("source") or "other"
+        if src not in SOURCES:
+            src = "other"
+        conversion[src]["total"] += 1
+        if l.get("status") in PAID_STATUSES:
+            conversion[src]["paid"] += 1
         try:
             ts = datetime.fromisoformat(l["created_at"])
             if ts.tzinfo is None:
                 ts = ts.replace(tzinfo=timezone.utc)
         except Exception:
             continue
-        src = l.get("source") or "other"
-        if src not in SOURCES:
-            src = "other"
-        for i in range(weeks):
-            if buckets[i] <= ts < buckets[i] + timedelta(days=7):
+        for i, (bs, be) in enumerate(buckets):
+            if bs <= ts < be:
                 rows[i][src] += 1
                 break
+    for s in SOURCES:
+        t = conversion[s]["total"]
+        conversion[s]["rate"] = round(100 * conversion[s]["paid"] / t) if t else 0
     totals = {s: sum(r[s] for r in rows) for s in SOURCES}
-    return {"weeks": rows, "sources": SOURCES, "totals": totals}
+    return {"weeks": rows, "sources": SOURCES, "totals": totals, "granularity": granularity,
+            "period": period, "conversion": conversion}
 
 
 # ---------------- Service Desk (tickets) ----------------

@@ -136,3 +136,9 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 ## Iteration 5.5 (Aug 31, 2026) — Source Analytics chart
 - Backend GET /admin/lead-analytics?weeks=8 → weekly buckets of lead counts per source + totals.
 - Overview tab: recharts stacked bar chart "Lead volume by source" (last 8 weeks) with colour legend + totals. testid lead-source-chart. Verified in UI.
+
+## Iteration 5.6 (Aug 31, 2026) — Date Range, Conversion, Security Audit
+- **Date range toggle**: chart period 8 weeks / 3 months (13 weekly) / 12 months (monthly). GET /admin/lead-analytics?period=8w|3m|12m. testids chart-period-toggle, period-<v>.
+- **Conversion view**: per-source paid-conversion (paid statuses: paid/won/scheduled) with % bars — testid conversion-view, conversion-<source>.
+- **Security audit** (deployment static scan + manual): PASS. No hardcoded secrets; URLs env-driven; admin routes gated by require_admin; auth (JWT + Google session cookie, HttpOnly/Secure/SameSite=None); admin allowlist strict; hCaptcha strict. Fixed: N+1 in /admin/clients → now MongoDB aggregations (4 queries total).
+- Advisories (not fixed): tighten CORS to explicit origin; escape user input in outbound email HTML when SMTP is enabled; consider rate-limit/captcha on public /chat/lead.

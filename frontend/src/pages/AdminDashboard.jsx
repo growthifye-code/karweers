@@ -36,6 +36,7 @@ export default function AdminDashboard() {
   const [segments, setSegments] = useState([]);
   const [leadSource, setLeadSource] = useState("all");
   const [analytics, setAnalytics] = useState(null);
+  const [chartPeriod, setChartPeriod] = useState("8w");
   const [ticketReplies, setTicketReplies] = useState({});
 
   const [form, setForm] = useState({ title: "", category: "news", sector: SECTORS[0], summary: "", content: "", tags: "", image: DEFAULT_IMG, featured: false });
@@ -53,6 +54,10 @@ export default function AdminDashboard() {
     api.get("/admin/lead-analytics").then((r) => setAnalytics(r.data)).catch(() => {});
   };
   useEffect(load, []);
+
+  useEffect(() => {
+    api.get("/admin/lead-analytics", { params: { period: chartPeriod } }).then((r) => setAnalytics(r.data)).catch(() => {});
+  }, [chartPeriod]);
 
   const openClient = async (id) => {
     try {
@@ -235,16 +240,22 @@ export default function AdminDashboard() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h3 className="font-display text-lg font-bold">Lead volume by source</h3>
-                    <p className="text-sm text-muted-foreground">Last 8 weeks · where your enquiries come from</p>
+                    <p className="text-sm text-muted-foreground">Where your enquiries come from</p>
                   </div>
-                  <div className="flex flex-wrap gap-3">
-                    {analytics.sources.filter((s) => analytics.totals[s] > 0).map((s) => (
-                      <span key={s} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <span className="h-2.5 w-2.5 rounded-full" style={{ background: SOURCE_COLORS[s] }} />
-                        {SOURCE_LABELS[s]} <span className="font-semibold text-foreground">{analytics.totals[s]}</span>
-                      </span>
+                  <div className="flex gap-1 rounded-full border border-border p-1" data-testid="chart-period-toggle">
+                    {[["8w", "8 weeks"], ["3m", "3 months"], ["12m", "12 months"]].map(([v, l]) => (
+                      <button key={v} onClick={() => setChartPeriod(v)} data-testid={`period-${v}`}
+                        className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${chartPeriod === v ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]" : "text-muted-foreground hover:bg-secondary"}`}>{l}</button>
                     ))}
                   </div>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-3">
+                  {analytics.sources.filter((s) => analytics.totals[s] > 0).map((s) => (
+                    <span key={s} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ background: SOURCE_COLORS[s] }} />
+                      {SOURCE_LABELS[s]} <span className="font-semibold text-foreground">{analytics.totals[s]}</span>
+                    </span>
+                  ))}
                 </div>
                 <div className="mt-6 h-64 w-full">
                   <ResponsiveContainer width="100%" height="100%">
@@ -259,6 +270,31 @@ export default function AdminDashboard() {
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
+                {analytics.conversion && (
+                  <div className="mt-6 border-t border-border pt-5" data-testid="conversion-view">
+                    <h4 className="font-display text-sm font-bold">Conversion by source</h4>
+                    <p className="text-xs text-muted-foreground">Share of each channel's leads that became paid consultations (all-time)</p>
+                    <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                      {analytics.sources.filter((s) => analytics.conversion[s].total > 0).map((s) => {
+                        const c = analytics.conversion[s];
+                        return (
+                          <div key={s} className="rounded-xl border border-border p-4" data-testid={`conversion-${s}`}>
+                            <div className="flex items-center justify-between">
+                              <span className="inline-flex items-center gap-1.5 text-sm font-medium">
+                                <span className="h-2.5 w-2.5 rounded-full" style={{ background: SOURCE_COLORS[s] }} />{SOURCE_LABELS[s]}
+                              </span>
+                              <span className="font-display text-lg font-black text-[hsl(var(--primary))]">{c.rate}%</span>
+                            </div>
+                            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-secondary">
+                              <div className="h-full rounded-full" style={{ width: `${c.rate}%`, background: SOURCE_COLORS[s] }} />
+                            </div>
+                            <p className="mt-2 text-xs text-muted-foreground">{c.paid} paid of {c.total} lead{c.total > 1 ? "s" : ""}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

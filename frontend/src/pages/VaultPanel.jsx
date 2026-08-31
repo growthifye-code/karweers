@@ -191,7 +191,7 @@ export default function VaultPanel() {
             <button onClick={lock} data-testid="vault-lock-btn" className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-2 text-xs font-medium hover:bg-secondary"><Lock className="h-3.5 w-3.5" /> Lock now</button>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
-            <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Label (e.g. Stripe live key)" data-testid="vault-key-label" className="flex-1 min-w-[160px] rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))]" />
+            <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Label (e.g. Razorpay live key)" data-testid="vault-key-label" className="flex-1 min-w-[160px] rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))]" />
             <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="Secret value" data-testid="vault-key-value" className="flex-1 min-w-[160px] rounded-xl border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-[hsl(var(--primary))]" />
             <button onClick={addKey} disabled={busy} data-testid="vault-key-add" className="inline-flex items-center gap-1.5 rounded-full bg-[hsl(var(--primary))] px-4 py-2 text-sm font-semibold text-[hsl(var(--primary-foreground))]"><Plus className="h-4 w-4" /> Add</button>
           </div>

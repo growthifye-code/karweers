@@ -48,6 +48,7 @@ export default function AdminDashboard() {
   const [allowlistText, setAllowlistText] = useState("");
   const [tokenLabel, setTokenLabel] = useState("");
   const [provisioned, setProvisioned] = useState(null);
+  const [auditLog, setAuditLog] = useState([]);
 
   const [form, setForm] = useState({ title: "", category: "news", sector: SECTORS[0], summary: "", content: "", tags: "", image: DEFAULT_IMG, featured: false });
   const [aiTopic, setAiTopic] = useState("");
@@ -71,6 +72,7 @@ export default function AdminDashboard() {
       }
     }).catch(() => {});
     api.get("/admin/vpn-guard").then((r) => { setVpnGuard(r.data); setAllowlistText((r.data.allowlist || []).join("\n")); }).catch(() => {});
+    api.get("/admin/audit-log").then((r) => setAuditLog(r.data.logs || [])).catch(() => {});
   };
   useEffect(load, []);
 
@@ -220,6 +222,20 @@ export default function AdminDashboard() {
       const r = await api.get("/admin/vpn-guard"); setVpnGuard(r.data);
       toast.success("Token removed.");
     } catch { toast.error("Could not remove token."); }
+  };
+  const blockCountry = async (code, country) => {
+    try {
+      await api.post("/admin/security/block-country", { code, country });
+      const r = await api.get("/admin/security"); setSecurity(r.data);
+      toast.success(`Blocked ${country || code}.`);
+    } catch (e) { toast.error(e?.response?.data?.detail || "Could not block country."); }
+  };
+  const unblockCountry = async (code) => {
+    try {
+      await api.post("/admin/security/unblock-country", { code });
+      const r = await api.get("/admin/security"); setSecurity(r.data);
+      toast.success(`Unblocked ${code}.`);
+    } catch { toast.error("Could not unblock country."); }
   };
 
   const SOURCE_META = {
@@ -531,6 +547,17 @@ export default function AdminDashboard() {
                   {security && security.offenders && security.offenders.length > 0 && (
                     <div className="mt-5" data-testid="top-offenders">
                       <h4 className="text-sm font-bold">Top offenders — most persistent probes</h4>
+                      {security.blocked_countries && security.blocked_countries.length > 0 && (
+                        <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="blocked-countries">
+                          <span className="text-xs font-semibold text-red-500">Blocked countries:</span>
+                          {security.blocked_countries.map((cc) => (
+                            <span key={cc} className="inline-flex items-center gap-1.5 rounded-full bg-red-500/15 px-2.5 py-1 text-xs font-semibold text-red-500" data-testid={`blocked-country-${cc}`}>
+                              {cc}
+                              <button onClick={() => unblockCountry(cc)} data-testid={`unblock-country-${cc}`} className="hover:text-foreground" aria-label={`Unblock ${cc}`}>×</button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       {security.countries && security.countries.length > 0 && (
                         <div className="mt-2 flex flex-wrap gap-2" data-testid="offender-countries">
                           {security.countries.map((c) => (
@@ -568,6 +595,10 @@ export default function AdminDashboard() {
                                     )}
                                     <button onClick={() => banRange(o.subnet)} data-testid={`block-range-${i}`}
                                       className="inline-flex items-center gap-1 rounded-full border border-red-500/40 px-2.5 py-1.5 text-xs font-medium text-red-500 hover:bg-red-500/10">Block {o.subnet.split("/")[1] ? "/" + o.subnet.split("/")[1] : "range"}</button>
+                                    {o.cc && (
+                                      <button onClick={() => blockCountry(o.cc, o.country)} data-testid={`block-country-${i}`}
+                                        className="inline-flex items-center gap-1 rounded-full border border-red-500/40 px-2.5 py-1.5 text-xs font-medium text-red-500 hover:bg-red-500/10">Block {o.cc}</button>
+                                    )}
                                   </div>
                                 </td>
                               </tr>
@@ -683,6 +714,24 @@ export default function AdminDashboard() {
                       <button onClick={() => setProvisioned(null)} className="mt-3 text-xs text-muted-foreground hover:text-foreground">Done — hide</button>
                     </div>
                   )}
+                </div>
+              )}
+
+              {auditLog.length > 0 && (
+                <div className="mt-6 rounded-2xl border border-border bg-card p-6" data-testid="audit-log-card">
+                  <h3 className="flex items-center gap-2 font-display text-lg font-bold"><FileText className="h-4 w-4 text-muted-foreground" /> Admin audit trail</h3>
+                  <p className="text-sm text-muted-foreground">Every sensitive admin action, logged.</p>
+                  <div className="mt-3 space-y-1.5" data-testid="audit-log-list">
+                    {auditLog.slice(0, 12).map((l) => (
+                      <div key={l.id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
+                        <span className="font-mono text-muted-foreground">{l.at ? new Date(l.at).toLocaleString() : ""}</span>
+                        <span className="font-semibold">{l.actor}</span>
+                        <span className="rounded-full bg-secondary px-2 py-0.5 font-medium">{l.action}</span>
+                        {l.target && <span className="font-mono text-muted-foreground">{l.target}{l.meta ? ` (${l.meta})` : ""}</span>}
+                        <span className="ml-auto font-mono text-muted-foreground">{l.ip}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 

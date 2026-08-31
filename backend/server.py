@@ -348,6 +348,13 @@ async def ban_ip(ip: str, reason: str, detail: str, minutes: int = BAN_MINUTES, 
     await _apply_block(ip, "ip", reason, detail, minutes, severity)
 
 
+async def audit(request: Request, actor: str, action: str, target: str = "", meta: str = ""):
+    """Tamper-evident admin action trail."""
+    await db.audit_log.insert_one({
+        "id": str(uuid.uuid4()), "actor": actor or "unknown", "action": action,
+        "target": target, "meta": meta, "ip": _client_ip(request), "at": now_iso()})
+
+
 async def _apply_block(target: str, scope: str, reason: str, detail: str,
                        minutes: int = BAN_MINUTES, severity: str = "high", alert: bool = True):
     until = datetime.now(timezone.utc) + timedelta(minutes=minutes)
@@ -467,7 +474,10 @@ async def detect_vpn(ip: str) -> dict:
         try:
             r = await asyncio.to_thread(requests.get, f"https://vpnapi.io/api/{ip}",
                                         params={"key": VPNAPI_KEY}, timeout=5)
-            s = r.json().get("security", {})
+            j = r.json()
+            if "security" not in j:
+                raise RuntimeError(j.get("message", "vpnapi error/quota"))
+            s = j["security"]
             vpn, proxy, tor = bool(s.get("vpn")), bool(s.get("proxy")), bool(s.get("tor"))
             provider = "vpnapi.io"
         except Exception:
@@ -528,6 +538,25 @@ async def vpn_should_block(request: Request) -> bool:
     if _verify_vpn_totp_cookie(request.cookies.get("vpn_totp")):
         return False
     return (await detect_vpn(ip))["flagged"]
+
+
+async def blocked_countries() -> set:
+    doc = await db.app_meta.find_one({"_id": "blocked_countries"})
+    return set((doc or {}).get("codes", []))
+
+
+async def country_should_block(request: Request):
+    """(blocked, country_name, country_code) — hard geo block, independent of the VPN toggle."""
+    codes = await blocked_countries()
+    if not codes:
+        return (False, "", "")
+    ip = _client_ip(request)
+    if ip in await vpn_allowlist():
+        return (False, "", "")
+    country, cc = await lookup_country(ip)
+    if cc and cc in codes:
+        return (True, country, cc)
+    return (False, country, cc)
 
 
 @api_router.post("/auth/login")
@@ -930,7 +959,41 @@ async def admin_security(admin: dict = Depends(require_admin)):
     return {"banned": banned, "active_bans": sum(1 for b in banned if b["active"]),
             "alerts": alerts, "unseen": unseen, "trend": days,
             "offenders": await _top_offenders(), "networks": _last_networks,
-            "countries": _last_countries}
+            "countries": _last_countries, "blocked_countries": sorted(await blocked_countries())}
+
+
+class CountryIn(BaseModel):
+    code: str
+    country: str = ""
+
+
+@api_router.post("/admin/security/block-country")
+async def admin_block_country(body: CountryIn, request: Request, admin: dict = Depends(require_admin)):
+    cc = (body.code or "").upper().strip()
+    if len(cc) != 2:
+        raise HTTPException(status_code=400, detail="Provide a 2-letter ISO country code")
+    codes = await blocked_countries()
+    codes.add(cc)
+    await db.app_meta.update_one({"_id": "blocked_countries"}, {"$set": {"codes": sorted(codes)}}, upsert=True)
+    await raise_security_alert("info", "country_blocked", "-", f"Country blocked: {body.country or cc}", cc)
+    await audit(request, admin.get("email"), "block_country", cc, body.country)
+    return {"blocked_countries": sorted(codes)}
+
+
+@api_router.post("/admin/security/unblock-country")
+async def admin_unblock_country(body: CountryIn, request: Request, admin: dict = Depends(require_admin)):
+    cc = (body.code or "").upper().strip()
+    codes = await blocked_countries()
+    codes.discard(cc)
+    await db.app_meta.update_one({"_id": "blocked_countries"}, {"$set": {"codes": sorted(codes)}}, upsert=True)
+    await audit(request, admin.get("email"), "unblock_country", cc)
+    return {"blocked_countries": sorted(codes)}
+
+
+@api_router.get("/admin/audit-log")
+async def admin_audit_log(admin: dict = Depends(require_admin)):
+    logs = await db.audit_log.find({}, {"_id": 0}).sort("at", -1).to_list(100)
+    return {"logs": logs}
 
 
 _last_networks = []
@@ -981,10 +1044,11 @@ class BanIn(BaseModel):
 
 
 @api_router.post("/admin/security/ban")
-async def admin_security_ban(body: BanIn, admin: dict = Depends(require_admin)):
+async def admin_security_ban(body: BanIn, request: Request, admin: dict = Depends(require_admin)):
     """Immediately block a single offending IP."""
     await _apply_block(body.ip, "ip", "Blocked by admin", "Manual block", severity="high", alert=False)
     await raise_security_alert("high", "ip_banned", body.ip, "Blocked by admin", "Manual block")
+    await audit(request, admin.get("email"), "ban_ip", body.ip)
     return {"banned": True}
 
 
@@ -993,7 +1057,7 @@ class CidrIn(BaseModel):
 
 
 @api_router.post("/admin/security/ban-range")
-async def admin_security_ban_range(body: CidrIn, admin: dict = Depends(require_admin)):
+async def admin_security_ban_range(body: CidrIn, request: Request, admin: dict = Depends(require_admin)):
     """Block a whole /24 (or CIDR) range where an attack emerges from."""
     try:
         _ipaddr.ip_network(body.subnet, strict=False)
@@ -1002,6 +1066,7 @@ async def admin_security_ban_range(body: CidrIn, admin: dict = Depends(require_a
     await _apply_block(body.subnet, "cidr", "Range blocked by admin",
                        f"Network {body.subnet}", severity="high", alert=False)
     await raise_security_alert("high", "cidr_banned", body.subnet, "Range blocked by admin", f"Network {body.subnet}")
+    await audit(request, admin.get("email"), "ban_range", body.subnet)
     return {"banned": True}
 
 
@@ -1019,13 +1084,14 @@ class UnbanIn(BaseModel):
 
 
 @api_router.post("/admin/security/unban")
-async def admin_security_unban(body: UnbanIn, admin: dict = Depends(require_admin)):
+async def admin_security_unban(body: UnbanIn, request: Request, admin: dict = Depends(require_admin)):
     """Lift an IP or range ban (false positive) and clear related failed-login records."""
     _banned_ips.pop(body.ip, None)
     _banned_cidrs.pop(body.ip, None)
     await db.blocked_ips.delete_one({"ip": body.ip})
     await db.login_attempts.delete_many({"ip": body.ip})
     await raise_security_alert("info", "ip_unbanned", body.ip, "Ban lifted by admin", "Manual override")
+    await audit(request, admin.get("email"), "unban", body.ip)
     return {"unbanned": True}
 
 
@@ -1035,6 +1101,9 @@ class VpnVerifyIn(BaseModel):
 
 @api_router.get("/vpn/status")
 async def vpn_status(request: Request):
+    cblk, country, _cc = await country_should_block(request)
+    if cblk:
+        return {"blocked": True, "enabled": True, "reason": "country", "country": country}
     if not await vpn_guard_enabled():
         return {"blocked": False, "enabled": False}
     ip = _client_ip(request)
@@ -1075,8 +1144,9 @@ async def admin_vpn_guard_get(admin: dict = Depends(require_admin)):
 
 
 @api_router.post("/admin/vpn-guard/toggle")
-async def admin_vpn_guard_toggle(body: VpnToggleIn, admin: dict = Depends(require_admin)):
+async def admin_vpn_guard_toggle(body: VpnToggleIn, request: Request, admin: dict = Depends(require_admin)):
     await db.app_meta.update_one({"_id": "vpn_guard"}, {"$set": {"enabled": bool(body.enabled)}}, upsert=True)
+    await audit(request, admin.get("email"), "vpn_guard_toggle", str(bool(body.enabled)))
     return {"enabled": bool(body.enabled)}
 
 
@@ -1863,6 +1933,14 @@ async def security_guard(request: Request, call_next):
     if await is_ip_banned(ip):
         return _blocked(403, "Access blocked due to suspicious activity. Contact support if this is a mistake.")
 
+    # 1b) Oversized request body → reject (basic DoS / abuse guard).
+    try:
+        clen = int(request.headers.get("content-length") or 0)
+        if clen > 2_000_000:
+            return _blocked(413, "Request too large.")
+    except Exception:
+        pass
+
     # 2) Malicious signature in path/query → ban + stop.
     from urllib.parse import unquote
     raw = (path + "?" + (request.url.query or "")).lower()
@@ -1883,14 +1961,21 @@ async def security_guard(request: Request, call_next):
 
     # 4) VPN / proxy guard — block browsing & login unless allowlisted or TOTP-verified.
     if not path.startswith("/api/vpn/"):
+        def _cors_json(status, content):
+            headers = {}
+            origin = request.headers.get("origin")
+            if origin:
+                headers["Access-Control-Allow-Origin"] = origin
+                headers["Access-Control-Allow-Credentials"] = "true"
+            return JSONResponse(status_code=status, headers=headers, content=content)
         try:
+            cblk, country, _cc = await country_should_block(request)
+            if cblk:
+                return _cors_json(403, {
+                    "detail": f"Access from {country} is not available.",
+                    "country_block": True, "country": country})
             if await vpn_should_block(request):
-                headers = {}
-                origin = request.headers.get("origin")
-                if origin:
-                    headers["Access-Control-Allow-Origin"] = origin
-                    headers["Access-Control-Allow-Credentials"] = "true"
-                return JSONResponse(status_code=403, headers=headers, content={
+                return _cors_json(403, {
                     "detail": "You appear to be connecting over a VPN or proxy. Disable it or verify with your access code to continue.",
                     "vpn_block": True})
         except Exception:
@@ -1911,6 +1996,7 @@ async def startup():
     await db.login_attempts.create_index("ip")
     await db.blocked_ips.create_index("ip", unique=True)
     await db.security_alerts.create_index("created_at")
+    await db.audit_log.create_index("at")
     await db.articles.create_index("slug", unique=True)
     # Warm the in-memory ban cache with any still-active bans.
     now = datetime.now(timezone.utc)

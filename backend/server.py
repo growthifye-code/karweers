@@ -28,7 +28,7 @@ import curator
 from services_data import SERVICES as SERVICE_PAGES
 from emailer import send_booking_email
 from emailer import send_security_alert_email
-from emailer import send_new_booking_alert_email, send_session_reminder_email
+from emailer import send_new_booking_alert_email, send_session_reminder_email, send_weekly_agenda_email
 import xml.etree.ElementTree as ET
 from datetime import datetime as _dt
 
@@ -1835,6 +1835,13 @@ async def _digest_scheduler():
                         "last_published_on": today.isoformat()}}, upsert=True)
             if os.environ.get("GMAIL_APP_PASSWORD"):
                 await _send_session_reminders()
+                ist_now = datetime.now(IST_TZ)
+                if ist_now.weekday() == 0 and ist_now.hour == 8:
+                    ameta = await db.app_meta.find_one({"_id": "availability"}) or {}
+                    if ameta.get("last_weekly_agenda") != ist_now.date().isoformat():
+                        await _send_weekly_agenda()
+                        await db.app_meta.update_one({"_id": "availability"},
+                                                     {"$set": {"last_weekly_agenda": ist_now.date().isoformat()}}, upsert=True)
             if now.weekday() == 0 and os.environ.get("GMAIL_APP_PASSWORD"):  # Monday
                 meta = await db.app_meta.find_one({"_id": "digest"})
                 last = (meta or {}).get("last_run", "")
@@ -2521,6 +2528,21 @@ async def _send_session_reminders():
                                                    "$unset": {"reminder_sent": ""}})
         except Exception:
             logger.exception("reminder failed for %s", b.get("id"))
+
+
+async def _send_weekly_agenda():
+    """Monday-morning email to the advisor with the coming week's confirmed sessions."""
+    admin_to = os.environ.get("BOOKING_ADMIN_EMAIL") or os.environ.get("ADMIN_EMAIL")
+    if not admin_to:
+        return
+    today = datetime.now(IST_TZ).date()
+    end = today + timedelta(days=7)
+    sessions = await db.consultations.find(
+        {"status": "confirmed", "slot_date": {"$gte": today.isoformat(), "$lt": end.isoformat()}},
+        {"_id": 0, "name": 1, "package": 1, "slot_date": 1, "slot_time": 1, "meeting_link": 1}).to_list(200)
+    sessions.sort(key=lambda s: (s.get("slot_date", ""), s.get("slot_time", "")))
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, send_weekly_agenda_email, admin_to, sessions)
 
 
 # ---------------- Google Calendar sync (admin's own calendar) ----------------

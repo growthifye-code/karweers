@@ -258,6 +258,35 @@ def _smtp_send(msg) -> str:
         return "failed"
 
 
+def send_weekly_agenda_email(to_email: str, sessions: list) -> str:
+    """Monday-morning digest to the advisor listing the week's confirmed sessions."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email:
+        return "skipped"
+    if sessions:
+        rows = ""
+        for s in sessions:
+            join = f'<a href="{s.get("meeting_link")}" style="color:#059669;font-weight:600;">Join</a>' if s.get("meeting_link") else '<span style="color:#9ca3af;">—</span>'
+            rows += (f'<tr>'
+                     f'<td style="padding:8px 6px;border-bottom:1px solid #eee;font-size:13px;color:#059669;font-weight:600;white-space:nowrap;">{s.get("slot_date","")}<br>{s.get("slot_time","")} IST</td>'
+                     f'<td style="padding:8px 6px;border-bottom:1px solid #eee;font-size:13px;color:#111;">{s.get("name","")}<div style="color:#6b7280;font-size:12px;">{s.get("package","")}</div></td>'
+                     f'<td style="padding:8px 6px;border-bottom:1px solid #eee;font-size:13px;text-align:right;">{join}</td>'
+                     f'</tr>')
+        inner = (f'<p style="font-size:15px;color:#111;font-weight:600;">Your week ahead — {len(sessions)} confirmed session(s)</p>'
+                 f'<table style="width:100%;border-collapse:collapse;margin-top:10px;">{rows}</table>'
+                 f'<a href="https://www.sudarshankarweer.com/admin" style="display:inline-block;margin-top:16px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Open dashboard</a>')
+    else:
+        inner = '<p style="font-size:15px;color:#111;font-weight:600;">Your week ahead</p><p style="font-size:14px;color:#374151;margin-top:6px;">No confirmed sessions scheduled for the coming week yet.</p>'
+    msg = EmailMessage()
+    msg["Subject"] = f"Week ahead: {len(sessions)} confirmed session(s)"
+    msg["From"] = user
+    msg["To"] = to_email
+    msg.set_content(f"Your week ahead: {len(sessions)} confirmed session(s). Open your dashboard for details.")
+    msg.add_alternative(_shell("Weekly agenda", inner), subtype="html")
+    return _smtp_send(msg)
+
+
 def send_new_booking_alert_email(to_email: str, booking: dict) -> str:
     """Alert the advisor the moment a new session booking lands (pending confirmation)."""
     user = os.environ.get("GMAIL_USER")

@@ -118,6 +118,16 @@ export default function AdminDashboard() {
     catch { toast.error("Could not save reminder timing."); }
   };
 
+  const upcomingCount = (() => {
+    const now = new Date();
+    const in48 = new Date(now.getTime() + 48 * 3600 * 1000);
+    return bookings.filter((b) => {
+      if (b.status !== "confirmed" || !b.slot_date || !b.slot_time) return false;
+      const dt = new Date(`${b.slot_date}T${b.slot_time}:00+05:30`);
+      return dt >= now && dt <= in48;
+    }).length;
+  })();
+
   const renderAgenda = () => {
     const now = new Date();
     const in48 = new Date(now.getTime() + 48 * 3600 * 1000);
@@ -452,6 +462,7 @@ export default function AdminDashboard() {
             <button key={t} onClick={() => setTab(t)} data-testid={`admin-tab-${t}`}
               className={`rounded-full px-4 py-2 text-sm font-medium capitalize transition-colors ${tab === t ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]" : "border border-border text-muted-foreground hover:bg-secondary"}`}>
               {t === "create" ? "Create + AI" : t === "crm" ? "CRM" : t === "tickets" ? "Service Desk" : t}
+              {t === "bookings" && upcomingCount > 0 && <span data-testid="bookings-badge" className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold normal-case ${tab === t ? "bg-[hsl(var(--primary-foreground))] text-[hsl(var(--primary))]" : "bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]"}`}>{upcomingCount} in 48h</span>}
             </button>
           ))}
         </div>

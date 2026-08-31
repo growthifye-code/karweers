@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useAuth, formatApiErrorDetail } from "@/context/AuthContext";
 import { Logo } from "@/components/Navbar";
 import ThemeToggle from "@/components/ThemeToggle";
-import { Users, FileText, Inbox, Sparkles, Trash2, Wand2, Mail, LifeBuoy, UserCircle, ChevronDown } from "lucide-react";
+import { Users, FileText, Inbox, Sparkles, Trash2, Wand2, Mail, LifeBuoy, UserCircle, ChevronDown, Tag, AlertTriangle } from "lucide-react";
 import api from "@/lib/api";
 
 const CATS = [
@@ -31,6 +31,7 @@ export default function AdminDashboard() {
   const [activeClient, setActiveClient] = useState(null);
   const [clientNotes, setClientNotes] = useState("");
   const [clientTags, setClientTags] = useState("");
+  const [crmTag, setCrmTag] = useState("all");
   const [ticketReplies, setTicketReplies] = useState({});
 
   const [form, setForm] = useState({ title: "", category: "news", sector: SECTORS[0], summary: "", content: "", tags: "", image: DEFAULT_IMG, featured: false });
@@ -80,6 +81,15 @@ export default function AdminDashboard() {
     try { await api.post(`/tickets/${id}/reply`, { message: msg }); setTicketReplies((r) => ({ ...r, [id]: "" })); load(); toast.success("Reply sent"); }
     catch { toast.error("Reply failed"); }
   };
+
+  const SLA_HOURS = { high: 4, medium: 24, low: 72 };
+  const ticketAgeHrs = (t) => (Date.now() - new Date(t.updated_at || t.created_at).getTime()) / 3.6e6;
+  const isBreached = (t) => ["open", "in-progress"].includes(t.status) && ticketAgeHrs(t) > (SLA_HOURS[t.priority] ?? 24);
+  const fmtAge = (h) => (h >= 24 ? `${Math.floor(h / 24)}d` : `${Math.max(1, Math.floor(h))}h`);
+  const allTags = [...new Set(clients.flatMap((c) => c.tags || []))].sort();
+  const filteredClients = crmTag === "all" ? clients : clients.filter((c) => (c.tags || []).includes(crmTag));
+  const sortedTickets = [...tickets].sort((a, b) => (isBreached(b) ? 1 : 0) - (isBreached(a) ? 1 : 0));
+  const breachedCount = tickets.filter(isBreached).length;
 
   const generate = async () => {
     if (!aiTopic.trim()) { toast.error("Enter a topic for the AI to write about."); return; }
@@ -191,7 +201,21 @@ export default function AdminDashboard() {
         )}
 
         {tab === "crm" && (
-          <div className="mt-8 overflow-x-auto rounded-2xl border border-border" data-testid="admin-crm">
+          <div className="mt-8" data-testid="admin-crm">
+            {allTags.length > 0 && (
+              <div className="mb-4 flex flex-wrap items-center gap-2" data-testid="crm-tag-filters">
+                <span className="mr-1 inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground"><Tag className="h-3.5 w-3.5" /> Filter</span>
+                <button onClick={() => setCrmTag("all")} data-testid="crm-tag-all"
+                  className={`rounded-full border px-3 py-1.5 text-xs font-medium capitalize transition-colors ${crmTag === "all" ? "border-[hsl(var(--primary))] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]" : "border-border text-muted-foreground hover:bg-secondary"}`}>All ({clients.length})</button>
+                {allTags.map((tg) => (
+                  <button key={tg} onClick={() => setCrmTag(tg)} data-testid={`crm-tag-${tg}`}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${crmTag === tg ? "border-[hsl(var(--primary))] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]" : "border-border text-muted-foreground hover:bg-secondary"}`}>
+                    {tg} ({clients.filter((c) => (c.tags || []).includes(tg)).length})
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="overflow-x-auto rounded-2xl border border-border">
             <table className="w-full text-left text-sm">
               <thead className="bg-card text-muted-foreground">
                 <tr>
@@ -199,8 +223,8 @@ export default function AdminDashboard() {
                 </tr>
               </thead>
               <tbody>
-                {clients.length === 0 && <tr><td colSpan="8" className="p-8 text-center text-muted-foreground">No registered clients yet.</td></tr>}
-                {clients.map((c) => (
+                {filteredClients.length === 0 && <tr><td colSpan="8" className="p-8 text-center text-muted-foreground">{crmTag === "all" ? "No registered clients yet." : `No clients tagged "${crmTag}".`}</td></tr>}
+                {filteredClients.map((c) => (
                   <tr key={c.id} className="border-t border-border align-top">
                     <td className="p-4 font-mono text-xs font-semibold text-[hsl(var(--primary))]">{c.client_code || "—"}</td>
                     <td className="p-4 font-medium">{c.name}<div className="text-xs text-muted-foreground">{c.email}</div>{c.tags?.length > 0 && <div className="mt-1 flex flex-wrap gap-1">{c.tags.map((tg) => <span key={tg} className="rounded-full bg-[hsl(var(--primary))]/15 px-2 py-0.5 text-[10px] font-semibold text-[hsl(var(--primary))]">{tg}</span>)}</div>}</td>
@@ -214,18 +238,29 @@ export default function AdminDashboard() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         )}
 
         {tab === "tickets" && (
           <div className="mt-8 space-y-4" data-testid="admin-tickets">
+            {breachedCount > 0 && (
+              <div className="flex items-center gap-2 rounded-xl border border-[hsl(var(--destructive))]/40 bg-[hsl(var(--destructive))]/10 px-4 py-3 text-sm font-medium text-[hsl(var(--destructive))]" data-testid="sla-summary">
+                <AlertTriangle className="h-4 w-4" /> {breachedCount} ticket{breachedCount > 1 ? "s" : ""} past SLA — respond now (SLA: high 4h · medium 24h · low 72h).
+              </div>
+            )}
             {tickets.length === 0 && <div className="rounded-2xl border border-dashed border-border p-10 text-center text-muted-foreground">No support tickets yet.</div>}
-            {tickets.map((t) => (
-              <div key={t.id} className="rounded-2xl border border-border bg-card p-5" data-testid={`admin-ticket-${t.id}`}>
+            {sortedTickets.map((t) => {
+              const breached = isBreached(t);
+              return (
+              <div key={t.id} className={`rounded-2xl border bg-card p-5 ${breached ? "border-[hsl(var(--destructive))]/60" : "border-border"}`} data-testid={`admin-ticket-${t.id}`}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p className="font-semibold">{t.subject}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">{t.ticket_code} · {t.name} ({t.client_code || t.email}) · {t.category}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="font-semibold">{t.subject}</p>
+                      {breached && <span className="inline-flex items-center gap-1 rounded-full bg-[hsl(var(--destructive))]/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[hsl(var(--destructive))]" data-testid={`sla-breach-${t.id}`}><AlertTriangle className="h-3 w-3" /> SLA breached</span>}
+                    </div>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{t.ticket_code} · {t.name} ({t.client_code || t.email}) · {t.category} · <span className={breached ? "font-semibold text-[hsl(var(--destructive))]" : ""}>open {fmtAge(ticketAgeHrs(t))}</span></p>
                   </div>
                   <div className="flex gap-2">
                     <select value={t.priority} onChange={(e) => ticketPriority(t.id, e.target.value)} data-testid={`ticket-priority-${t.id}`} className="rounded-lg border border-border bg-background px-2 py-1 text-xs capitalize">
@@ -252,7 +287,8 @@ export default function AdminDashboard() {
                   <button onClick={() => adminReply(t.id)} data-testid={`admin-reply-send-${t.id}`} className="rounded-lg bg-[hsl(var(--accent))] px-4 py-2 text-sm font-medium text-[hsl(var(--accent-foreground))]">Reply</button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
 

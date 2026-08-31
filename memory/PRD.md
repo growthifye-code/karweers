@@ -117,3 +117,7 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 ## Iteration 5.1 (Aug 31, 2026) — Ticket Alerts + CRM Notes/Tags
 - **Ticket alerts**: `send_ticket_alert_email` fires to BOOKING_ADMIN_EMAIL on every new ticket (fire-and-forget). INERT until GMAIL_APP_PASSWORD is set; ticket creation always succeeds regardless.
 - **CRM notes & tags**: `PATCH /admin/clients/{id}` saves private `notes` + `tags`; editor in the client drawer; tags shown as pills in the CRM table. Verified via API + UI.
+
+## Iteration 5.2 (Aug 31, 2026) — Tag Filter + Ticket SLA
+- **CRM tag filter**: filter chips (All / per-tag with counts) above the CRM table filter clients by tag client-side. Testids: crm-tag-filters, crm-tag-all, crm-tag-<tag>.
+- **Ticket SLA**: SLA thresholds (high 4h / medium 24h / low 72h) on open|in-progress tickets. Breached tickets get a red border + "SLA breached" badge (sla-breach-<id>), sort to top, show time-open; a summary banner (sla-summary) counts breaches. Frontend-only (uses created_at/updated_at). Verified via UI.

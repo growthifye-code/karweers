@@ -10,6 +10,8 @@ import logging
 import uuid
 import time
 import io
+import random
+import hashlib
 import razorpay
 import requests
 from concurrent.futures import ThreadPoolExecutor
@@ -33,10 +35,12 @@ from emailer import send_security_alert_email
 from emailer import send_new_booking_alert_email, send_session_reminder_email, send_weekly_agenda_email, send_waitlist_opening_email
 from emailer import send_consent_receipt_email
 from emailer import send_signals_digest_email, render_signals_digest_html, send_test_email
+from emailer import send_sector_digest_email
 from emailer import send_payment_receipt_email, send_refund_email
 from emailer import send_gst_invoice_email, send_abandoned_nudge_email
 import xml.etree.ElementTree as ET
 import contextvars
+from urllib.parse import quote_plus
 from datetime import datetime as _dt
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
@@ -2096,6 +2100,11 @@ async def _digest_scheduler():
                         await _send_weekly_agenda()
                         await db.app_meta.update_one({"_id": "availability"},
                                                      {"$set": {"last_weekly_agenda": ist_now.date().isoformat()}}, upsert=True)
+                    sdg = await db.app_meta.find_one({"_id": "sector_digest"})
+                    if (sdg or {}).get("last_run", "")[:10] != ist_now.date().isoformat():
+                        await _send_sector_digest()
+                        await db.app_meta.update_one({"_id": "sector_digest"},
+                                                     {"$set": {"last_run": now_iso()}}, upsert=True)
                 # Weekly Market Signals digest to subscribers — Friday ~09:00 IST.
                 if ist_now.weekday() == 4 and ist_now.hour == 9:
                     sd = await db.app_meta.find_one({"_id": "signals_digest"})
@@ -2820,8 +2829,9 @@ def _oem_prompt(ent: dict) -> str:
         f"Return STRICT JSON only, factual and evergreen (no fabricated dated figures presented as current). Keys:\n"
         "overview: 45-70 word plain-English summary of the company and what it makes;\n"
         "technology: 45-70 words on its core products and technology edge;\n"
-        "manufacturing_capacity: 40-60 words on its manufacturing footprint and scale in qualitative terms;\n"
-        "locations: array of 4-6 short strings — key manufacturing / HQ locations (India emphasised where relevant);\n"
+        "manufacturing_capacity: 40-60 words on its manufacturing footprint and total scale in qualitative terms;\n"
+        "plants: array of 3-6 objects {location, capacity(short, e.g. '5 GW modules' or 'qualitative'), note(8-16 words)} — key manufacturing plants/facilities (India emphasised where relevant);\n"
+        "sales_offices: array of 3-6 objects {location, note(6-14 words)} — key sales/market offices or regions (India & global);\n"
         "sales_presence: 35-55 words on its India & global sales/market presence;\n"
         "recent_focus: array of 3 objects {title, note(10-18 words)} — recent expansion/launch themes (evergreen framing);\n"
         "competition: array of 4 objects {name, note(6-12 words)} — its key competitors;\n"
@@ -2902,12 +2912,43 @@ async def _entity_detail(kind: str, slug: str) -> dict:
             "insights": insights, "videos": videos}
 
 
+# Filter metadata for the Climate Fund Directory (instruments / ticket band / India access).
+AGENCY_META = {
+    "world-bank": {"instruments": ["Concessional debt", "Guarantees", "Technical assistance"], "ticket": "Large", "access": "Sovereign / PSU"},
+    "ifc": {"instruments": ["Equity", "Commercial debt", "Green bonds", "Blended finance"], "ticket": "Mid", "access": "Direct (private sector)"},
+    "adb": {"instruments": ["Concessional debt", "Equity", "Guarantees", "Technical assistance"], "ticket": "Large", "access": "Direct (sovereign & private)"},
+    "aiib": {"instruments": ["Commercial debt", "Equity"], "ticket": "Large", "access": "Direct (sovereign & private)"},
+    "ndb": {"instruments": ["Commercial debt"], "ticket": "Large", "access": "Sovereign / PSU"},
+    "imf": {"instruments": ["Concessional debt", "Technical assistance"], "ticket": "Large", "access": "Sovereign / PSU"},
+    "gcf": {"instruments": ["Grants", "Concessional debt", "Equity", "Guarantees", "Blended finance"], "ticket": "Mid", "access": "Via MDB / accredited entity"},
+    "gef": {"instruments": ["Grants", "Blended finance"], "ticket": "Small", "access": "Via MDB / accredited entity"},
+    "cif": {"instruments": ["Concessional debt", "Grants", "Blended finance"], "ticket": "Large", "access": "Via MDB / accredited entity"},
+    "kfw": {"instruments": ["Concessional debt", "Grants", "Technical assistance"], "ticket": "Mid", "access": "Sovereign / PSU"},
+    "jica": {"instruments": ["Concessional debt", "Technical assistance"], "ticket": "Large", "access": "Sovereign / PSU"},
+    "afd": {"instruments": ["Concessional debt", "Grants", "Technical assistance"], "ticket": "Mid", "access": "Direct (sovereign & private)"},
+    "dfc": {"instruments": ["Equity", "Commercial debt", "Guarantees"], "ticket": "Mid", "access": "Direct (private sector)"},
+    "giz": {"instruments": ["Grants", "Technical assistance"], "ticket": "Small", "access": "Technical assistance"},
+    "fmo": {"instruments": ["Equity", "Commercial debt", "Blended finance"], "ticket": "Small", "access": "Direct (private sector)"},
+    "bii": {"instruments": ["Equity", "Commercial debt"], "ticket": "Mid", "access": "Direct (private sector)"},
+    "niif": {"instruments": ["Equity"], "ticket": "Large", "access": "India-domiciled"},
+    "ireda": {"instruments": ["Commercial debt", "Concessional debt"], "ticket": "Mid", "access": "Direct (developers)"},
+    "sidbi": {"instruments": ["Commercial debt", "Blended finance"], "ticket": "Small", "access": "Direct (MSMEs)"},
+    "nabard": {"instruments": ["Concessional debt", "Grants"], "ticket": "Small", "access": "Rural / agri"},
+    "pfc": {"instruments": ["Commercial debt"], "ticket": "Large", "access": "Direct (power sector)"},
+    "rec": {"instruments": ["Commercial debt"], "ticket": "Large", "access": "Direct (power sector)"},
+}
+AGENCY_TICKET_LABEL = {"Small": "Small (<$25M)", "Mid": "Mid ($25M–$250M)", "Large": "Large ($250M+)"}
+
+
 @api_router.get("/agencies")
 async def list_agencies():
     groups = {}
     for k, v in AGENCIES.items():
+        meta = AGENCY_META.get(k, {})
         groups.setdefault(v["group"], []).append({"slug": k, "name": v["name"], "tag": v["tag"], "blurb": v["blurb"],
-            "logo": _logo_url(v['domain'])})
+            "logo": _logo_url(v['domain']),
+            "instruments": meta.get("instruments", []), "ticket": meta.get("ticket", ""),
+            "ticket_label": AGENCY_TICKET_LABEL.get(meta.get("ticket", ""), ""), "access": meta.get("access", "")})
     order = ["Multilateral Development Banks", "Global Climate Funds", "Bilateral & DFI Partners", "India Funds & Agencies"]
     return [{"group": g, "items": groups[g]} for g in order if g in groups]
 
@@ -3035,6 +3076,211 @@ async def get_topic(name: str, context: str = "", topic: str = "energy"):
     return {"name": name, "context": context, **prof,
             "logo": lg.get("logo"), "favicon": lg.get("favicon"),
             "news": news, "blogs": blogs, "videos": videos}
+
+
+# ---------------- Leadership Library (read / listen / watch / get it) ----------------
+# Catalogue lives in library_data.py (40 curated titles). Public-domain titles get an
+# in-site page-flip reader (Project Gutenberg) + free audiobook (LibriVox via archive.org).
+# Copyrighted titles get key lessons + an Amazon link. Every title carries SK's
+# perspective, key learnings and a "make it a ritual" practice. Videos are pulled
+# specifically for each book; the Watch tab is hidden when none are found.
+from library_data import BOOKS, BOOKS_BY_SLUG
+
+_BOOK_TEXT_CACHE: dict = {}
+LIBRARY_SHELF_SIZE = 12
+
+
+def _daily_shelf(n: int = LIBRARY_SHELF_SIZE) -> list:
+    """Deterministic per-day rotation of the full catalogue — a fresh shelf daily."""
+    today = date.today().isoformat()
+    seed = int(hashlib.sha256(today.encode()).hexdigest(), 16)
+    rnd = random.Random(seed)
+    idx = list(range(len(BOOKS)))
+    rnd.shuffle(idx)
+    return [BOOKS[i] for i in idx[:n]]
+
+
+def _book_public(b: dict) -> dict:
+    return {"slug": b["slug"], "title": b["title"], "author": b["author"], "year": b["year"],
+            "theme": b["theme"], "blurb": b["blurb"], "why_sk": b["why_sk"], "lessons": b["lessons"],
+            "ritual": b.get("ritual", ""), "ritual_pro": b.get("ritual_pro", []),
+            "ritual_personal": b.get("ritual_personal", []),
+            "public_domain": b["public_domain"], "has_read": bool(b.get("gutenberg")),
+            "has_audio": bool(b.get("audio")), "audio_embed": (f"https://archive.org/embed/{b['audio']}" if b.get("audio") else ""),
+            "amazon": f"https://www.amazon.com/s?k={quote_plus(b['title'] + ' ' + b['author'])}",
+            "source": b["source"], "credit": b["credit"]}
+
+
+@api_router.get("/books")
+async def list_books(scope: str = "shelf"):
+    src = BOOKS if scope == "all" else _daily_shelf()
+    return [_book_public(b) for b in src]
+
+
+@api_router.get("/books/{slug}")
+async def get_book(slug: str):
+    b = BOOKS_BY_SLUG.get(slug)
+    if not b:
+        raise HTTPException(status_code=404, detail="Unknown book")
+    data = _book_public(b)
+    try:
+        data["videos"] = await asyncio.to_thread(curator.book_videos, f"{b['title']} {b['author']}", 6)
+    except Exception:
+        data["videos"] = []
+    return data
+
+@api_router.get("/books/{slug}/text")
+async def get_book_text(slug: str):
+    b = BOOKS_BY_SLUG.get(slug)
+    if not b or not b.get("gutenberg"):
+        raise HTTPException(status_code=404, detail="No free text for this title")
+    gid = b["gutenberg"]
+    if gid in _BOOK_TEXT_CACHE:
+        return Response(content=_BOOK_TEXT_CACHE[gid], media_type="text/plain; charset=utf-8")
+    text = ""
+    for url in (f"https://www.gutenberg.org/cache/epub/{gid}/pg{gid}.txt", f"https://www.gutenberg.org/files/{gid}/{gid}-0.txt"):
+        try:
+            r = await asyncio.to_thread(lambda u=url: requests.get(u, timeout=15, headers={"User-Agent": "Mozilla/5.0"}))
+            if r.status_code == 200 and len(r.text) > 500:
+                text = r.text
+                break
+        except Exception:
+            continue
+    if not text:
+        raise HTTPException(status_code=503, detail="Text temporarily unavailable")
+    # Trim Project Gutenberg header/footer boilerplate.
+    up = text
+    s = up.find("*** START OF")
+    if s != -1:
+        s = up.find("\n", s)
+        up = up[s + 1:]
+    e = up.find("*** END OF")
+    if e != -1:
+        up = up[:e]
+    up = up.strip()
+    _BOOK_TEXT_CACHE[gid] = up
+    return Response(content=up, media_type="text/plain; charset=utf-8")
+
+
+# ---------------- CXO Strategy Simulations (war-room decision games) ----------------
+from games_data import GAMES, GAMES_BY_SLUG, game_card, game_play, debrief as _game_debrief
+
+
+class GameScoreIn(BaseModel):
+    answers: dict  # {round_id(str): option_id}
+
+
+@api_router.get("/games")
+async def list_games():
+    return [game_card(g) for g in GAMES]
+
+
+@api_router.get("/games/{slug}")
+async def get_game(slug: str):
+    g = GAMES_BY_SLUG.get(slug)
+    if not g:
+        raise HTTPException(status_code=404, detail="Unknown game")
+    return game_play(g)
+
+
+@api_router.post("/games/{slug}/score")
+async def score_game(slug: str, body: GameScoreIn):
+    g = GAMES_BY_SLUG.get(slug)
+    if not g:
+        raise HTTPException(status_code=404, detail="Unknown game")
+    total = 0
+    breakdown = []
+    for r in g["rounds"]:
+        chosen = (body.answers or {}).get(str(r["id"]))
+        opt = next((o for o in r["options"] if o["id"] == chosen), None)
+        sc = opt["score"] if opt else 0
+        total += sc
+        breakdown.append({"round": r["id"], "chosen": chosen, "score": sc,
+                          "feedback": opt["feedback"] if opt else "",
+                          "best": max(o["score"] for o in r["options"])})
+    return {**_game_debrief(g, total), "breakdown": breakdown}
+
+
+
+# ---------------- Leadership Assessment: Mini-IPIP Big Five -> quadrant -> SK Blueprint ----------------
+# Mini-IPIP (Donnellan, Oswald, Baird & Lucas, 2006) — public domain (ipip.ori.org).
+IPIP_ITEMS = [
+    {"id": "e1", "trait": "E", "keyed": 1, "text": "I am the life of the party."},
+    {"id": "a1", "trait": "A", "keyed": 1, "text": "I sympathize with others' feelings."},
+    {"id": "c1", "trait": "C", "keyed": 1, "text": "I get chores done right away."},
+    {"id": "n1", "trait": "N", "keyed": 1, "text": "I have frequent mood swings."},
+    {"id": "o1", "trait": "O", "keyed": 1, "text": "I have a vivid imagination."},
+    {"id": "e2", "trait": "E", "keyed": -1, "text": "I don't talk a lot."},
+    {"id": "a2", "trait": "A", "keyed": -1, "text": "I am not interested in other people's problems."},
+    {"id": "c2", "trait": "C", "keyed": -1, "text": "I often forget to put things back in their proper place."},
+    {"id": "n2", "trait": "N", "keyed": -1, "text": "I am relaxed most of the time."},
+    {"id": "o2", "trait": "O", "keyed": -1, "text": "I am not interested in abstract ideas."},
+    {"id": "e3", "trait": "E", "keyed": 1, "text": "I talk to a lot of different people at events."},
+    {"id": "a3", "trait": "A", "keyed": 1, "text": "I feel others' emotions."},
+    {"id": "c3", "trait": "C", "keyed": 1, "text": "I like order."},
+    {"id": "n3", "trait": "N", "keyed": 1, "text": "I get upset easily."},
+    {"id": "o3", "trait": "O", "keyed": -1, "text": "I have difficulty understanding abstract ideas."},
+    {"id": "e4", "trait": "E", "keyed": -1, "text": "I keep in the background."},
+    {"id": "a4", "trait": "A", "keyed": -1, "text": "I am not really interested in others."},
+    {"id": "c4", "trait": "C", "keyed": -1, "text": "I make a mess of things."},
+    {"id": "n4", "trait": "N", "keyed": -1, "text": "I seldom feel blue."},
+    {"id": "o4", "trait": "O", "keyed": -1, "text": "I do not have a good imagination."},
+]
+TRAIT_NAMES = {"E": "Extraversion", "A": "Agreeableness", "C": "Conscientiousness", "N": "Neuroticism", "O": "Openness"}
+QUADRANTS = {
+    "visionary": {"name": "Visionary Commander", "tagline": "High drive, high people — you set bold direction and take people with you."},
+    "driver": {"name": "Driving Commander", "tagline": "High drive, lower warmth — you execute relentlessly and demand results."},
+    "coach": {"name": "Empowering Coach", "tagline": "High people, lower task-grip — you grow people and build trust."},
+    "steward": {"name": "Steady Steward", "tagline": "Measured and reliable — you bring calm, order and consistency."},
+}
+
+
+class AssessmentIn(BaseModel):
+    answers: dict
+
+
+@api_router.get("/assessment/questions")
+async def assessment_questions():
+    return {"items": [{"id": i["id"], "text": i["text"]} for i in IPIP_ITEMS],
+            "scale": ["Strongly disagree", "Disagree", "Neutral", "Agree", "Strongly agree"],
+            "credit": "Questionnaire: Mini-IPIP (Donnellan et al., 2006), International Personality Item Pool — public domain."}
+
+
+@api_router.post("/assessment/score")
+async def assessment_score(body: AssessmentIn):
+    raw = {"E": 0, "A": 0, "C": 0, "N": 0, "O": 0}
+    for item in IPIP_ITEMS:
+        v = body.answers.get(item["id"])
+        if not isinstance(v, int) or v < 1 or v > 5:
+            raise HTTPException(status_code=400, detail=f"Missing/invalid answer for {item['id']}")
+        raw[item["trait"]] += v if item["keyed"] == 1 else (6 - v)
+    pct = {t: round((raw[t] - 4) / 16 * 100) for t in raw}  # 4 items each: 4..20 -> 0..100
+    emotional_stability = 100 - pct["N"]
+    task = round(pct["C"] * 0.6 + pct["E"] * 0.4)
+    people = round(pct["A"] * 0.6 + emotional_stability * 0.4)
+    key = ("visionary" if task >= 50 and people >= 50 else "driver" if task >= 50 else "coach" if people >= 50 else "steward")
+    quad = QUADRANTS[key]
+    scores = {
+        "Extraversion": pct["E"], "Agreeableness": pct["A"], "Conscientiousness": pct["C"],
+        "Openness": pct["O"], "Emotional stability": emotional_stability,
+    }
+    prompt = (
+        f"You are Sudarshan Karweer (ex-EY Big 4 advisor, $2B+ debt syndication, executive coach) writing a private "
+        f"'Leadership Blueprint' for a senior leader based on a validated Big Five profile. Speak in first person as SK, warm but "
+        f"direct, from experience — NEVER mention AI, algorithms or that this is automated. Profile (0-100): "
+        f"Extraversion {pct['E']}, Agreeableness {pct['A']}, Conscientiousness {pct['C']}, Openness {pct['O']}, "
+        f"Emotional stability {emotional_stability}. Leadership quadrant: {quad['name']} ({quad['tagline']}). "
+        f"Return STRICT JSON only. Keys: "
+        f"narrative: 90-130 words on what this style means in a leadership seat and where it shines; "
+        f"strengths: array of 4 short strings; "
+        f"blind_spots: array of 4 objects {{spot(4-8 words), why(12-20 words)}}; "
+        f"roadmap: array of 4 objects {{horizon('30 days'|'90 days'|'6 months'|'12 months'), milestone(4-8 words), action(12-22 words)}}. "
+        f"JSON only."
+    )
+    blueprint = await _claude_json(prompt) or {}
+    return {"scores": scores, "quadrant": {"key": key, **quad}, "axes": {"task": task, "people": people},
+            "blueprint": blueprint,
+            "credit": "Big Five profile via Mini-IPIP (Donnellan et al., 2006), public domain. Blueprint reflects Sudarshan Karweer's coaching perspective."}
 
 
 NEWS_REFRESH_HOURS = 4
@@ -3219,6 +3465,123 @@ def _resub_token(email: str) -> str:
 
 def _unsub_url(email: str) -> str:
     return f"{PUBLIC_SITE}/api/newsletter/unsubscribe?token={_unsub_token(email)}"
+
+
+# ---- Weekly Sector Digest: subscriber interests + compile + send ----
+def _prefs_token(email: str) -> str:
+    return pyjwt.encode({"purpose": "prefs", "email": (email or "").lower()}, get_jwt_secret(), algorithm="HS256")
+
+
+def _prefs_url(email: str) -> str:
+    return f"{PUBLIC_SITE}/preferences?token={_prefs_token(email)}"
+
+
+DEFAULT_DIGEST_SECTORS = ["renewable-energy", "storage", "green-hydrogen", "climate-finance"]
+DEFAULT_DIGEST_AGENCIES = ["world-bank", "adb", "gcf"]
+
+
+class PrefsIn(BaseModel):
+    token: str
+    sectors: List[str] = []
+    agencies: List[str] = []
+
+
+class FollowIn(BaseModel):
+    email: EmailStr
+    kind: str
+    slug: str
+
+
+@api_router.get("/newsletter/preferences")
+async def get_preferences(token: str = ""):
+    email = _decode_email(token, "prefs")
+    if not email:
+        raise HTTPException(status_code=400, detail="Invalid or expired link")
+    sub = await db.subscribers.find_one({"email": email}, {"_id": 0})
+    return {"email": email, "subscribed": bool(sub),
+            "selected_sectors": (sub or {}).get("interests_sectors", []),
+            "selected_agencies": (sub or {}).get("interests_agencies", []),
+            "all_sectors": [{"slug": k, "name": v["name"]} for k, v in SECTORS.items()],
+            "all_agencies": [{"slug": k, "name": v["name"], "group": v["group"]} for k, v in AGENCIES.items()]}
+
+
+@api_router.post("/newsletter/preferences")
+async def set_preferences(body: PrefsIn):
+    email = _decode_email(body.token, "prefs")
+    if not email:
+        raise HTTPException(status_code=400, detail="Invalid or expired link")
+    sec = [s for s in body.sectors if s in SECTORS][:20]
+    ag = [a for a in body.agencies if a in AGENCIES][:30]
+    await db.subscribers.update_one({"email": email},
+        {"$set": {"interests_sectors": sec, "interests_agencies": ag},
+         "$setOnInsert": {"id": str(uuid.uuid4()), "email": email, "created_at": now_iso()}}, upsert=True)
+    return {"success": True, "message": "Your weekly topics are saved."}
+
+
+@api_router.post("/newsletter/follow")
+async def follow_topic(body: FollowIn):
+    email = body.email.lower()
+    if body.kind == "sector" and body.slug not in SECTORS:
+        raise HTTPException(status_code=400, detail="Unknown sector")
+    if body.kind == "agency" and body.slug not in AGENCIES:
+        raise HTTPException(status_code=400, detail="Unknown agency")
+    field = "interests_sectors" if body.kind == "sector" else "interests_agencies"
+    await db.subscribers.update_one({"email": email},
+        {"$addToSet": {field: body.slug},
+         "$setOnInsert": {"id": str(uuid.uuid4()), "email": email, "created_at": now_iso()}}, upsert=True)
+    return {"success": True, "message": "Done — you'll get this in your Monday brief.", "prefs_url": _prefs_url(email)}
+
+
+async def _compile_sector_digest_groups(sub: dict) -> list:
+    sec = sub.get("interests_sectors") or []
+    ag = sub.get("interests_agencies") or []
+    if not sec and not ag:
+        sec, ag = DEFAULT_DIGEST_SECTORS, DEFAULT_DIGEST_AGENCIES
+    groups = []
+    for slug in sec:
+        if slug not in SECTORS:
+            continue
+        nd = await db.sector_news.find_one({"_id": slug}, {"_id": 0})
+        ins = await db.sector_insights.find_one({"slug": slug}, {"_id": 0}, sort=[("created_at", -1)])
+        groups.append({"label": SECTORS[slug]["name"], "slug": slug, "kind": "sector",
+                       "items": (nd or {}).get("items", [])[:4], "insight": (ins or {}).get("insight", "")})
+    for slug in ag:
+        if slug not in AGENCIES:
+            continue
+        nd = await db.entity_news.find_one({"_id": f"agency:{slug}"}, {"_id": 0})
+        ins = await db.entity_insights.find_one({"kind": "agency", "slug": slug}, {"_id": 0}, sort=[("created_at", -1)])
+        groups.append({"label": AGENCIES[slug]["name"], "slug": slug, "kind": "agency",
+                       "items": (nd or {}).get("items", [])[:4], "insight": (ins or {}).get("insight", "")})
+    return groups
+
+
+async def _send_sector_digest():
+    if not os.environ.get("GMAIL_APP_PASSWORD"):
+        return {"sent": False, "reason": "smtp_not_configured"}
+    subs = await db.subscribers.find({}, {"_id": 0}).to_list(5000)
+    sent = 0
+    for sub in subs:
+        groups = [g for g in await _compile_sector_digest_groups(sub) if g.get("items")]
+        if not groups:
+            continue
+        r = await asyncio.to_thread(send_sector_digest_email, sub["email"], sub.get("name", "there"),
+                                    groups, PUBLIC_SITE, _unsub_url(sub["email"]), _prefs_url(sub["email"]))
+        if r == "sent":
+            sent += 1
+    return {"sent": True, "emails": sent, "subscribers": len(subs)}
+
+
+@api_router.post("/admin/sector-digest/send")
+async def admin_send_sector_digest(admin: dict = Depends(require_admin)):
+    return await _send_sector_digest()
+
+
+@api_router.get("/admin/sector-digest/preview", response_class=HTMLResponse)
+async def admin_sector_digest_preview(admin: dict = Depends(require_admin)):
+    demo = {"interests_sectors": DEFAULT_DIGEST_SECTORS, "interests_agencies": DEFAULT_DIGEST_AGENCIES}
+    groups = [g for g in await _compile_sector_digest_groups(demo) if g.get("items")]
+    from emailer import render_sector_digest_html
+    return HTMLResponse(render_sector_digest_html("there", groups, PUBLIC_SITE, PUBLIC_SITE + "/api/newsletter/unsubscribe?token=PREVIEW", PUBLIC_SITE + "/preferences?token=PREVIEW"))
 
 
 def _decode_email(token: str, purpose: str) -> str:

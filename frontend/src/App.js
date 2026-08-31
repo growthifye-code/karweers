@@ -17,6 +17,13 @@ import SignalsArchivePage from "@/pages/SignalsArchivePage";
 import ResumePaymentPage from "@/pages/ResumePaymentPage";
 import ExplorePage from "@/pages/ExplorePage";
 import EntityPage from "@/pages/EntityPage";
+import PreferencesPage from "@/pages/PreferencesPage";
+import LeadershipLabPage from "@/pages/LeadershipLabPage";
+import LibraryPage from "@/pages/LibraryPage";
+import BookPage from "@/pages/BookPage";
+import GamesPage from "@/pages/GamesPage";
+import GamePlayPage from "@/pages/GamePlayPage";
+import AssessmentPage from "@/pages/AssessmentPage";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import AuthCallback from "@/pages/AuthCallback";
@@ -52,6 +59,13 @@ function AppRoutes() {
       <Route path="/sectors/:slug" element={<EntityPage kind="sector" />} />
       <Route path="/capital/:slug" element={<EntityPage kind="agency" />} />
       <Route path="/oems/:slug" element={<EntityPage kind="oem" />} />
+      <Route path="/preferences" element={<PreferencesPage />} />
+      <Route path="/leadership-lab" element={<LeadershipLabPage />} />
+      <Route path="/library" element={<LibraryPage />} />
+      <Route path="/library/:slug" element={<BookPage />} />
+      <Route path="/games" element={<GamesPage />} />
+      <Route path="/games/:slug" element={<GamePlayPage />} />
+      <Route path="/assessment" element={<AssessmentPage />} />
       <Route path="/signals" element={<SignalsArchivePage />} />
       <Route path="/signals/:date" element={<SignalsArchivePage />} />
       <Route path="/resume/:bid" element={<ResumePaymentPage />} />

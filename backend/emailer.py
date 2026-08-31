@@ -452,6 +452,59 @@ def send_signals_digest_email(to_email: str, name: str, items: list, site: str =
     return _smtp_send(msg)
 
 
+def render_sector_digest_html(name: str, groups: list, site: str = "https://www.sudarshankarweer.com", unsubscribe_url: str = "", prefs_url: str = "") -> str:
+    blocks = ""
+    for g in groups:
+        rows = ""
+        for it in (g.get("items") or [])[:4]:
+            rows += (
+                f'<a href="{it.get("link","#")}" style="display:block;text-decoration:none;padding:7px 0;border-bottom:1px solid #f0f0f0;">'
+                f'<span style="font-size:11px;color:#059669;font-weight:600;">{it.get("source","")}</span>'
+                f'<span style="display:block;font-size:13px;color:#111;line-height:1.35;">{it.get("title","")}</span></a>'
+            )
+        ins = (f'<p style="font-size:12px;color:#6b7280;font-style:italic;margin:8px 0 0;">SK Take: {g.get("insight")}</p>' if g.get("insight") else "")
+        path = "sectors" if g.get("kind") == "sector" else ("capital" if g.get("kind") == "agency" else "oems")
+        link = f'{site}/{path}/{g.get("slug","")}'
+        rows_html = rows or "<p style='font-size:13px;color:#9ca3af;margin:6px 0;'>No major headlines this week.</p>"
+        blocks += (
+            f'<div style="border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;margin-bottom:12px;">'
+            f'<a href="{link}" style="font-size:15px;font-weight:700;color:#111;text-decoration:none;">{g.get("label","")} &rarr;</a>'
+            f'<div style="margin-top:6px;">{rows_html}</div>{ins}</div>'
+        )
+    prefs = (f'<a href="{prefs_url}" style="color:#059669;text-decoration:underline;">Manage your topics</a> · ' if prefs_url else "")
+    unsub = (f'<p style="font-size:12px;color:#9ca3af;margin-top:20px;text-align:center;">'
+             f'{prefs}You receive this because you subscribed to Sudarshan Karweer updates. '
+             f'<a href="{unsubscribe_url}" style="color:#9ca3af;text-decoration:underline;">Unsubscribe</a> anytime.</p>'
+             if (unsubscribe_url or prefs_url) else "")
+    inner = (
+        f'<p style="font-size:15px;color:#111;">Hi {name or "there"},</p>'
+        f'<p style="font-size:14px;color:#374151;">Your Monday brief — the week\'s biggest moves across the sectors and capital you follow.</p>'
+        f'<div style="margin-top:14px;">{blocks}</div>'
+        f'<a href="{site}/explore" style="display:inline-block;margin-top:4px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Explore Sectors &amp; Capital</a>'
+        f'<p style="font-size:13px;color:#374151;margin-top:16px;">— Team Sudarshan Karweer</p>'
+        f'{unsub}'
+    )
+    return _shell("Weekly Sector Brief", inner)
+
+
+def send_sector_digest_email(to_email: str, name: str, groups: list, site: str = "https://www.sudarshankarweer.com", unsubscribe_url: str = "", prefs_url: str = "") -> str:
+    """Monday sector/agency news round-up to a subscriber (INERT until SMTP configured)."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email or not groups:
+        return "skipped"
+    msg = EmailMessage()
+    msg["Subject"] = "Your weekly sector brief"
+    msg["From"] = user
+    msg["To"] = to_email
+    if unsubscribe_url:
+        msg["List-Unsubscribe"] = f"<{unsubscribe_url}>"
+        msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+    msg.set_content("Your weekly sector brief: " + " | ".join(g.get("label", "") for g in groups) + f"  Read more: {site}/explore")
+    msg.add_alternative(render_sector_digest_html(name, groups, site, unsubscribe_url, prefs_url), subtype="html")
+    return _smtp_send(msg)
+
+
 def send_test_email(to_email: str) -> str:
     """Send a simple deliverability test email (used to check SPF/DKIM/DMARC via a mail tester)."""
     user = os.environ.get("GMAIL_USER")

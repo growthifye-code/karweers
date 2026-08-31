@@ -33,6 +33,9 @@ export default function ExplorePage() {
   const [sectors, setSectors] = useState([]);
   const [agencies, setAgencies] = useState([]);
   const [oems, setOems] = useState([]);
+  const [inst, setInst] = useState("All");
+  const [ticket, setTicket] = useState("All");
+  const [access, setAccess] = useState("All");
 
   useEffect(() => { window.scrollTo(0, 0); }, []);
   useEffect(() => {
@@ -77,24 +80,79 @@ export default function ExplorePage() {
         </div>
       </section>
 
-      {/* Agencies */}
+      {/* Agencies — Climate Fund Directory with filters */}
       <section className="border-t border-border py-14" data-testid="explore-agencies">
         <div className="mx-auto max-w-7xl px-6 lg:px-10">
           <div className="flex items-center gap-2">
             <Landmark className="h-5 w-5 text-[hsl(var(--primary))]" />
-            <h2 className="font-display text-2xl font-bold">Climate &amp; development finance agencies</h2>
+            <h2 className="font-display text-2xl font-bold">Climate &amp; development finance directory</h2>
           </div>
-          <p className="mt-2 text-sm text-muted-foreground">Multilaterals, global climate funds, bilateral DFIs and India's own institutions — mandate, India presence, leadership, programmes &amp; live news.</p>
-          {agencies.map((grp) => (
-            <div key={grp.group} className="mt-10">
-              <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-[hsl(var(--primary))]">{grp.group}</h3>
-              <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {grp.items.map((a) => (
-                  <Tile key={a.slug} to={`/capital/${a.slug}`} testid={`agency-tile-${a.slug}`} name={a.name} blurb={a.blurb} logo={a.logo} />
-                ))}
-              </div>
-            </div>
-          ))}
+          <p className="mt-2 text-sm text-muted-foreground">Filter by instrument, ticket size and India access to find the right capital fast. Multilaterals, global climate funds, bilateral DFIs and India's own institutions.</p>
+
+          {(() => {
+            const flat = agencies.flatMap((g) => g.items.map((it) => ({ ...it, group: g.group })));
+            const instruments = ["All", ...Array.from(new Set(flat.flatMap((a) => a.instruments || []))).sort()];
+            const tickets = ["All", "Small (<$25M)", "Mid ($25M–$250M)", "Large ($250M+)"];
+            const accesses = ["All", ...Array.from(new Set(flat.map((a) => a.access).filter(Boolean))).sort()];
+            const filtering = inst !== "All" || ticket !== "All" || access !== "All";
+            const filtered = flat.filter((a) =>
+              (inst === "All" || (a.instruments || []).includes(inst)) &&
+              (ticket === "All" || a.ticket_label === ticket) &&
+              (access === "All" || a.access === access));
+            const Chip = ({ active, onClick, children, testid }) => (
+              <button type="button" onClick={onClick} data-testid={testid}
+                className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${active ? "border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10 text-[hsl(var(--primary))]" : "border-border text-muted-foreground hover:text-foreground"}`}>{children}</button>
+            );
+            return (
+              <>
+                <div className="mt-6 space-y-3 rounded-2xl border border-border bg-card p-4" data-testid="agency-filters">
+                  <div>
+                    <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Instrument</p>
+                    <div className="flex flex-wrap gap-2">
+                      {instruments.map((x) => <Chip key={x} active={inst === x} onClick={() => setInst(x)} testid={`filter-inst-${x}`}>{x}</Chip>)}
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:gap-8">
+                    <div>
+                      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Ticket size</p>
+                      <div className="flex flex-wrap gap-2">
+                        {tickets.map((x) => <Chip key={x} active={ticket === x} onClick={() => setTicket(x)} testid={`filter-ticket-${x}`}>{x}</Chip>)}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">India access</p>
+                      <div className="flex flex-wrap gap-2">
+                        {accesses.map((x) => <Chip key={x} active={access === x} onClick={() => setAccess(x)} testid={`filter-access-${x}`}>{x}</Chip>)}
+                      </div>
+                    </div>
+                  </div>
+                  {filtering && (
+                    <button type="button" onClick={() => { setInst("All"); setTicket("All"); setAccess("All"); }} data-testid="filter-clear"
+                      className="text-xs font-semibold text-[hsl(var(--primary))] hover:underline">Clear filters ({filtered.length} match)</button>
+                  )}
+                </div>
+
+                {filtering ? (
+                  <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="agency-filtered">
+                    {filtered.length ? filtered.map((a) => (
+                      <Tile key={a.slug} to={`/capital/${a.slug}`} testid={`agency-tile-${a.slug}`} name={a.name} blurb={a.blurb} logo={a.logo} />
+                    )) : <p className="text-sm text-muted-foreground">No agencies match these filters — try widening them.</p>}
+                  </div>
+                ) : (
+                  agencies.map((grp) => (
+                    <div key={grp.group} className="mt-10">
+                      <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-[hsl(var(--primary))]">{grp.group}</h3>
+                      <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                        {grp.items.map((a) => (
+                          <Tile key={a.slug} to={`/capital/${a.slug}`} testid={`agency-tile-${a.slug}`} name={a.name} blurb={a.blurb} logo={a.logo} />
+                        ))}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </>
+            );
+          })()}
         </div>
       </section>
 

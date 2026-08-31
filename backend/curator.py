@@ -5,6 +5,8 @@ catalogue always stays fresh, then rotates a daily selection and supports
 personalised recommendations based on a client's browsing interests.
 """
 import time
+import re
+import json
 import hashlib
 import logging
 import xml.etree.ElementTree as ET
@@ -227,3 +229,76 @@ def recommended(topic_weights: dict, limit: int = 12) -> list:
         return interest * 2.2 + freshness
     videos.sort(key=score, reverse=True)
     return videos[:limit]
+
+
+# ---- Book-specific YouTube search (no API key; scrapes public search results) ----
+_SEARCH_CACHE: dict = {}
+_SEARCH_TTL = 24 * 3600  # cache each book's videos for a day
+
+
+def book_videos(query: str, limit: int = 6) -> list:
+    """Return YouTube videos specifically about a book (title + author query).
+
+    Scrapes YouTube's public search results (videos-only filter) and parses
+    ytInitialData. Cached per query for a day. Returns [] on any failure so the
+    caller can hide the Watch tab when nothing specific is found.
+    """
+    key = (query or "").lower().strip()
+    if not key:
+        return []
+    now = time.time()
+    c = _SEARCH_CACHE.get(key)
+    if c and now - c["ts"] < _SEARCH_TTL:
+        return c["videos"][:limit]
+    try:
+        r = requests.get(
+            "https://www.youtube.com/results",
+            params={"search_query": query, "sp": "EgIQAQ%3D%3D"},  # type=video
+            headers={"User-Agent": _UA, "Accept-Language": "en-US,en;q=0.9"},
+            timeout=10,
+        )
+        m = re.search(r"var ytInitialData = (\{.*?\});</script>", r.text)
+        if not m:
+            m = re.search(r'ytInitialData\s*=\s*(\{.*?\});', r.text)
+        data = json.loads(m.group(1)) if m else {}
+        found = []
+
+        def walk(node):
+            if isinstance(node, dict):
+                vr = node.get("videoRenderer")
+                if vr and vr.get("videoId"):
+                    runs = (vr.get("title", {}) or {}).get("runs") or []
+                    title = runs[0].get("text", "") if runs else ""
+                    ot = ((vr.get("ownerText", {}) or {}).get("runs")
+                          or (vr.get("longBylineText", {}) or {}).get("runs") or [])
+                    owner = ot[0].get("text", "") if ot else ""
+                    vid = vr["videoId"]
+                    found.append({
+                        "video_id": vid,
+                        "title": title,
+                        "source": owner or "YouTube",
+                        "source_url": f"https://www.youtube.com/watch?v={vid}",
+                        "topics": ["leadership"],
+                        "published": "",
+                        "thumbnail": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+                        "description": "",
+                    })
+                for v in node.values():
+                    walk(v)
+            elif isinstance(node, list):
+                for v in node:
+                    walk(v)
+
+        walk(data)
+        seen, out = set(), []
+        for v in found:
+            if v["video_id"] in seen:
+                continue
+            seen.add(v["video_id"])
+            out.append(v)
+        if out:
+            _SEARCH_CACHE[key] = {"ts": now, "videos": out}
+        return out[:limit]
+    except Exception as e:
+        logger.warning("curator.book_videos failed for %s: %s", query, e)
+        return []

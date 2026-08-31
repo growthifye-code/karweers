@@ -182,3 +182,6 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - **Admin API**: GET /admin/security (active bans + recent alerts + unseen count), POST /admin/security/seen, POST /admin/security/unban {ip} (lifts ban + clears that IP's failed-login records = false-positive control).
 - **Admin UI** (Login Security card): toast on load for unseen alerts; "Auto-blocked IPs — attack stopped" list with Unblock buttons (testid blocked-ips, blocked-ip-N, unban-ip-N); "Recent security events" feed with severity dots (testid security-alerts). 
 - Verified via curl: SQLi & path-traversal probes → 403 + ban; banned IP blocked everywhere; clean IPs unaffected; unban restores access. Screenshot confirms UI + toast.
+
+## Iteration 5.16 (Jun 2026) — Threat trends chart
+- GET /admin/security now returns a 14-day `trend` (per-day counts of high/critical + medium/lockout blocked events). Login Security card renders a small stacked recharts bar chart "Blocked attacks — last 14 days" (testid threat-trend; red=Critical, amber=Lockouts) so admins can see when the site is being probed. Verified via seeded data + screenshot.

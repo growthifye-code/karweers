@@ -426,6 +426,23 @@ export default function AdminDashboard() {
                       </span>
                     )}
                   </div>
+                  {security && security.trend && security.trend.some((d) => d.total > 0) && (
+                    <div className="mt-5" data-testid="threat-trend">
+                      <h4 className="text-sm font-bold">Blocked attacks — last 14 days</h4>
+                      <div className="mt-3 h-40 w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={security.trend} margin={{ top: 4, right: 8, left: -22, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                            <XAxis dataKey="day" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} interval={1} />
+                            <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
+                            <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12 }} cursor={{ fill: "hsl(var(--secondary))", opacity: 0.4 }} />
+                            <Bar dataKey="high" stackId="t" name="Critical" fill="#ef4444" />
+                            <Bar dataKey="medium" stackId="t" name="Lockouts" fill="#f59e0b" radius={[3, 3, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  )}
                   {security && security.banned.filter((b) => b.active).length > 0 && (
                     <div className="mt-5" data-testid="blocked-ips">
                       <h4 className="flex items-center gap-2 text-sm font-bold text-red-500"><AlertTriangle className="h-4 w-4" /> Auto-blocked IPs — attack stopped</h4>

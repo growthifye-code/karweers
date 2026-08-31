@@ -745,8 +745,33 @@ async def admin_security(admin: dict = Depends(require_admin)):
                        "banned_until": d.get("banned_until"), "active": active, "updated_at": d.get("updated_at")})
     alerts = await db.security_alerts.find({}, {"_id": 0}).sort("created_at", -1).to_list(50)
     unseen = await db.security_alerts.count_documents({"seen": False})
+
+    # 14-day trend of blocked/attack events (exclude info-level like manual unbans).
+    all_alerts = await db.security_alerts.find(
+        {"severity": {"$in": ["high", "medium"]}}, {"_id": 0, "created_at": 1, "severity": 1}).to_list(5000)
+    days = []
+    starts = []
+    for i in range(13, -1, -1):
+        d = (now - timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0)
+        starts.append(d)
+        days.append({"day": d.strftime("%d %b"), "high": 0, "medium": 0, "total": 0})
+    for a in all_alerts:
+        try:
+            ts = datetime.fromisoformat(a["created_at"])
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+        except Exception:
+            continue
+        for i, s in enumerate(starts):
+            if s <= ts < s + timedelta(days=1):
+                sev = a.get("severity", "medium")
+                if sev in ("high", "medium"):
+                    days[i][sev] += 1
+                days[i]["total"] += 1
+                break
+
     return {"banned": banned, "active_bans": sum(1 for b in banned if b["active"]),
-            "alerts": alerts, "unseen": unseen}
+            "alerts": alerts, "unseen": unseen, "trend": days}
 
 
 @api_router.post("/admin/security/seen")

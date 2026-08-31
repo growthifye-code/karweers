@@ -563,8 +563,41 @@ async def admin_lead_analytics(period: str = "8w", admin: dict = Depends(require
     ranked = sorted(
         [{"source": s, **conversion[s]} for s in SOURCES if conversion[s]["total"] > 0],
         key=lambda x: (x["revenue"], x["paid"]), reverse=True)
+
+    # Revenue by consultation package + current-month revenue vs goal.
+    packages, month_rev = {}, 0
+    month_prefix = now.strftime("%Y-%m")
+    for l in leads:
+        if l.get("status") not in PAID_STATUSES:
+            continue
+        try:
+            amt = int(l.get("amount") or 0)
+        except Exception:
+            amt = 0
+        pkg = l.get("package") or "Custom / Direct"
+        packages[pkg] = packages.get(pkg, 0) + amt
+        if (l.get("created_at") or "")[:7] == month_prefix:
+            month_rev += amt
+    packages_ranked = sorted(
+        [{"package": p, "revenue": v} for p, v in packages.items() if v > 0],
+        key=lambda x: x["revenue"], reverse=True)
+    goal_doc = await db.app_meta.find_one({"_id": "revenue_goal"})
+    goal = (goal_doc or {}).get("target", 0)
+
     return {"weeks": rows, "revenue": rev_rows, "sources": SOURCES, "totals": totals,
-            "granularity": granularity, "period": period, "conversion": conversion, "ranked": ranked}
+            "granularity": granularity, "period": period, "conversion": conversion, "ranked": ranked,
+            "packages": packages_ranked, "month_revenue": month_rev, "revenue_goal": goal,
+            "month_label": now.strftime("%B %Y")}
+
+
+class RevenueGoalIn(BaseModel):
+    target: int = 0
+
+
+@api_router.post("/admin/revenue-goal")
+async def set_revenue_goal(body: RevenueGoalIn, admin: dict = Depends(require_admin)):
+    await db.app_meta.update_one({"_id": "revenue_goal"}, {"$set": {"target": max(0, body.target)}}, upsert=True)
+    return {"target": max(0, body.target)}
 
 
 @api_router.get("/admin/lead-analytics/export")

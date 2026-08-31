@@ -150,3 +150,8 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - **Scheduled report**: POST /admin/report/run emails Sudarshan the analytics CSV (send_report_email, CSV attachment); scheduler sends on the 1st of each month. Admin "Email report" button (testid email-report). INERT until GMAIL_APP_PASSWORD set (returns skipped:email_not_configured; UI shows an informative toast).
 - **Security audit** (deployment static scan + manual): PASS. No hardcoded secrets; URLs env-driven; admin routes gated by require_admin; auth (JWT + Google session cookie, HttpOnly/Secure/SameSite=None); admin allowlist strict; hCaptcha strict. Fixed: N+1 in /admin/clients → now MongoDB aggregations (4 queries total).
 - Advisories (not fixed): tighten CORS to explicit origin; escape user input in outbound email HTML when SMTP is enabled; consider rate-limit/captcha on public /chat/lead.
+
+## Iteration 5.9 (Jun 2026) — Revenue Goal + Best Package View
+- **Revenue Goal card** (Admin Overview): current-month revenue vs a monthly target with progress bar + inline editor. Backend GET /admin/lead-analytics returns `revenue_goal`, `month_revenue`, `month_label`; POST /admin/revenue-goal {target} persists to app_meta (_id revenue_goal). testids revenue-goal-card, edit-revenue-goal, revenue-goal-input, save-revenue-goal, revenue-goal-bar.
+- **Best Package card** (Admin Overview): ranked revenue breakdown by consultation package (Discovery/Strategy/Deep Dive/Custom) from `packages` in analytics (sums paid lead `amount` grouped by `package`). testids best-package-card, best-package-list, package-row-N.
+- Verified: backend via curl (goal set → 5000, month_revenue 898, packages ranked); frontend via screenshot (both cards render on Overview).

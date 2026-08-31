@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useAuth, formatApiErrorDetail } from "@/context/AuthContext";
 import { Logo } from "@/components/Navbar";
 import ThemeToggle from "@/components/ThemeToggle";
-import { Users, FileText, Inbox, Sparkles, Trash2, Wand2, Mail, LifeBuoy, UserCircle, ChevronDown, Tag, AlertTriangle, Star } from "lucide-react";
+import { Users, FileText, Inbox, Sparkles, Trash2, Wand2, Mail, LifeBuoy, UserCircle, ChevronDown, Tag, AlertTriangle, Star, Target, Package, Pencil } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from "recharts";
 import api from "@/lib/api";
 
@@ -39,6 +39,9 @@ export default function AdminDashboard() {
   const [chartPeriod, setChartPeriod] = useState("8w");
   const [chartMetric, setChartMetric] = useState("volume");
   const [ticketReplies, setTicketReplies] = useState({});
+  const [goalInput, setGoalInput] = useState("");
+  const [goalEditing, setGoalEditing] = useState(false);
+  const [savingGoal, setSavingGoal] = useState(false);
 
   const [form, setForm] = useState({ title: "", category: "news", sector: SECTORS[0], summary: "", content: "", tags: "", image: DEFAULT_IMG, featured: false });
   const [aiTopic, setAiTopic] = useState("");
@@ -128,6 +131,18 @@ export default function AdminDashboard() {
       if (data.sent) toast.success(`Report emailed to ${data.to}.`);
       else toast.info("Email isn't configured yet — add a Gmail App Password to enable monthly reports.");
     } catch { toast.error("Could not send report."); }
+  };
+  const saveGoal = async () => {
+    const target = parseInt(goalInput, 10);
+    if (isNaN(target) || target < 0) { toast.error("Enter a valid target amount."); return; }
+    setSavingGoal(true);
+    try {
+      await api.post("/admin/revenue-goal", { target });
+      setAnalytics((a) => a ? { ...a, revenue_goal: target } : a);
+      setGoalEditing(false);
+      toast.success("Monthly revenue goal updated.");
+    } catch { toast.error("Could not save goal."); }
+    finally { setSavingGoal(false); }
   };
 
   const SOURCE_META = {
@@ -254,7 +269,94 @@ export default function AdminDashboard() {
             </div>
 
             {analytics && (
-              <div className="rounded-2xl border border-border bg-card p-6" data-testid="lead-source-chart">
+              <>
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="rounded-2xl border border-border bg-card p-6" data-testid="revenue-goal-card">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="flex items-center gap-2 font-display text-lg font-bold"><Target className="h-4 w-4 text-[hsl(var(--primary))]" /> Revenue Goal</h3>
+                      <p className="text-sm text-muted-foreground">{analytics.month_label} target vs progress</p>
+                    </div>
+                    {!goalEditing && (
+                      <button onClick={() => { setGoalInput(String(analytics.revenue_goal || "")); setGoalEditing(true); }}
+                        data-testid="edit-revenue-goal"
+                        className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-2 text-xs font-medium hover:bg-secondary">
+                        <Pencil className="h-3.5 w-3.5" /> {analytics.revenue_goal ? "Edit" : "Set goal"}
+                      </button>
+                    )}
+                  </div>
+                  {goalEditing ? (
+                    <div className="mt-5 flex flex-wrap items-center gap-2">
+                      <div className="relative flex-1 min-w-[140px]">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
+                        <input type="number" min="0" value={goalInput} onChange={(e) => setGoalInput(e.target.value)}
+                          data-testid="revenue-goal-input" placeholder="e.g. 5000"
+                          className="w-full rounded-xl border border-border bg-background py-2.5 pl-7 pr-3 text-sm outline-none focus:border-[hsl(var(--primary))]" />
+                      </div>
+                      <button onClick={saveGoal} disabled={savingGoal} data-testid="save-revenue-goal"
+                        className="rounded-xl bg-[hsl(var(--primary))] px-4 py-2.5 text-sm font-semibold text-[hsl(var(--primary-foreground))] disabled:opacity-60">
+                        {savingGoal ? "Saving…" : "Save"}
+                      </button>
+                      <button onClick={() => setGoalEditing(false)} data-testid="cancel-revenue-goal"
+                        className="rounded-xl border border-border px-4 py-2.5 text-sm font-medium hover:bg-secondary">Cancel</button>
+                    </div>
+                  ) : analytics.revenue_goal > 0 ? (
+                    <div className="mt-5" data-testid="revenue-goal-progress">
+                      <div className="flex items-end justify-between">
+                        <span className="font-display text-3xl font-black text-[hsl(var(--primary))]">${(analytics.month_revenue || 0).toLocaleString()}</span>
+                        <span className="text-sm text-muted-foreground">of ${analytics.revenue_goal.toLocaleString()}</span>
+                      </div>
+                      {(() => {
+                        const pct = Math.min(100, Math.round(100 * (analytics.month_revenue || 0) / analytics.revenue_goal));
+                        return (
+                          <>
+                            <div className="mt-3 h-3 w-full overflow-hidden rounded-full bg-secondary">
+                              <div className="h-full rounded-full bg-[hsl(var(--primary))] transition-all" style={{ width: `${pct}%` }} data-testid="revenue-goal-bar" />
+                            </div>
+                            <p className="mt-2 text-xs text-muted-foreground">
+                              <span className="font-semibold text-foreground">{pct}%</span> reached ·
+                              {" "}${Math.max(0, analytics.revenue_goal - (analytics.month_revenue || 0)).toLocaleString()} to go
+                            </p>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  ) : (
+                    <p className="mt-6 text-sm text-muted-foreground" data-testid="revenue-goal-empty">
+                      No goal set yet. This month's revenue: <span className="font-semibold text-foreground">${(analytics.month_revenue || 0).toLocaleString()}</span>.
+                    </p>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-border bg-card p-6" data-testid="best-package-card">
+                  <h3 className="flex items-center gap-2 font-display text-lg font-bold"><Package className="h-4 w-4 text-[hsl(var(--accent))]" /> Best Package</h3>
+                  <p className="text-sm text-muted-foreground">Revenue by consultation package (all-time)</p>
+                  {analytics.packages?.length > 0 ? (
+                    <div className="mt-5 space-y-3" data-testid="best-package-list">
+                      {(() => {
+                        const max = analytics.packages[0].revenue || 1;
+                        return analytics.packages.map((p, i) => (
+                          <div key={p.package} data-testid={`package-row-${i}`}>
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="inline-flex items-center gap-2 font-medium">
+                                {i === 0 && <Star className="h-3.5 w-3.5 text-[hsl(var(--primary))]" />}{p.package}
+                              </span>
+                              <span className="font-display font-black text-[hsl(var(--accent))]">${p.revenue.toLocaleString()}</span>
+                            </div>
+                            <div className="mt-1.5 h-2.5 w-full overflow-hidden rounded-full bg-secondary">
+                              <div className="h-full rounded-full bg-[hsl(var(--accent))]" style={{ width: `${Math.round(100 * p.revenue / max)}%` }} />
+                            </div>
+                          </div>
+                        ));
+                      })()}
+                    </div>
+                  ) : (
+                    <p className="mt-6 text-sm text-muted-foreground" data-testid="best-package-empty">No paid consultations yet — package revenue will appear here.</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-6 rounded-2xl border border-border bg-card p-6" data-testid="lead-source-chart">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h3 className="font-display text-lg font-bold">{chartMetric === "revenue" ? "Revenue by source" : "Lead volume by source"}</h3>
@@ -332,6 +434,7 @@ export default function AdminDashboard() {
                   </div>
                 )}
               </div>
+              </>
             )}
           </div>
         )}

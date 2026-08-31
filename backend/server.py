@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, Depends, BackgroundTasks
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -25,6 +25,7 @@ from seed_data import ARTICLES, SERVICES, STATS, MARKET_PULSE, TESTIMONIALS
 import curator
 from services_data import SERVICES as SERVICE_PAGES
 from emailer import send_booking_email
+from emailer import send_security_alert_email
 import xml.etree.ElementTree as ET
 from datetime import datetime as _dt
 
@@ -238,9 +239,19 @@ LOGIN_MAX_ATTEMPTS = 5
 LOGIN_LOCKOUT_MINUTES = 15
 
 
+def _client_ip(request: Request) -> str:
+    """Real client IP behind the ingress proxy (X-Forwarded-For), else socket peer."""
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    xri = request.headers.get("x-real-ip")
+    if xri:
+        return xri.strip()
+    return request.client.host if request.client else "unknown"
+
+
 def _login_identifier(request: Request, email: str) -> str:
-    ip = request.client.host if request.client else "unknown"
-    return f"{ip}:{email}"
+    return f"{_client_ip(request)}:{email}"
 
 
 async def check_login_lockout(identifier: str):
@@ -266,19 +277,100 @@ async def check_login_lockout(identifier: str):
 
 
 async def register_failed_login(identifier: str, ip: str, email: str):
-    """Increment failed-attempt counter; lock the account after the threshold."""
+    """Increment failed-attempt counter; lock after threshold; escalate to IP ban on attack."""
     doc = await db.login_attempts.find_one({"identifier": identifier})
     count = (doc or {}).get("count", 0) + 1
     fail_total = (doc or {}).get("fail_total", 0) + 1
     update = {"count": count, "fail_total": fail_total, "ip": ip, "email": email, "updated_at": now_iso()}
+    locked = False
     if count >= LOGIN_MAX_ATTEMPTS:
         update["locked_until"] = (datetime.now(timezone.utc) + timedelta(minutes=LOGIN_LOCKOUT_MINUTES)).isoformat()
         update["count"] = 0  # reset counter; lockout window now governs access
+        locked = True
     await db.login_attempts.update_one({"identifier": identifier}, {"$set": update}, upsert=True)
+    if locked:
+        await raise_security_alert("medium", "account_lockout", ip,
+                                   "Repeated failed logins", f"{email} locked for {LOGIN_LOCKOUT_MINUTES} min", email=email)
+        await evaluate_credential_stuffing(ip)
+
+
+async def evaluate_credential_stuffing(ip: str):
+    """One IP failing across many accounts (or very high total fails) => attack => auto-ban."""
+    docs = await db.login_attempts.find({"ip": ip}).to_list(1000)
+    distinct = {d.get("email") for d in docs if d.get("email")}
+    total = sum(d.get("fail_total", 0) for d in docs)
+    if len(distinct) >= CRED_STUFF_DISTINCT_EMAILS or total >= CRED_STUFF_TOTAL_FAILS:
+        if not await is_ip_banned(ip):
+            await ban_ip(ip, "Credential stuffing",
+                         f"{len(distinct)} accounts targeted · {total} failed logins")
 
 
 async def clear_login_attempts(identifier: str):
     await db.login_attempts.delete_one({"identifier": identifier})
+
+
+# ---------------- Site-wide security guard (auto-detect & block attacks) ----------------
+import time as _time
+from collections import defaultdict, deque
+
+RATE_WINDOW_SEC = 10
+RATE_MAX_REQUESTS = 100          # per IP per window across ALL /api endpoints
+BAN_MINUTES = 60                 # auto-ban duration
+CRED_STUFF_DISTINCT_EMAILS = 3   # 1 IP failing across N accounts => attack
+CRED_STUFF_TOTAL_FAILS = 15
+
+MALICIOUS_PATTERNS = [
+    "../", "..%2f", "%2e%2e", "/etc/passwd", "/.env", "/.git", "/wp-admin", "/wp-login",
+    "/phpmyadmin", "/vendor/", "/.aws", "/config.json", "<script", "onerror=", "javascript:",
+    "union select", "union+select", " or 1=1", "'or'1'='1", "sleep(", "benchmark(", "%00",
+    "/cgi-bin/", "/actuator", "/.ssh", "eval(", "base64_decode", "/xmlrpc.php",
+]
+
+_req_log = defaultdict(deque)    # ip -> deque[timestamps]
+_banned_ips = {}                 # ip -> banned_until epoch (in-memory cache)
+
+
+async def raise_security_alert(severity: str, atype: str, ip: str, reason: str, detail: str, email: str = ""):
+    alert = {"id": str(uuid.uuid4()), "type": atype, "severity": severity, "ip": ip,
+             "email": email, "reason": reason, "detail": detail, "created_at": now_iso(), "seen": False}
+    await db.security_alerts.insert_one(dict(alert))
+    logger.warning("SECURITY[%s] %s ip=%s :: %s (%s)", severity, atype, ip, reason, detail)
+    try:
+        to = os.environ.get("BOOKING_ADMIN_EMAIL", "")
+        asyncio.create_task(asyncio.to_thread(send_security_alert_email, to, alert))
+    except Exception:
+        pass
+
+
+async def ban_ip(ip: str, reason: str, detail: str, minutes: int = BAN_MINUTES, severity: str = "high"):
+    until = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+    _banned_ips[ip] = until.timestamp()
+    await db.blocked_ips.update_one({"ip": ip}, {"$set": {
+        "ip": ip, "reason": reason, "detail": detail,
+        "banned_until": until.isoformat(), "updated_at": now_iso()}}, upsert=True)
+    await raise_security_alert(severity, "ip_banned", ip, reason, detail)
+
+
+async def is_ip_banned(ip: str) -> bool:
+    now = _time.time()
+    exp = _banned_ips.get(ip)
+    if exp is not None:
+        if exp > now:
+            return True
+        _banned_ips.pop(ip, None)
+    doc = await db.blocked_ips.find_one({"ip": ip})
+    if not doc:
+        return False
+    try:
+        t = datetime.fromisoformat(doc.get("banned_until"))
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+    except Exception:
+        return False
+    if t > datetime.now(timezone.utc):
+        _banned_ips[ip] = t.timestamp()
+        return True
+    return False
 
 
 @api_router.post("/auth/login")
@@ -632,6 +724,49 @@ async def admin_unlock_login(body: UnlockIn, admin: dict = Depends(require_admin
     identifier = f"{body.ip}:{body.email}"
     res = await db.login_attempts.delete_one({"identifier": identifier})
     return {"cleared": res.deleted_count > 0}
+
+
+@api_router.get("/admin/security")
+async def admin_security(admin: dict = Depends(require_admin)):
+    """Live threat overview: auto-blocked IPs + recent security alerts for real-time response."""
+    now = datetime.now(timezone.utc)
+    banned_docs = await db.blocked_ips.find({}, {"_id": 0}).sort("updated_at", -1).to_list(100)
+    banned = []
+    for d in banned_docs:
+        active = False
+        try:
+            t = datetime.fromisoformat(d.get("banned_until"))
+            if t.tzinfo is None:
+                t = t.replace(tzinfo=timezone.utc)
+            active = t > now
+        except Exception:
+            active = False
+        banned.append({"ip": d.get("ip"), "reason": d.get("reason"), "detail": d.get("detail"),
+                       "banned_until": d.get("banned_until"), "active": active, "updated_at": d.get("updated_at")})
+    alerts = await db.security_alerts.find({}, {"_id": 0}).sort("created_at", -1).to_list(50)
+    unseen = await db.security_alerts.count_documents({"seen": False})
+    return {"banned": banned, "active_bans": sum(1 for b in banned if b["active"]),
+            "alerts": alerts, "unseen": unseen}
+
+
+@api_router.post("/admin/security/seen")
+async def admin_security_seen(admin: dict = Depends(require_admin)):
+    await db.security_alerts.update_many({"seen": False}, {"$set": {"seen": True}})
+    return {"ok": True}
+
+
+class UnbanIn(BaseModel):
+    ip: str
+
+
+@api_router.post("/admin/security/unban")
+async def admin_security_unban(body: UnbanIn, admin: dict = Depends(require_admin)):
+    """Lift an automatic IP ban (false positive) and clear its failed-login records."""
+    _banned_ips.pop(body.ip, None)
+    await db.blocked_ips.delete_one({"ip": body.ip})
+    await db.login_attempts.delete_many({"ip": body.ip})
+    await raise_security_alert("info", "ip_unbanned", body.ip, "Ban lifted by admin", "Manual override")
+    return {"unbanned": True}
 
 
 @api_router.get("/admin/lead-analytics")
@@ -1368,6 +1503,47 @@ async def security_headers(request: Request, call_next):
     return response
 
 
+@app.middleware("http")
+async def security_guard(request: Request, call_next):
+    """Site-wide attack detection & automatic blocking for all /api traffic."""
+    path = request.url.path
+    if request.method == "OPTIONS" or not path.startswith("/api"):
+        return await call_next(request)
+    ip = _client_ip(request)
+
+    def _blocked(status, detail):
+        headers = {}
+        origin = request.headers.get("origin")
+        if origin:
+            headers["Access-Control-Allow-Origin"] = origin
+            headers["Access-Control-Allow-Credentials"] = "true"
+        return JSONResponse(status_code=status, content={"detail": detail}, headers=headers)
+
+    # 1) Already banned → stop immediately.
+    if await is_ip_banned(ip):
+        return _blocked(403, "Access blocked due to suspicious activity. Contact support if this is a mistake.")
+
+    # 2) Malicious signature in path/query → ban + stop.
+    from urllib.parse import unquote
+    raw = (path + "?" + (request.url.query or "")).lower()
+    probe = unquote(raw)
+    if any(p in probe or p in raw for p in MALICIOUS_PATTERNS):
+        await ban_ip(ip, "Malicious request pattern", probe[:180])
+        return _blocked(403, "Request blocked.")
+
+    # 3) Request flood (sliding window) → ban + stop.
+    now = _time.time()
+    dq = _req_log[ip]
+    dq.append(now)
+    while dq and dq[0] < now - RATE_WINDOW_SEC:
+        dq.popleft()
+    if len(dq) > RATE_MAX_REQUESTS:
+        await ban_ip(ip, "Request flood", f"{len(dq)} requests in {RATE_WINDOW_SEC}s")
+        return _blocked(429, "Too many requests — temporarily blocked.")
+
+    return await call_next(request)
+
+
 @app.on_event("startup")
 async def startup():
     await db.users.create_index("email", unique=True)
@@ -1377,7 +1553,21 @@ async def startup():
     await db.support_tickets.create_index("user_id")
     await db.support_tickets.create_index("status")
     await db.login_attempts.create_index("identifier", unique=True)
+    await db.login_attempts.create_index("ip")
+    await db.blocked_ips.create_index("ip", unique=True)
+    await db.security_alerts.create_index("created_at")
     await db.articles.create_index("slug", unique=True)
+    # Warm the in-memory ban cache with any still-active bans.
+    now = datetime.now(timezone.utc)
+    async for b in db.blocked_ips.find({}, {"_id": 0, "ip": 1, "banned_until": 1}):
+        try:
+            t = datetime.fromisoformat(b.get("banned_until"))
+            if t.tzinfo is None:
+                t = t.replace(tzinfo=timezone.utc)
+            if t > now:
+                _banned_ips[b["ip"]] = t.timestamp()
+        except Exception:
+            continue
     # Seed admin
     admin_email = os.environ["ADMIN_EMAIL"].lower()
     admin_password = os.environ["ADMIN_PASSWORD"]

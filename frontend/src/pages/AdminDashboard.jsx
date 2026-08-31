@@ -43,6 +43,7 @@ export default function AdminDashboard() {
   const [goalEditing, setGoalEditing] = useState(false);
   const [savingGoal, setSavingGoal] = useState(false);
   const [loginAttempts, setLoginAttempts] = useState(null);
+  const [security, setSecurity] = useState(null);
 
   const [form, setForm] = useState({ title: "", category: "news", sector: SECTORS[0], summary: "", content: "", tags: "", image: DEFAULT_IMG, featured: false });
   const [aiTopic, setAiTopic] = useState("");
@@ -58,6 +59,13 @@ export default function AdminDashboard() {
     api.get("/admin/tickets").then((r) => setTickets(r.data)).catch(() => {});
     api.get("/admin/lead-analytics").then((r) => setAnalytics(r.data)).catch(() => {});
     api.get("/admin/login-attempts").then((r) => setLoginAttempts(r.data)).catch(() => {});
+    api.get("/admin/security").then((r) => {
+      setSecurity(r.data);
+      if (r.data.unseen > 0) {
+        toast.warning(`${r.data.unseen} new security alert${r.data.unseen > 1 ? "s" : ""} — ${r.data.active_bans} IP${r.data.active_bans !== 1 ? "s" : ""} auto-blocked.`, { duration: 8000 });
+        api.post("/admin/security/seen").catch(() => {});
+      }
+    }).catch(() => {});
   };
   useEffect(load, []);
 
@@ -153,6 +161,14 @@ export default function AdminDashboard() {
       setLoginAttempts(r.data);
       toast.success(`Cleared lockout for ${email || ip}.`);
     } catch { toast.error("Could not clear lockout."); }
+  };
+  const unbanIp = async (ip) => {
+    try {
+      await api.post("/admin/security/unban", { ip });
+      const r = await api.get("/admin/security");
+      setSecurity(r.data);
+      toast.success(`Unblocked ${ip}.`);
+    } catch { toast.error("Could not unblock IP."); }
   };
 
   const SOURCE_META = {
@@ -410,6 +426,40 @@ export default function AdminDashboard() {
                       </span>
                     )}
                   </div>
+                  {security && security.banned.filter((b) => b.active).length > 0 && (
+                    <div className="mt-5" data-testid="blocked-ips">
+                      <h4 className="flex items-center gap-2 text-sm font-bold text-red-500"><AlertTriangle className="h-4 w-4" /> Auto-blocked IPs — attack stopped</h4>
+                      <div className="mt-3 space-y-2">
+                        {security.banned.filter((b) => b.active).map((b, i) => (
+                          <div key={b.ip} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-500/30 bg-red-500/5 px-4 py-3" data-testid={`blocked-ip-${i}`}>
+                            <div>
+                              <span className="font-mono text-sm font-semibold">{b.ip}</span>
+                              <span className="ml-2 text-xs text-muted-foreground">{b.reason}{b.detail ? ` · ${b.detail}` : ""}</span>
+                            </div>
+                            <button onClick={() => unbanIp(b.ip)} data-testid={`unban-ip-${i}`}
+                              className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs font-medium hover:bg-secondary">
+                              <Unlock className="h-3.5 w-3.5" /> Unblock
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {security && security.alerts.length > 0 && (
+                    <div className="mt-5" data-testid="security-alerts">
+                      <h4 className="text-sm font-bold">Recent security events</h4>
+                      <div className="mt-3 space-y-1.5">
+                        {security.alerts.slice(0, 6).map((a) => (
+                          <div key={a.id} className="flex items-center gap-3 text-xs" data-testid={`security-alert-${a.id}`}>
+                            <span className={`inline-block h-2 w-2 rounded-full ${a.severity === "high" ? "bg-red-500" : a.severity === "medium" ? "bg-amber-500" : "bg-[hsl(var(--primary))]"}`} />
+                            <span className="font-medium">{a.reason}</span>
+                            <span className="font-mono text-muted-foreground">{a.ip}</span>
+                            <span className="ml-auto text-muted-foreground">{a.created_at ? new Date(a.created_at).toLocaleString() : ""}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   {loginAttempts.attempts.length > 0 ? (
                     <div className="mt-4 overflow-x-auto">
                       <table className="w-full text-left text-sm" data-testid="login-attempts-table">

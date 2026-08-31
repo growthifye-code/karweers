@@ -190,3 +190,42 @@ def send_report_email(to_email: str, csv_text: str) -> str:
     except Exception:
         log.exception("Report email failed")
         return "failed"
+
+
+def send_security_alert_email(to_email: str, alert: dict) -> str:
+    """Alert the advisor the moment an attack is detected and auto-mitigated."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email:
+        return "skipped"
+    sev = (alert.get("severity") or "high").upper()
+    html = (
+        f'<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;">'
+        f'<div style="background:#0A0A0A;padding:18px 24px;border-radius:12px 12px 0 0;">'
+        f'<span style="color:#fff;font-size:20px;font-weight:700;">S<span style="color:#C6F135;">K.</span></span>'
+        f'<span style="color:#ef4444;font-size:12px;margin-left:10px;font-weight:700;">SECURITY ALERT · {sev}</span></div>'
+        f'<div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;padding:24px;">'
+        f'<p style="font-size:15px;color:#111;font-weight:600;">{alert.get("reason","Suspicious activity")}</p>'
+        f'<p style="font-size:13px;color:#6b7280;">IP <strong>{alert.get("ip","")}</strong>'
+        f'{(" · " + alert.get("email","")) if alert.get("email") else ""} · {alert.get("type","")}</p>'
+        f'<p style="font-size:14px;color:#374151;margin-top:12px;">{alert.get("detail","")}</p>'
+        f'<p style="font-size:13px;color:#059669;margin-top:12px;font-weight:600;">Automatic action taken: this IP has been blocked.</p>'
+        f'<a href="https://www.sudarshankarweer.com/admin" style="display:inline-block;margin-top:16px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Review in dashboard</a>'
+        f'</div></div>'
+    )
+    msg = EmailMessage()
+    msg["Subject"] = f"[Security] {alert.get('reason','Attack blocked')} — {alert.get('ip','')}"
+    msg["From"] = user
+    msg["To"] = to_email
+    msg.set_content(f"Security alert ({sev}): {alert.get('reason','')} from IP {alert.get('ip','')}. "
+                    f"{alert.get('detail','')}. This IP has been automatically blocked.")
+    msg.add_alternative(html, subtype="html")
+    try:
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as s:
+            s.ehlo(); s.starttls(context=ctx); s.ehlo()
+            s.login(user, pwd); s.send_message(msg)
+        return "sent"
+    except Exception:
+        log.exception("Security alert email failed")
+        return "failed"

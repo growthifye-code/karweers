@@ -175,3 +175,10 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 ## Iteration 5.14 (Jun 2026) — Manual unlock control
 - POST /api/admin/login-attempts/unlock {ip, email} deletes the login_attempts record so a genuinely-stuck user can sign in immediately. Admin-only.
 - Login Security card: added an Action column with an "Unlock" (locked) / "Clear" button per row (testid unlock-login-N); on click it clears the lockout and refreshes the list with a toast. Verified via curl (cleared:true, list empties) + screenshot (click removed the row → empty state).
+
+## Iteration 5.15 (Jun 2026) — Site-wide attack detection & auto-mitigation
+- **SecurityGuard middleware** (backend, all /api traffic): detects & INSTANTLY blocks attacks — (1) malicious signatures in path/query (SQLi, path traversal, /.env, /wp-admin, XSS, etc.), (2) request floods (>100 req/10s per IP), (3) credential stuffing (1 IP failing across 3+ accounts or 15+ total fails, triggered from login). Offending IP is auto-banned (60 min) → all further requests get 403. Uses X-Forwarded-For for the real client IP (critical behind ingress). In-memory ban cache + Mongo persistence (blocked_ips), warmed on startup.
+- **Alerts**: every detection writes a security_alerts record (severity high/medium/info) + fires send_security_alert_email to BOOKING_ADMIN_EMAIL (INERT until GMAIL_APP_PASSWORD set). Login lockouts raise a medium alert too.
+- **Admin API**: GET /admin/security (active bans + recent alerts + unseen count), POST /admin/security/seen, POST /admin/security/unban {ip} (lifts ban + clears that IP's failed-login records = false-positive control).
+- **Admin UI** (Login Security card): toast on load for unseen alerts; "Auto-blocked IPs — attack stopped" list with Unblock buttons (testid blocked-ips, blocked-ip-N, unban-ip-N); "Recent security events" feed with severity dots (testid security-alerts). 
+- Verified via curl: SQLi & path-traversal probes → 403 + ban; banned IP blocked everywhere; clean IPs unaffected; unban restores access. Screenshot confirms UI + toast.

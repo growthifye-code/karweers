@@ -44,6 +44,10 @@ export default function AdminDashboard() {
   const [savingGoal, setSavingGoal] = useState(false);
   const [loginAttempts, setLoginAttempts] = useState(null);
   const [security, setSecurity] = useState(null);
+  const [vpnGuard, setVpnGuard] = useState(null);
+  const [allowlistText, setAllowlistText] = useState("");
+  const [tokenLabel, setTokenLabel] = useState("");
+  const [provisioned, setProvisioned] = useState(null);
 
   const [form, setForm] = useState({ title: "", category: "news", sector: SECTORS[0], summary: "", content: "", tags: "", image: DEFAULT_IMG, featured: false });
   const [aiTopic, setAiTopic] = useState("");
@@ -66,6 +70,7 @@ export default function AdminDashboard() {
         api.post("/admin/security/seen").catch(() => {});
       }
     }).catch(() => {});
+    api.get("/admin/vpn-guard").then((r) => { setVpnGuard(r.data); setAllowlistText((r.data.allowlist || []).join("\n")); }).catch(() => {});
   };
   useEffect(load, []);
 
@@ -169,6 +174,52 @@ export default function AdminDashboard() {
       setSecurity(r.data);
       toast.success(`Unblocked ${ip}.`);
     } catch { toast.error("Could not unblock IP."); }
+  };
+  const banIp = async (ip) => {
+    try {
+      await api.post("/admin/security/ban", { ip });
+      const r = await api.get("/admin/security"); setSecurity(r.data);
+      toast.success(`Blocked ${ip}.`);
+    } catch { toast.error("Could not block IP."); }
+  };
+  const banRange = async (subnet) => {
+    try {
+      await api.post("/admin/security/ban-range", { subnet });
+      const r = await api.get("/admin/security"); setSecurity(r.data);
+      toast.success(`Blocked range ${subnet}.`);
+    } catch { toast.error("Could not block range."); }
+  };
+  const toggleVpnGuard = async () => {
+    try {
+      const next = !vpnGuard?.enabled;
+      const { data } = await api.post("/admin/vpn-guard/toggle", { enabled: next });
+      setVpnGuard((g) => ({ ...g, enabled: data.enabled }));
+      toast.success(`VPN guard ${data.enabled ? "enabled" : "disabled"}.`);
+    } catch { toast.error("Could not update VPN guard."); }
+  };
+  const saveVpnAllowlist = async () => {
+    try {
+      const ips = allowlistText.split(/[\n,]/).map((s) => s.trim()).filter(Boolean);
+      const { data } = await api.post("/admin/vpn-guard/allowlist", { ips });
+      setVpnGuard((g) => ({ ...g, allowlist: data.ips }));
+      toast.success("Trusted IP allowlist saved.");
+    } catch { toast.error("Could not save allowlist."); }
+  };
+  const addVpnToken = async () => {
+    try {
+      const { data } = await api.post("/admin/vpn-guard/token", { label: tokenLabel || "Trusted token" });
+      setProvisioned(data);
+      setTokenLabel("");
+      const r = await api.get("/admin/vpn-guard"); setVpnGuard(r.data);
+      toast.success("Trusted token created — scan the QR now.");
+    } catch { toast.error("Could not create token."); }
+  };
+  const delVpnToken = async (id) => {
+    try {
+      await api.delete(`/admin/vpn-guard/token/${id}`);
+      const r = await api.get("/admin/vpn-guard"); setVpnGuard(r.data);
+      toast.success("Token removed.");
+    } catch { toast.error("Could not remove token."); }
   };
 
   const SOURCE_META = {
@@ -477,6 +528,55 @@ export default function AdminDashboard() {
                       </div>
                     </div>
                   )}
+                  {security && security.offenders && security.offenders.length > 0 && (
+                    <div className="mt-5" data-testid="top-offenders">
+                      <h4 className="text-sm font-bold">Top offenders — most persistent probes</h4>
+                      {security.countries && security.countries.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-2" data-testid="offender-countries">
+                          {security.countries.map((c) => (
+                            <span key={c.country} className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-1 text-xs">
+                              {c.country} <span className="font-semibold text-foreground">{c.count}</span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <div className="mt-3 overflow-x-auto">
+                        <table className="w-full text-left text-sm" data-testid="offenders-table">
+                          <thead>
+                            <tr className="border-b border-border text-xs uppercase tracking-wider text-muted-foreground">
+                              <th className="pb-2 pr-4 font-semibold">IP</th>
+                              <th className="pb-2 pr-4 font-semibold">Country</th>
+                              <th className="pb-2 pr-4 font-semibold">Network</th>
+                              <th className="pb-2 pr-4 font-semibold">Events</th>
+                              <th className="pb-2 font-semibold text-right">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {security.offenders.map((o, i) => (
+                              <tr key={o.ip} className="border-b border-border/50" data-testid={`offender-row-${i}`}>
+                                <td className="py-2.5 pr-4 font-mono text-xs">{o.ip}</td>
+                                <td className="py-2.5 pr-4">{o.country}</td>
+                                <td className="py-2.5 pr-4 font-mono text-xs text-muted-foreground">{o.subnet}</td>
+                                <td className="py-2.5 pr-4"><span className="font-semibold text-red-500">{o.count}</span></td>
+                                <td className="py-2.5">
+                                  <div className="flex items-center justify-end gap-2">
+                                    {o.banned ? (
+                                      <span className="rounded-full bg-red-500/15 px-2.5 py-1 text-xs font-semibold text-red-500">Blocked</span>
+                                    ) : (
+                                      <button onClick={() => banIp(o.ip)} data-testid={`block-ip-${i}`}
+                                        className="inline-flex items-center gap-1 rounded-full border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-secondary">Block IP</button>
+                                    )}
+                                    <button onClick={() => banRange(o.subnet)} data-testid={`block-range-${i}`}
+                                      className="inline-flex items-center gap-1 rounded-full border border-red-500/40 px-2.5 py-1.5 text-xs font-medium text-red-500 hover:bg-red-500/10">Block {o.subnet.split("/")[1] ? "/" + o.subnet.split("/")[1] : "range"}</button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
                   {loginAttempts.attempts.length > 0 ? (
                     <div className="mt-4 overflow-x-auto">
                       <table className="w-full text-left text-sm" data-testid="login-attempts-table">
@@ -517,6 +617,71 @@ export default function AdminDashboard() {
                     </div>
                   ) : (
                     <p className="mt-5 text-sm text-muted-foreground" data-testid="login-attempts-empty">No failed sign-in attempts recorded — all quiet.</p>
+                  )}
+                </div>
+              )}
+
+              {vpnGuard && (
+                <div className="mt-6 rounded-2xl border border-border bg-card p-6" data-testid="vpn-guard-card">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="flex items-center gap-2 font-display text-lg font-bold"><ShieldAlert className="h-4 w-4 text-[hsl(var(--primary))]" /> VPN / Proxy Guard</h3>
+                      <p className="text-sm text-muted-foreground">Block browsing &amp; login from VPNs/proxies unless allowlisted or verified by access code{!vpnGuard.provider_configured && " · detection key not set"}</p>
+                    </div>
+                    <button onClick={toggleVpnGuard} data-testid="vpn-guard-toggle"
+                      className={`relative h-7 w-12 rounded-full transition-colors ${vpnGuard.enabled ? "bg-[hsl(var(--primary))]" : "bg-secondary"}`}>
+                      <span className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-transform ${vpnGuard.enabled ? "translate-x-6" : "translate-x-1"}`} />
+                    </button>
+                  </div>
+                  <span className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${vpnGuard.enabled ? "bg-[hsl(var(--primary))]/15 text-[hsl(var(--primary))]" : "bg-secondary text-muted-foreground"}`} data-testid="vpn-guard-state">
+                    {vpnGuard.enabled ? "Active — VPN visitors are blocked" : "Off — no VPN blocking"}
+                  </span>
+
+                  <div className="mt-5 grid gap-6 lg:grid-cols-2">
+                    <div>
+                      <h4 className="text-sm font-bold">Trusted IP allowlist</h4>
+                      <p className="text-xs text-muted-foreground">One IP per line — these always get through.</p>
+                      <textarea value={allowlistText} onChange={(e) => setAllowlistText(e.target.value)}
+                        data-testid="vpn-allowlist-input" rows={4} placeholder="203.0.113.5&#10;198.51.100.10"
+                        className="mt-2 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-[hsl(var(--primary))]" />
+                      <button onClick={saveVpnAllowlist} data-testid="vpn-allowlist-save"
+                        className="mt-2 rounded-full bg-[hsl(var(--accent))] px-4 py-2 text-xs font-semibold text-[hsl(var(--accent-foreground))]">Save allowlist</button>
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold">Trusted access codes (TOTP)</h4>
+                      <p className="text-xs text-muted-foreground">Provision a rotating 6-digit code for a trusted user to bypass the VPN block.</p>
+                      <div className="mt-2 flex gap-2">
+                        <input value={tokenLabel} onChange={(e) => setTokenLabel(e.target.value)}
+                          data-testid="vpn-token-label" placeholder="e.g. Sudarshan's phone"
+                          className="flex-1 rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))]" />
+                        <button onClick={addVpnToken} data-testid="vpn-token-add"
+                          className="rounded-full bg-[hsl(var(--primary))] px-4 py-2 text-xs font-semibold text-[hsl(var(--primary-foreground))]">Create</button>
+                      </div>
+                      <div className="mt-3 space-y-2" data-testid="vpn-token-list">
+                        {(vpnGuard.tokens || []).map((t) => (
+                          <div key={t.id} className="flex items-center justify-between rounded-lg border border-border px-3 py-2 text-sm">
+                            <span>{t.label}</span>
+                            <button onClick={() => delVpnToken(t.id)} data-testid={`vpn-token-del-${t.id}`}
+                              className="text-xs text-red-500 hover:underline">Remove</button>
+                          </div>
+                        ))}
+                        {(vpnGuard.tokens || []).length === 0 && <p className="text-xs text-muted-foreground">No trusted codes yet.</p>}
+                      </div>
+                    </div>
+                  </div>
+
+                  {provisioned && (
+                    <div className="mt-5 rounded-xl border border-[hsl(var(--primary))]/40 bg-[hsl(var(--primary))]/5 p-4" data-testid="vpn-token-qr">
+                      <p className="text-sm font-semibold">Scan this in Google Authenticator / Authy — shown once</p>
+                      <div className="mt-3 flex flex-wrap items-center gap-4">
+                        <img src={provisioned.qr} alt="TOTP QR" className="h-40 w-40 rounded-lg bg-white p-2" />
+                        <div className="text-xs">
+                          <p className="text-muted-foreground">Manual key:</p>
+                          <code className="break-all font-mono text-foreground">{provisioned.secret}</code>
+                        </div>
+                      </div>
+                      <button onClick={() => setProvisioned(null)} className="mt-3 text-xs text-muted-foreground hover:text-foreground">Done — hide</button>
+                    </div>
                   )}
                 </div>
               )}

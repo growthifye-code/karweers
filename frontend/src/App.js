@@ -24,6 +24,7 @@ import ProtectedRoute from "@/components/ProtectedRoute";
 import AIChatWidget from "@/components/AIChatWidget";
 import ConsentBanner from "@/components/ConsentBanner";
 import PageTracker from "@/components/PageTracker";
+import VpnGate from "@/components/VpnGate";
 
 function AppRoutes() {
   const location = useLocation();
@@ -62,6 +63,7 @@ function App() {
         <BrowserRouter>
           <PageTracker />
           <AppRoutes />
+          <VpnGate />
           <AIChatWidget />
           <ConsentBanner />
           <Toaster position="top-center" richColors />

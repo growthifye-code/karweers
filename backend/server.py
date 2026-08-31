@@ -21,6 +21,7 @@ load_dotenv(ROOT_DIR / '.env')
 
 from auth import hash_password, verify_password, create_access_token, decode_token, get_jwt_secret
 import jwt as pyjwt
+import pyotp
 from seed_data import ARTICLES, SERVICES, STATS, MARKET_PULSE, TESTIMONIALS
 import curator
 from services_data import SERVICES as SERVICE_PAGES
@@ -328,6 +329,7 @@ MALICIOUS_PATTERNS = [
 
 _req_log = defaultdict(deque)    # ip -> deque[timestamps]
 _banned_ips = {}                 # ip -> banned_until epoch (in-memory cache)
+_banned_cidrs = {}               # cidr string -> banned_until epoch (range blocks)
 
 
 async def raise_security_alert(severity: str, atype: str, ip: str, reason: str, detail: str, email: str = ""):
@@ -343,12 +345,25 @@ async def raise_security_alert(severity: str, atype: str, ip: str, reason: str, 
 
 
 async def ban_ip(ip: str, reason: str, detail: str, minutes: int = BAN_MINUTES, severity: str = "high"):
+    await _apply_block(ip, "ip", reason, detail, minutes, severity)
+
+
+async def _apply_block(target: str, scope: str, reason: str, detail: str,
+                       minutes: int = BAN_MINUTES, severity: str = "high", alert: bool = True):
     until = datetime.now(timezone.utc) + timedelta(minutes=minutes)
-    _banned_ips[ip] = until.timestamp()
-    await db.blocked_ips.update_one({"ip": ip}, {"$set": {
-        "ip": ip, "reason": reason, "detail": detail,
+    if scope == "cidr":
+        _banned_cidrs[target] = until.timestamp()
+    else:
+        _banned_ips[target] = until.timestamp()
+    await db.blocked_ips.update_one({"ip": target}, {"$set": {
+        "ip": target, "scope": scope, "reason": reason, "detail": detail,
         "banned_until": until.isoformat(), "updated_at": now_iso()}}, upsert=True)
-    await raise_security_alert(severity, "ip_banned", ip, reason, detail)
+    if alert:
+        await raise_security_alert(severity, "cidr_banned" if scope == "cidr" else "ip_banned",
+                                   target, reason, detail)
+
+
+import ipaddress as _ipaddr
 
 
 async def is_ip_banned(ip: str) -> bool:
@@ -358,6 +373,20 @@ async def is_ip_banned(ip: str) -> bool:
         if exp > now:
             return True
         _banned_ips.pop(ip, None)
+    # Range (CIDR) blocks — stop a whole attacking network.
+    try:
+        addr = _ipaddr.ip_address(ip)
+        for cidr, until in list(_banned_cidrs.items()):
+            if until <= now:
+                _banned_cidrs.pop(cidr, None)
+                continue
+            try:
+                if addr in _ipaddr.ip_network(cidr, strict=False):
+                    return True
+            except Exception:
+                continue
+    except Exception:
+        pass
     doc = await db.blocked_ips.find_one({"ip": ip})
     if not doc:
         return False
@@ -371,6 +400,134 @@ async def is_ip_banned(ip: str) -> bool:
         _banned_ips[ip] = t.timestamp()
         return True
     return False
+
+
+async def lookup_country(ip: str):
+    """Best-effort country for an offender IP, cached in Mongo. Returns (country, code)."""
+    doc = await db.ip_geo.find_one({"ip": ip})
+    if doc:
+        return doc.get("country", "Unknown"), doc.get("cc", "")
+    country, cc = "Unknown", ""
+    try:
+        r = await asyncio.to_thread(
+            requests.get, f"http://ip-api.com/json/{ip}?fields=status,country,countryCode", timeout=4)
+        j = r.json()
+        if j.get("status") == "success":
+            country, cc = j.get("country", "Unknown"), j.get("countryCode", "")
+    except Exception:
+        pass
+    await db.ip_geo.update_one({"ip": ip}, {"$set": {"ip": ip, "country": country, "cc": cc}}, upsert=True)
+    return country, cc
+
+
+def _subnet24(ip: str) -> str:
+    try:
+        a = _ipaddr.ip_address(ip)
+        if a.version == 4:
+            return ".".join(ip.split(".")[:3]) + ".0/24"
+        return str(_ipaddr.ip_network(ip + "/64", strict=False))
+    except Exception:
+        return ""
+
+
+# ---------------- VPN / proxy guard + TOTP trusted-token bypass ----------------
+VPNAPI_KEY = os.environ.get("VPNAPI_KEY", "")
+IPQS_API_KEY = os.environ.get("IPQS_API_KEY", "")
+VPN_TOTP_TTL_HOURS = 12
+
+
+async def vpn_guard_enabled() -> bool:
+    doc = await db.app_meta.find_one({"_id": "vpn_guard"})
+    return bool(doc and doc.get("enabled"))
+
+
+async def vpn_allowlist() -> list:
+    doc = await db.app_meta.find_one({"_id": "vpn_allowlist"})
+    return (doc or {}).get("ips", [])
+
+
+async def detect_vpn(ip: str) -> dict:
+    """Cached VPN/proxy/Tor detection via vpnapi.io (fail-open on error)."""
+    now = datetime.now(timezone.utc)
+    hit = await db.ip_risk_cache.find_one({"_id": ip})
+    if hit:
+        try:
+            exp = datetime.fromisoformat(hit["expireAt"])
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            if exp > now:
+                return {"vpn": hit.get("vpn", False), "proxy": hit.get("proxy", False),
+                        "tor": hit.get("tor", False), "provider": hit.get("provider", "cache"),
+                        "flagged": hit.get("flagged", False)}
+        except Exception:
+            pass
+    vpn = proxy = tor = False
+    provider = "none"
+    if VPNAPI_KEY:
+        try:
+            r = await asyncio.to_thread(requests.get, f"https://vpnapi.io/api/{ip}",
+                                        params={"key": VPNAPI_KEY}, timeout=5)
+            s = r.json().get("security", {})
+            vpn, proxy, tor = bool(s.get("vpn")), bool(s.get("proxy")), bool(s.get("tor"))
+            provider = "vpnapi.io"
+        except Exception:
+            provider = "error"
+    if provider != "vpnapi.io" and IPQS_API_KEY:
+        try:
+            r = await asyncio.to_thread(
+                requests.get, f"https://www.ipqualityscore.com/api/json/ip/{IPQS_API_KEY}/{ip}",
+                params={"strictness": 0, "allow_public_access_points": "true"}, timeout=5)
+            j = r.json()
+            if j.get("success"):
+                vpn, proxy, tor = bool(j.get("vpn")), bool(j.get("proxy")), bool(j.get("tor"))
+                provider = "ipqualityscore"
+        except Exception:
+            pass
+    flagged = vpn or proxy or tor
+    ttl = timedelta(minutes=2) if provider in ("error", "none") else timedelta(hours=24)
+    await db.ip_risk_cache.update_one({"_id": ip}, {"$set": {
+        "_id": ip, "vpn": vpn, "proxy": proxy, "tor": tor, "provider": provider,
+        "flagged": flagged, "expireAt": (now + ttl).isoformat()}}, upsert=True)
+    return {"vpn": vpn, "proxy": proxy, "tor": tor, "provider": provider, "flagged": flagged}
+
+
+def _issue_vpn_totp_cookie() -> str:
+    return pyjwt.encode({"purpose": "vpn_totp",
+                         "exp": datetime.now(timezone.utc) + timedelta(hours=VPN_TOTP_TTL_HOURS)},
+                        get_jwt_secret(), algorithm="HS256")
+
+
+def _verify_vpn_totp_cookie(token) -> bool:
+    if not token:
+        return False
+    try:
+        return pyjwt.decode(token, get_jwt_secret(), algorithms=["HS256"]).get("purpose") == "vpn_totp"
+    except Exception:
+        return False
+
+
+async def _totp_matches(code: str) -> bool:
+    code = (code or "").strip()
+    if not (code.isdigit() and len(code) == 6):
+        return False
+    async for t in db.trusted_totp.find({"enabled": True}):
+        try:
+            if pyotp.TOTP(t["secret"]).verify(code, valid_window=1):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+async def vpn_should_block(request: Request) -> bool:
+    if not await vpn_guard_enabled():
+        return False
+    ip = _client_ip(request)
+    if ip in await vpn_allowlist():
+        return False
+    if _verify_vpn_totp_cookie(request.cookies.get("vpn_totp")):
+        return False
+    return (await detect_vpn(ip))["flagged"]
 
 
 @api_router.post("/auth/login")
@@ -771,7 +928,84 @@ async def admin_security(admin: dict = Depends(require_admin)):
                 break
 
     return {"banned": banned, "active_bans": sum(1 for b in banned if b["active"]),
-            "alerts": alerts, "unseen": unseen, "trend": days}
+            "alerts": alerts, "unseen": unseen, "trend": days,
+            "offenders": await _top_offenders(), "networks": _last_networks,
+            "countries": _last_countries}
+
+
+_last_networks = []
+_last_countries = []
+
+
+async def _top_offenders():
+    """Rank the IPs probing us most, with best-effort country + /24 network grouping."""
+    global _last_networks, _last_countries
+    events = await db.security_alerts.find(
+        {"severity": {"$in": ["high", "medium"]}},
+        {"_id": 0, "ip": 1, "reason": 1, "created_at": 1}).to_list(5000)
+    by_ip = {}
+    for e in events:
+        ip = e.get("ip") or "unknown"
+        if ip == "unknown":
+            continue
+        d = by_ip.setdefault(ip, {"ip": ip, "count": 0, "last": "", "reasons": set()})
+        d["count"] += 1
+        if (e.get("created_at") or "") > d["last"]:
+            d["last"] = e.get("created_at")
+        if e.get("reason"):
+            d["reasons"].add(e["reason"])
+    offenders = sorted(by_ip.values(), key=lambda x: x["count"], reverse=True)[:10]
+    net_counts, country_counts = {}, {}
+    out = []
+    for o in offenders:
+        country, cc = await lookup_country(o["ip"])
+        subnet = _subnet24(o["ip"])
+        net_counts[subnet] = net_counts.get(subnet, 0) + o["count"]
+        country_counts[country] = country_counts.get(country, 0) + o["count"]
+        out.append({
+            "ip": o["ip"], "count": o["count"], "last": o["last"],
+            "reasons": sorted(o["reasons"]), "country": country, "cc": cc, "subnet": subnet,
+            "banned": await is_ip_banned(o["ip"]),
+        })
+    _last_networks = sorted(
+        [{"subnet": s, "count": c, "banned": s in _banned_cidrs} for s, c in net_counts.items() if s],
+        key=lambda x: x["count"], reverse=True)[:6]
+    _last_countries = sorted(
+        [{"country": c, "count": n} for c, n in country_counts.items()],
+        key=lambda x: x["count"], reverse=True)[:6]
+    return out
+
+
+class BanIn(BaseModel):
+    ip: str
+
+
+@api_router.post("/admin/security/ban")
+async def admin_security_ban(body: BanIn, admin: dict = Depends(require_admin)):
+    """Immediately block a single offending IP."""
+    await _apply_block(body.ip, "ip", "Blocked by admin", "Manual block", severity="high", alert=False)
+    await raise_security_alert("high", "ip_banned", body.ip, "Blocked by admin", "Manual block")
+    return {"banned": True}
+
+
+class CidrIn(BaseModel):
+    subnet: str
+
+
+@api_router.post("/admin/security/ban-range")
+async def admin_security_ban_range(body: CidrIn, admin: dict = Depends(require_admin)):
+    """Block a whole /24 (or CIDR) range where an attack emerges from."""
+    try:
+        _ipaddr.ip_network(body.subnet, strict=False)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid IP range / CIDR")
+    await _apply_block(body.subnet, "cidr", "Range blocked by admin",
+                       f"Network {body.subnet}", severity="high", alert=False)
+    await raise_security_alert("high", "cidr_banned", body.subnet, "Range blocked by admin", f"Network {body.subnet}")
+    return {"banned": True}
+
+
+
 
 
 @api_router.post("/admin/security/seen")
@@ -786,12 +1020,93 @@ class UnbanIn(BaseModel):
 
 @api_router.post("/admin/security/unban")
 async def admin_security_unban(body: UnbanIn, admin: dict = Depends(require_admin)):
-    """Lift an automatic IP ban (false positive) and clear its failed-login records."""
+    """Lift an IP or range ban (false positive) and clear related failed-login records."""
     _banned_ips.pop(body.ip, None)
+    _banned_cidrs.pop(body.ip, None)
     await db.blocked_ips.delete_one({"ip": body.ip})
     await db.login_attempts.delete_many({"ip": body.ip})
     await raise_security_alert("info", "ip_unbanned", body.ip, "Ban lifted by admin", "Manual override")
     return {"unbanned": True}
+
+
+class VpnVerifyIn(BaseModel):
+    code: str = ""
+
+
+@api_router.get("/vpn/status")
+async def vpn_status(request: Request):
+    if not await vpn_guard_enabled():
+        return {"blocked": False, "enabled": False}
+    ip = _client_ip(request)
+    if ip in await vpn_allowlist():
+        return {"blocked": False, "enabled": True, "reason": "allowlist"}
+    if _verify_vpn_totp_cookie(request.cookies.get("vpn_totp")):
+        return {"blocked": False, "enabled": True, "reason": "verified"}
+    d = await detect_vpn(ip)
+    return {"blocked": d["flagged"], "enabled": True, "ip": ip, "detection": d}
+
+
+@api_router.post("/vpn/verify")
+async def vpn_verify(body: VpnVerifyIn, response: Response):
+    if not await _totp_matches(body.code):
+        raise HTTPException(status_code=401, detail="Invalid or expired access code.")
+    response.set_cookie("vpn_totp", _issue_vpn_totp_cookie(), httponly=True, secure=True,
+                        samesite="none", path="/", max_age=VPN_TOTP_TTL_HOURS * 3600)
+    return {"verified": True}
+
+
+class VpnToggleIn(BaseModel):
+    enabled: bool = False
+
+
+class VpnAllowlistIn(BaseModel):
+    ips: List[str] = []
+
+
+class VpnTokenIn(BaseModel):
+    label: str = ""
+
+
+@api_router.get("/admin/vpn-guard")
+async def admin_vpn_guard_get(admin: dict = Depends(require_admin)):
+    tokens = await db.trusted_totp.find({}, {"_id": 0, "id": 1, "label": 1, "enabled": 1, "created_at": 1}).to_list(100)
+    return {"enabled": await vpn_guard_enabled(), "allowlist": await vpn_allowlist(),
+            "tokens": tokens, "provider_configured": bool(VPNAPI_KEY or IPQS_API_KEY)}
+
+
+@api_router.post("/admin/vpn-guard/toggle")
+async def admin_vpn_guard_toggle(body: VpnToggleIn, admin: dict = Depends(require_admin)):
+    await db.app_meta.update_one({"_id": "vpn_guard"}, {"$set": {"enabled": bool(body.enabled)}}, upsert=True)
+    return {"enabled": bool(body.enabled)}
+
+
+@api_router.post("/admin/vpn-guard/allowlist")
+async def admin_vpn_guard_allowlist(body: VpnAllowlistIn, admin: dict = Depends(require_admin)):
+    ips = [i.strip() for i in body.ips if i.strip()]
+    await db.app_meta.update_one({"_id": "vpn_allowlist"}, {"$set": {"ips": ips}}, upsert=True)
+    return {"ips": ips}
+
+
+@api_router.post("/admin/vpn-guard/token")
+async def admin_vpn_guard_token(body: VpnTokenIn, admin: dict = Depends(require_admin)):
+    secret = pyotp.random_base32()
+    tid = str(uuid.uuid4())
+    label = body.label or "Trusted token"
+    await db.trusted_totp.insert_one({"id": tid, "label": label, "secret": secret,
+                                      "enabled": True, "created_at": now_iso()})
+    uri = pyotp.TOTP(secret).provisioning_uri(name=label, issuer_name="Sudarshan Karweer")
+    import io as _io, base64 as _b64, qrcode as _qr
+    img = _qr.make(uri)
+    buf = _io.BytesIO()
+    img.save(buf, format="PNG")
+    qr = "data:image/png;base64," + _b64.b64encode(buf.getvalue()).decode()
+    return {"id": tid, "label": label, "otpauth_uri": uri, "qr": qr, "secret": secret}
+
+
+@api_router.delete("/admin/vpn-guard/token/{tid}")
+async def admin_vpn_guard_token_del(tid: str, admin: dict = Depends(require_admin)):
+    await db.trusted_totp.delete_one({"id": tid})
+    return {"deleted": True}
 
 
 @api_router.get("/admin/lead-analytics")
@@ -1566,6 +1881,21 @@ async def security_guard(request: Request, call_next):
         await ban_ip(ip, "Request flood", f"{len(dq)} requests in {RATE_WINDOW_SEC}s")
         return _blocked(429, "Too many requests — temporarily blocked.")
 
+    # 4) VPN / proxy guard — block browsing & login unless allowlisted or TOTP-verified.
+    if not path.startswith("/api/vpn/"):
+        try:
+            if await vpn_should_block(request):
+                headers = {}
+                origin = request.headers.get("origin")
+                if origin:
+                    headers["Access-Control-Allow-Origin"] = origin
+                    headers["Access-Control-Allow-Credentials"] = "true"
+                return JSONResponse(status_code=403, headers=headers, content={
+                    "detail": "You appear to be connecting over a VPN or proxy. Disable it or verify with your access code to continue.",
+                    "vpn_block": True})
+        except Exception:
+            pass
+
     return await call_next(request)
 
 
@@ -1584,13 +1914,16 @@ async def startup():
     await db.articles.create_index("slug", unique=True)
     # Warm the in-memory ban cache with any still-active bans.
     now = datetime.now(timezone.utc)
-    async for b in db.blocked_ips.find({}, {"_id": 0, "ip": 1, "banned_until": 1}):
+    async for b in db.blocked_ips.find({}, {"_id": 0, "ip": 1, "banned_until": 1, "scope": 1}):
         try:
             t = datetime.fromisoformat(b.get("banned_until"))
             if t.tzinfo is None:
                 t = t.replace(tzinfo=timezone.utc)
             if t > now:
-                _banned_ips[b["ip"]] = t.timestamp()
+                if b.get("scope") == "cidr":
+                    _banned_cidrs[b["ip"]] = t.timestamp()
+                else:
+                    _banned_ips[b["ip"]] = t.timestamp()
         except Exception:
             continue
     # Seed admin

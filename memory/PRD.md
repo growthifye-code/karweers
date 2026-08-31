@@ -185,3 +185,9 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 
 ## Iteration 5.16 (Jun 2026) — Threat trends chart
 - GET /admin/security now returns a 14-day `trend` (per-day counts of high/critical + medium/lockout blocked events). Login Security card renders a small stacked recharts bar chart "Blocked attacks — last 14 days" (testid threat-trend; red=Critical, amber=Lockouts) so admins can see when the site is being probed. Verified via seeded data + screenshot.
+
+## Iteration 5.17 (Jun 2026) — VPN/Proxy block + RSA-style TOTP bypass
+- **VPN/Proxy Guard** (admin toggle, OFF by default): SecurityGuard middleware blocks ALL /api (browsing + login) for VPN/proxy/Tor IPs via vpnapi.io (cached 24h in ip_risk_cache; IPQS fallback if IPQS_API_KEY set; fail-open on provider error). Bypass if IP ∈ admin trusted allowlist OR valid `vpn_totp` cookie. /api/vpn/* exempt so the gate works.
+- **TOTP trusted-token bypass** (pyotp, RSA SecurID-style): admin provisions named 6-digit rotating codes (QR + manual key, shown once) from the VPN Guard card; visitor enters code on a full-screen VpnGate (POST /api/vpn/verify) → signed 12h httpOnly `vpn_totp` cookie.
+- **Admin UI** (Overview → VPN/Proxy Guard card): master toggle, trusted-IP allowlist editor, token create/list/remove + QR. **Frontend** VpnGate.jsx overlay gates the whole site when /api/vpn/status returns blocked.
+- Keys: VPNAPI_KEY in .env (IPQS empty). Verified via curl: guard on → flagged VPN IP (45.83.91.1) blocked on content + login (403 vpn_block); clean IP 8.8.8.8 allowed; allowlist bypass 200; TOTP verify sets cookie (wrong code 401); toggle off restores. Admin UI + QR + gate verified via screenshot. Guard left OFF; test data cleaned.

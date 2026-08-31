@@ -1082,6 +1082,31 @@ async def admin_consent_export(admin: dict = Depends(require_admin)):
                     headers={"Content-Disposition": "attachment; filename=consent-log.csv"})
 
 
+class PolicyVersionIn(BaseModel):
+    version: str
+
+
+@api_router.get("/admin/policy-version")
+async def admin_get_policy_version(admin: dict = Depends(require_admin)):
+    total = await db.users.count_documents({})
+    current = await db.users.count_documents({"consent.agreed": True, "consent.version": CONSENT_POLICY_VERSION})
+    return {"version": CONSENT_POLICY_VERSION, "users_total": total, "users_on_current": current}
+
+
+@api_router.post("/admin/policy-version")
+async def admin_set_policy_version(body: PolicyVersionIn, request: Request, admin: dict = Depends(require_admin)):
+    """Bump the Terms/Privacy version — every client is prompted to re-agree on their next visit."""
+    global CONSENT_POLICY_VERSION
+    v = (body.version or "").strip()
+    if not v:
+        raise HTTPException(status_code=400, detail="Version cannot be empty.")
+    CONSENT_POLICY_VERSION = v
+    await db.app_meta.update_one({"_id": "policy"}, {"$set": {"version": v, "updated_at": now_iso()}}, upsert=True)
+    await audit(request, admin.get("email"), "policy_version_bumped", v)
+    return {"version": v}
+
+
+
 @api_router.post("/admin/signals-digest/run")
 async def admin_run_signals_digest(admin: dict = Depends(require_admin)):
     """Send the weekly Market Signals digest to subscribers now."""
@@ -3538,6 +3563,11 @@ async def startup():
             d.update({"id": str(uuid.uuid4()), "author": "Sudarshan Karweer", "created_at": now_iso()})
             await db.articles.insert_one(d)
     logger.info("Articles ensured")
+    # Load any admin-set Terms/Privacy policy version override.
+    global CONSENT_POLICY_VERSION
+    _pol = await db.app_meta.find_one({"_id": "policy"})
+    if _pol and _pol.get("version"):
+        CONSENT_POLICY_VERSION = _pol["version"]
     # Backfill today's Signals Archive from the current cached content (if any).
     _hc = await db.app_meta.find_one({"_id": "home_content"})
     if _hc and _hc.get("generated_at"):

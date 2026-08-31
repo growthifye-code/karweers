@@ -90,7 +90,7 @@ export default function SignalsArchivePage() {
         description={date
           ? (single?.insights?.[0] || "A daily read on the energy transition, capital and strategy from Sudarshan Karweer.")
           : "Browse past daily Market Signals: sharp, timely reads on the energy transition, storage, green hydrogen, climate finance and strategy."}
-        image="https://www.sudarshankarweer.com/og-signals.png"
+        image={date ? `https://www.sudarshankarweer.com/api/signals/og/${date}.png` : "https://www.sudarshankarweer.com/og-signals.png"}
         type={date ? "article" : "website"}
         path={date ? `/signals/${date}` : "/signals"} />
       <Navbar />

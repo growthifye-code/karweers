@@ -59,6 +59,8 @@ export default function AdminDashboard() {
   const [reminderSel, setReminderSel] = useState("24");
   const [cancelWin, setCancelWin] = useState("24");
   const [consentLogs, setConsentLogs] = useState(null);
+  const [policyInfo, setPolicyInfo] = useState(null);
+  const [newVersion, setNewVersion] = useState("");
   const [regenBusy, setRegenBusy] = useState(false);
 
   const [form, setForm] = useState({ title: "", category: "news", sector: SECTORS[0], summary: "", content: "", tags: "", image: DEFAULT_IMG, featured: false });
@@ -87,8 +89,23 @@ export default function AdminDashboard() {
     api.get("/admin/bookings").then((r) => setBookings(r.data)).catch(() => {});
     api.get("/admin/calendar/status").then((r) => setCalStatus(r.data)).catch(() => {});
     api.get("/admin/consent-logs").then((r) => setConsentLogs(r.data)).catch(() => {});
+    api.get("/admin/policy-version").then((r) => { setPolicyInfo(r.data); setNewVersion(r.data.version || ""); }).catch(() => {});
   };
   useEffect(load, []);
+
+  const bumpPolicy = async () => {
+    const v = (newVersion || "").trim();
+    if (!v) { toast.error("Enter a version."); return; }
+    if (!window.confirm(`Set policy version to "${v}"? Every client will be asked to re-agree on their next visit.`)) return;
+    try {
+      await api.post("/admin/policy-version", { version: v });
+      const r = await api.get("/admin/policy-version");
+      setPolicyInfo(r.data);
+      toast.success(`Policy version set to ${v}. Clients will re-agree on next visit.`);
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Could not update policy version.");
+    }
+  };
 
   const regenerateHome = async () => {
     setRegenBusy(true);
@@ -1235,6 +1252,23 @@ export default function AdminDashboard() {
                 className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2.5 text-sm font-medium hover:bg-secondary">
                 <FileText className="h-4 w-4" /> Export CSV
               </button>
+            </div>
+            <div className="flex flex-wrap items-end justify-between gap-4 rounded-2xl border border-border bg-card p-5" data-testid="policy-version-card">
+              <div>
+                <p className="flex items-center gap-2 font-display text-base font-bold"><ShieldAlert className="h-4 w-4 text-[hsl(var(--primary))]" /> Policy version control</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Bumping the version prompts every client to re-read &amp; re-agree on their next visit.
+                  {policyInfo && <> Currently <span className="font-semibold text-foreground">{policyInfo.users_on_current}</span> of <span className="font-semibold text-foreground">{policyInfo.users_total}</span> users are on version <span className="font-semibold text-foreground">{policyInfo.version}</span>.</>}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <input value={newVersion} onChange={(e) => setNewVersion(e.target.value)} data-testid="policy-version-input"
+                  placeholder="e.g. 2026-07-01" className="w-40 rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))]" />
+                <button onClick={bumpPolicy} data-testid="policy-version-save"
+                  className="inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-5 py-2.5 text-sm font-semibold text-[hsl(var(--primary-foreground))] transition-transform hover:-translate-y-0.5">
+                  Update &amp; prompt everyone
+                </button>
+              </div>
             </div>
             <div className="overflow-x-auto rounded-2xl border border-border">
               <table className="w-full text-left text-sm">

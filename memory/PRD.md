@@ -155,3 +155,6 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - **Revenue Goal card** (Admin Overview): current-month revenue vs a monthly target with progress bar + inline editor. Backend GET /admin/lead-analytics returns `revenue_goal`, `month_revenue`, `month_label`; POST /admin/revenue-goal {target} persists to app_meta (_id revenue_goal). testids revenue-goal-card, edit-revenue-goal, revenue-goal-input, save-revenue-goal, revenue-goal-bar.
 - **Best Package card** (Admin Overview): ranked revenue breakdown by consultation package (Discovery/Strategy/Deep Dive/Custom) from `packages` in analytics (sums paid lead `amount` grouped by `package`). testids best-package-card, best-package-list, package-row-N.
 - Verified: backend via curl (goal set → 5000, month_revenue 898, packages ranked); frontend via screenshot (both cards render on Overview).
+
+## Iteration 5.10 (Jun 2026) — Revenue Goal pace badge
+- Revenue Goal card shows a pace badge: "On track" / "Goal reached" (lime, up-trend) vs "Behind pace" (amber, down-trend), computed client-side from day-of-month vs monthly target (expected = goal × dayOfMonth / daysInMonth). Shows "pace target today $X" when behind. testid revenue-goal-pace. Verified via screenshot.

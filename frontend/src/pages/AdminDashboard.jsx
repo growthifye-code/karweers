@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useAuth, formatApiErrorDetail } from "@/context/AuthContext";
 import { Logo } from "@/components/Navbar";
 import ThemeToggle from "@/components/ThemeToggle";
-import { Users, FileText, Inbox, Sparkles, Trash2, Wand2, Mail, LifeBuoy, UserCircle, ChevronDown, Tag, AlertTriangle, Star, Target, Package, Pencil } from "lucide-react";
+import { Users, FileText, Inbox, Sparkles, Trash2, Wand2, Mail, LifeBuoy, UserCircle, ChevronDown, Tag, AlertTriangle, Star, Target, Package, Pencil, TrendingUp, TrendingDown } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from "recharts";
 import api from "@/lib/api";
 
@@ -302,6 +302,33 @@ export default function AdminDashboard() {
                     </div>
                   ) : analytics.revenue_goal > 0 ? (
                     <div className="mt-5" data-testid="revenue-goal-progress">
+                      {(() => {
+                        const rev = analytics.month_revenue || 0;
+                        const goal = analytics.revenue_goal;
+                        const now = new Date();
+                        const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+                        const expected = goal * (now.getDate() / daysInMonth);
+                        const reached = rev >= goal;
+                        const onTrack = rev >= expected;
+                        const badge = reached
+                          ? { cls: "bg-[hsl(var(--primary))]/15 text-[hsl(var(--primary))]", label: "Goal reached" }
+                          : onTrack
+                            ? { cls: "bg-[hsl(var(--primary))]/15 text-[hsl(var(--primary))]", label: "On track" }
+                            : { cls: "bg-amber-500/15 text-amber-500", label: "Behind pace" };
+                        return (
+                          <div className="mb-3 flex items-center gap-2" data-testid="revenue-goal-pace">
+                            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${badge.cls}`}>
+                              {reached || onTrack ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
+                              {badge.label}
+                            </span>
+                            {!reached && (
+                              <span className="text-xs text-muted-foreground">
+                                pace target today ${Math.round(expected).toLocaleString()}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
                       <div className="flex items-end justify-between">
                         <span className="font-display text-3xl font-black text-[hsl(var(--primary))]">${(analytics.month_revenue || 0).toLocaleString()}</span>
                         <span className="text-sm text-muted-foreground">of ${analytics.revenue_goal.toLocaleString()}</span>

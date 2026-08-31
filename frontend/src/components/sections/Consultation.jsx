@@ -162,11 +162,10 @@ export default function Consultation({ testimonials = [] }) {
                   {active && <span className="grid h-6 w-6 place-items-center rounded-full bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]"><Check className="h-3.5 w-3.5" /></span>}
                 </div>
                 <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{p.duration}</p>
-                <p className="mt-4 flex items-baseline gap-2">
-                  <span className="text-xs font-medium text-muted-foreground">from</span>
-                  <span className="font-display text-4xl font-extrabold text-[hsl(var(--primary))]">${p.amount}</span>
+                <p className="mt-4 flex items-baseline gap-1.5">
+                  <span className="font-display text-4xl font-extrabold text-[hsl(var(--primary))]">{inr(p.total)}</span>
                 </p>
-                <p className="text-[11px] text-muted-foreground">Indicative — final fee shared on confirmation</p>
+                <p className="text-[11px] text-muted-foreground">incl. {p.gst_pct}% GST · paid securely via Razorpay</p>
                 <ul className="mt-4 space-y-2 text-sm text-muted-foreground">
                   {p.features.map((f) => (
                     <li key={f} className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 flex-shrink-0 text-[hsl(var(--primary))]" /> {f}</li>
@@ -197,7 +196,7 @@ export default function Consultation({ testimonials = [] }) {
 
           <form onSubmit={submit} className="rounded-2xl bg-card p-8 text-foreground" data-testid="consult-form">
             <h3 className="font-display text-xl font-bold">{selected ? `Request: ${selectedPkg?.name}` : "Send a general enquiry"}</h3>
-            {selected && <p className="mt-1 text-sm text-muted-foreground">Choose an available slot below. Your booking will be <strong>pending confirmation</strong> until Sudarshan's team confirms it.</p>}
+            {selected && <p className="mt-1 text-sm text-muted-foreground">Pick a slot, then pay securely via Razorpay to reserve it. Your booking is <strong>confirmed only after payment</strong>; if we can't accommodate it, you're refunded in full to your original payment method.</p>}
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
               <input value={form.name} onChange={set("name")} data-testid="consult-name" placeholder="Full name *" className="rounded-lg border border-border bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]" />
               <input value={form.email} onChange={set("email")} data-testid="consult-email" type="email" placeholder="Email *" className="rounded-lg border border-border bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]" />
@@ -261,7 +260,7 @@ export default function Consultation({ testimonials = [] }) {
             <textarea value={form.message} onChange={set("message")} data-testid="consult-message" placeholder={selected ? "Anything to share before the session (optional)" : "Tell me about your business and what you'd like to achieve *"} rows={4} className="mt-4 w-full rounded-lg border border-border bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]" />
             <div className="mt-4"><Captcha onVerify={setCaptcha} onExpire={() => setCaptcha("")} /></div>
             <button type="submit" disabled={busy} data-testid="consult-submit" className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-[hsl(var(--accent))] px-6 py-3.5 font-semibold text-[hsl(var(--accent-foreground))] transition-transform hover:-translate-y-0.5 disabled:opacity-60">
-              {busy ? "Please wait…" : selected ? <>Request this session <ArrowUpRight className="h-4 w-4" /></> : "Send Enquiry"}
+              {busy ? "Please wait…" : selected ? <>Pay {selectedPkg ? inr(selectedPkg.total) : ""} & book <ArrowUpRight className="h-4 w-4" /></> : "Send Enquiry"}
             </button>
           </form>
         </div>

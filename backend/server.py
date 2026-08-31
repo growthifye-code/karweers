@@ -86,7 +86,7 @@ def verify_captcha(token, ip=None):
 CAPTCHA_GATE_TTL = 600  # 10 minutes
 
 # ---------------- Legal consent (T&C + Privacy) ----------------
-CONSENT_POLICY_VERSION = os.environ.get("CONSENT_POLICY_VERSION", "2026-06-01")
+CONSENT_POLICY_VERSION = os.environ.get("CONSENT_POLICY_VERSION", "2026-06-02")
 
 
 async def record_consent(request: Request, email: str, name: str, action: str, user_id: str = ""):
@@ -2623,23 +2623,23 @@ async def newsletter_resubscribe(token: str = ""):
 
 
 # ---------------- Consultation packages, availability & booking ----------------
-# Base prices in INR (exclusive of GST). GST added on top at checkout.
+# GST-inclusive prices in INR (the total the client is charged). Base + GST are derived from this.
 GST_PCT = 18
 PACKAGES = {
-    "discovery": {"name": "Discovery Call", "amount": 9999.0, "minutes": 30, "duration": "30 minutes",
+    "discovery": {"name": "Discovery Call", "total": 12000.0, "minutes": 30, "duration": "30 minutes",
                   "features": ["Focused problem framing", "Direct next-step guidance", "Ideal first touchpoint"]},
-    "strategy": {"name": "1:1 Strategy Session", "amount": 99999.0, "minutes": 60, "duration": "60 minutes",
+    "strategy": {"name": "1:1 Strategy Session", "total": 50000.0, "minutes": 60, "duration": "60 minutes",
                  "features": ["Deep strategy & fundraising review", "Actionable roadmap", "Follow-up notes"]},
-    "deepdive": {"name": "Deep-Dive Advisory", "amount": 999999.0, "minutes": 90, "duration": "90 minutes",
+    "deepdive": {"name": "Deep-Dive Advisory", "total": 120000.0, "minutes": 90, "duration": "90 minutes",
                  "features": ["Full business / deal deep-dive", "Bankability & scaling plan", "Priority follow-up access"]},
 }
 
 
 def _pkg_amounts(pkg: dict) -> dict:
-    base = float(pkg["amount"])
-    gst = round(base * GST_PCT / 100, 2)
-    total = round(base + gst, 2)
-    return {"base": base, "gst_pct": GST_PCT, "gst_amount": gst, "total": total,
+    total = float(pkg["total"])
+    base = round(total / (1 + GST_PCT / 100), 2)
+    gst = round(total - base, 2)
+    return {"base": base, "gst_pct": GST_PCT, "gst_amount": gst, "total": round(total, 2),
             "amount_paise": int(round(total * 100)), "currency": "INR"}
 
 

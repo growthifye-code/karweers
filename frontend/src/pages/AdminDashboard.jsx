@@ -1146,6 +1146,34 @@ export default function AdminDashboard() {
                   : <button onClick={connectCalendar} data-testid="calendar-connect" className="inline-flex items-center gap-1.5 rounded-full bg-[hsl(var(--primary))] px-4 py-2 text-xs font-semibold text-[hsl(var(--primary-foreground))]"><CalendarCheck className="h-4 w-4" /> Connect Google Calendar</button>)}
               </div>
             )}
+            {(() => {
+              const now = new Date();
+              const in48 = new Date(now.getTime() + 48 * 3600 * 1000);
+              const agenda = bookings
+                .filter((b) => b.status === "confirmed" && b.slot_date && b.slot_time)
+                .map((b) => ({ ...b, dt: new Date(`${b.slot_date}T${b.slot_time}:00+05:30`) }))
+                .filter((b) => b.dt >= now && b.dt <= in48)
+                .sort((a, b) => a.dt - b.dt);
+              return (
+                <div className="mb-4 rounded-2xl border border-border bg-card p-4" data-testid="today-agenda">
+                  <p className="flex items-center gap-2 text-sm font-semibold"><CalendarCheck className="h-4 w-4 text-[hsl(var(--primary))]" /> Next 24–48 hours <span className="text-xs font-normal text-muted-foreground">· upcoming confirmed sessions</span></p>
+                  {agenda.length === 0 ? (
+                    <p className="mt-2 text-xs text-muted-foreground" data-testid="agenda-empty">No confirmed sessions in the next 48 hours.</p>
+                  ) : (
+                    <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
+                      {agenda.map((b) => (
+                        <div key={b.id} data-testid={`agenda-${b.id}`} className="min-w-[210px] rounded-xl border border-[hsl(var(--primary))]/30 bg-[hsl(var(--primary))]/5 p-3">
+                          <p className="text-xs font-semibold text-[hsl(var(--primary))]">{b.dt.toLocaleString("en-GB", { timeZone: "Asia/Kolkata", weekday: "short", day: "numeric", month: "short" })} · {b.slot_time} IST</p>
+                          <p className="mt-1 text-sm font-medium">{b.name}</p>
+                          <p className="text-xs text-muted-foreground">{b.package}</p>
+                          {b.meeting_link && <a href={b.meeting_link} target="_blank" rel="noreferrer" className="mt-1 inline-block text-xs font-medium text-[hsl(var(--primary))] underline">Join →</a>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             <div className="overflow-x-auto rounded-2xl border border-border">
               <table className="w-full text-left text-sm">
                 <thead className="bg-card text-muted-foreground">

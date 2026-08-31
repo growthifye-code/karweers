@@ -2381,10 +2381,8 @@ async def confirm_booking(bid: str, body: BookingActionIn, request: Request, bac
         upd["meeting_link"] = body.meeting_link.strip()
     await db.consultations.update_one({"id": bid}, {"$set": upd})
     b.update(upd)
+    await _apply_calendar_sync(bid, b, "create")
     _schedule_booking_email(b, background_tasks)
-    event_id = await sync_booking_to_calendar(b, "create")
-    if event_id and not b.get("gcal_event_id"):
-        await db.consultations.update_one({"id": bid}, {"$set": {"gcal_event_id": event_id}})
     await audit(request, admin.get("email"), "booking_confirmed", bid)
     return {"success": True}
 
@@ -2417,10 +2415,8 @@ async def reschedule_booking(bid: str, body: BookingActionIn, request: Request, 
         upd["meeting_link"] = body.meeting_link.strip()
     await db.consultations.update_one({"id": bid}, {"$set": upd, "$unset": {"reminder_sent": ""}})
     b.update(upd)
+    await _apply_calendar_sync(bid, b, "update" if b.get("gcal_event_id") else "create")
     _schedule_booking_email(b, background_tasks)
-    event_id = await sync_booking_to_calendar(b, "update" if b.get("gcal_event_id") else "create")
-    if event_id and not b.get("gcal_event_id"):
-        await db.consultations.update_one({"id": bid}, {"$set": {"gcal_event_id": event_id}})
     await audit(request, admin.get("email"), "booking_rescheduled", bid, meta=f"{body.date} {body.time}")
     return {"success": True}
 
@@ -2590,7 +2586,7 @@ async def _gcal_service():
     return service
 
 
-def _event_body(booking: dict):
+def _event_body(booking: dict, want_meet: bool = False):
     start = f"{booking['slot_date']}T{booking['slot_time']}:00"
     end = f"{booking['slot_date']}T{_slot_end_hhmm(booking['slot_time'], booking.get('minutes', 60))}:00"
     link = (booking.get("meeting_link") or "").strip()
@@ -2606,13 +2602,26 @@ def _event_body(booking: dict):
     }
     if link:
         body["location"] = link
+    elif want_meet:
+        body["conferenceData"] = {"createRequest": {
+            "requestId": f"{booking['id']}-{booking.get('slot_time','')}",
+            "conferenceSolutionKey": {"type": "hangoutsMeet"}}}
     if booking.get("email"):
         body["attendees"] = [{"email": booking["email"]}]
     return body
 
 
+def _extract_meet_link(ev: dict) -> str:
+    if ev.get("hangoutLink"):
+        return ev["hangoutLink"]
+    for ep in (ev.get("conferenceData", {}) or {}).get("entryPoints", []):
+        if ep.get("entryPointType") == "video" and ep.get("uri"):
+            return ep["uri"]
+    return ""
+
+
 async def sync_booking_to_calendar(booking: dict, action: str):
-    """Create/update/delete the calendar event for a booking. Never raises."""
+    """Create/update/delete the calendar event. Returns {event_id, meet_link} or None. Never raises."""
     try:
         service = await _gcal_service()
         if not service:
@@ -2624,17 +2633,34 @@ async def sync_booking_to_calendar(booking: dict, action: str):
                 await loop.run_in_executor(None, lambda: service.events().delete(
                     calendarId="primary", eventId=event_id).execute())
             return None
-        body = _event_body(booking)
+        want_meet = not (booking.get("meeting_link") or "").strip()
+        body = _event_body(booking, want_meet)
         if event_id:
-            await loop.run_in_executor(None, lambda: service.events().update(
-                calendarId="primary", eventId=event_id, body=body).execute())
-            return event_id
-        ev = await loop.run_in_executor(None, lambda: service.events().insert(
-            calendarId="primary", body=body).execute())
-        return ev.get("id")
+            ev = await loop.run_in_executor(None, lambda: service.events().update(
+                calendarId="primary", eventId=event_id, body=body, conferenceDataVersion=1).execute())
+        else:
+            ev = await loop.run_in_executor(None, lambda: service.events().insert(
+                calendarId="primary", body=body, conferenceDataVersion=1).execute())
+        return {"event_id": ev.get("id", event_id), "meet_link": _extract_meet_link(ev)}
     except Exception:
         logger.exception("Google Calendar sync failed (%s)", action)
         return None
+
+
+async def _apply_calendar_sync(bid: str, booking: dict, action: str):
+    """Sync to calendar, persist event id + any auto Meet link onto the booking dict + DB."""
+    res = await sync_booking_to_calendar(booking, action)
+    if not res:
+        return
+    set_fields = {}
+    if res.get("event_id") and not booking.get("gcal_event_id"):
+        set_fields["gcal_event_id"] = res["event_id"]
+        booking["gcal_event_id"] = res["event_id"]
+    if res.get("meet_link") and not (booking.get("meeting_link") or "").strip():
+        set_fields["meeting_link"] = res["meet_link"]
+        booking["meeting_link"] = res["meet_link"]
+    if set_fields:
+        await db.consultations.update_one({"id": bid}, {"$set": set_fields})
 
 
 @api_router.get("/admin/calendar/status")

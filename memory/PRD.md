@@ -113,3 +113,7 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - **Branding/Copy**: logo = elegant white **S** + lime **K.**; "Ask SK" AI widget global (client & admin dashboards); About Me + Ex-EY badge; hero/about credibility (EY Big-4 Advisory, $2B+ debt syndication across Maharashtra authorities, 60+ projects, strategy/supply chain/transformation/financial mgmt/scaling for corporates in India & globally).
 - **SEO**: Seo component (canonical/OG/Twitter/JSON-LD), index.html favicons (svg+png+apple-touch) + og-cover.png, sitemap incl. /learning.
 - Verified: backend 17/17, frontend 100% on 27 flows (iteration_5.json). Email/SMTP intentionally OFF.
+
+## Iteration 5.1 (Aug 31, 2026) — Ticket Alerts + CRM Notes/Tags
+- **Ticket alerts**: `send_ticket_alert_email` fires to BOOKING_ADMIN_EMAIL on every new ticket (fire-and-forget). INERT until GMAIL_APP_PASSWORD is set; ticket creation always succeeds regardless.
+- **CRM notes & tags**: `PATCH /admin/clients/{id}` saves private `notes` + `tags`; editor in the client drawer; tags shown as pills in the CRM table. Verified via API + UI.

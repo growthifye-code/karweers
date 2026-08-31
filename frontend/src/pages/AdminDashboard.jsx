@@ -29,6 +29,8 @@ export default function AdminDashboard() {
   const [clients, setClients] = useState([]);
   const [tickets, setTickets] = useState([]);
   const [activeClient, setActiveClient] = useState(null);
+  const [clientNotes, setClientNotes] = useState("");
+  const [clientTags, setClientTags] = useState("");
   const [ticketReplies, setTicketReplies] = useState({});
 
   const [form, setForm] = useState({ title: "", category: "news", sector: SECTORS[0], summary: "", content: "", tags: "", image: DEFAULT_IMG, featured: false });
@@ -47,8 +49,22 @@ export default function AdminDashboard() {
   useEffect(load, []);
 
   const openClient = async (id) => {
-    try { const { data } = await api.get(`/admin/clients/${id}`); setActiveClient(data); }
-    catch { toast.error("Could not load client."); }
+    try {
+      const { data } = await api.get(`/admin/clients/${id}`);
+      setActiveClient(data);
+      setClientNotes(data.user.notes || "");
+      setClientTags((data.user.tags || []).join(", "));
+    } catch { toast.error("Could not load client."); }
+  };
+  const saveClientMeta = async () => {
+    if (!activeClient) return;
+    try {
+      const tags = clientTags.split(",").map((t) => t.trim()).filter(Boolean);
+      await api.patch(`/admin/clients/${activeClient.user.id}`, { notes: clientNotes, tags });
+      setActiveClient((c) => ({ ...c, user: { ...c.user, notes: clientNotes, tags } }));
+      setClients((cs) => cs.map((c) => c.id === activeClient.user.id ? { ...c, notes: clientNotes, tags } : c));
+      toast.success("Client profile saved.");
+    } catch { toast.error("Save failed."); }
   };
   const ticketStatus = async (id, status) => {
     try { await api.patch(`/admin/tickets/${id}`, { status }); setTickets((t) => t.map((x) => x.id === id ? { ...x, status } : x)); }
@@ -187,7 +203,7 @@ export default function AdminDashboard() {
                 {clients.map((c) => (
                   <tr key={c.id} className="border-t border-border align-top">
                     <td className="p-4 font-mono text-xs font-semibold text-[hsl(var(--primary))]">{c.client_code || "—"}</td>
-                    <td className="p-4 font-medium">{c.name}<div className="text-xs text-muted-foreground">{c.email}</div></td>
+                    <td className="p-4 font-medium">{c.name}<div className="text-xs text-muted-foreground">{c.email}</div>{c.tags?.length > 0 && <div className="mt-1 flex flex-wrap gap-1">{c.tags.map((tg) => <span key={tg} className="rounded-full bg-[hsl(var(--primary))]/15 px-2 py-0.5 text-[10px] font-semibold text-[hsl(var(--primary))]">{tg}</span>)}</div>}</td>
                     <td className="p-4 text-muted-foreground capitalize">{c.auth || "email"}</td>
                     <td className="p-4 text-xs text-muted-foreground">{(c.interests_computed || []).join(", ") || "—"}</td>
                     <td className="p-4 text-muted-foreground">{c.activity_count}</td>
@@ -371,6 +387,18 @@ export default function AdminDashboard() {
                   </div>
                 </div>
               )}
+
+              <div className="mt-6 rounded-xl border border-border p-4" data-testid="client-meta">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Private notes &amp; tags</p>
+                <input value={clientTags} onChange={(e) => setClientTags(e.target.value)} data-testid="client-tags"
+                  placeholder="Tags (comma separated) e.g. VIP, warm, fundraising"
+                  className="mt-3 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]" />
+                <textarea value={clientNotes} onChange={(e) => setClientNotes(e.target.value)} data-testid="client-notes" rows={4}
+                  placeholder="Private notes about this relationship (only visible to admins)…"
+                  className="mt-3 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]" />
+                <button onClick={saveClientMeta} data-testid="save-client-meta"
+                  className="mt-3 rounded-full bg-[hsl(var(--accent))] px-5 py-2 text-sm font-semibold text-[hsl(var(--accent-foreground))] transition-transform hover:-translate-y-0.5">Save profile</button>
+              </div>
 
               <div className="mt-6">
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Bookings ({activeClient.bookings.length})</p>

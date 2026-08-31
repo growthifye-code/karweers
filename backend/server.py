@@ -419,6 +419,25 @@ async def admin_client_detail(cid: str, admin: dict = Depends(require_admin)):
     return {"user": u, "timeline": timeline, "bookings": bookings, "tickets": tickets, "interests": interests}
 
 
+class ClientMetaIn(BaseModel):
+    notes: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+
+@api_router.patch("/admin/clients/{cid}")
+async def admin_update_client(cid: str, body: ClientMetaIn, admin: dict = Depends(require_admin)):
+    upd = {}
+    if body.notes is not None:
+        upd["notes"] = body.notes
+    if body.tags is not None:
+        upd["tags"] = [t.strip() for t in body.tags if t and t.strip()]
+    if upd:
+        res = await db.users.update_one({"id": cid}, {"$set": upd})
+        if res.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Client not found")
+    return {"success": True, **upd}
+
+
 # ---------------- Service Desk (tickets) ----------------
 class TicketIn(BaseModel):
     subject: str
@@ -446,6 +465,12 @@ async def create_ticket(body: TicketIn, user: dict = Depends(get_current_user)):
            "created_at": now_iso(), "updated_at": now_iso()}
     await db.support_tickets.insert_one(doc)
     doc.pop("_id", None)
+    try:
+        from emailer import send_ticket_alert_email
+        admin_to = os.environ.get("BOOKING_ADMIN_EMAIL") or os.environ.get("ADMIN_EMAIL")
+        asyncio.get_event_loop().run_in_executor(None, lambda: send_ticket_alert_email(admin_to, doc))
+    except Exception:
+        logger.exception("ticket alert scheduling failed")
     return doc
 
 

@@ -115,3 +115,41 @@ def send_digest_email(client_email: str, client_name: str, videos: list) -> str:
     except Exception:
         log.exception("Digest email failed for %s", client_email)
         return "failed"
+
+
+def send_ticket_alert_email(to_email: str, ticket: dict) -> str:
+    """Alert the advisor the moment a client raises a support ticket."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email:
+        return "skipped"
+    html = (
+        f'<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;">'
+        f'<div style="background:#0A0A0A;padding:18px 24px;border-radius:12px 12px 0 0;">'
+        f'<span style="color:#fff;font-size:20px;font-weight:700;">S<span style="color:#C6F135;">K.</span></span>'
+        f'<span style="color:#9ca3af;font-size:12px;margin-left:10px;">New support ticket</span></div>'
+        f'<div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;padding:24px;">'
+        f'<p style="font-size:15px;color:#111;font-weight:600;">{ticket.get("subject","")}</p>'
+        f'<p style="font-size:13px;color:#6b7280;">{ticket.get("ticket_code","")} · {ticket.get("name","")} '
+        f'({ticket.get("client_code") or ticket.get("email","")}) · {ticket.get("category","")} · '
+        f'priority {ticket.get("priority","")}</p>'
+        f'<p style="font-size:14px;color:#374151;margin-top:14px;white-space:pre-wrap;">{ticket.get("message","")}</p>'
+        f'<a href="https://www.sudarshankarweer.com/admin" style="display:inline-block;margin-top:18px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Open Service Desk</a>'
+        f'</div></div>'
+    )
+    msg = EmailMessage()
+    msg["Subject"] = f"New ticket: {ticket.get('subject','')} [{ticket.get('ticket_code','')}]"
+    msg["From"] = user
+    msg["To"] = to_email
+    msg["Reply-To"] = ticket.get("email", user)
+    msg.set_content(f"New support ticket from {ticket.get('name','')}: {ticket.get('subject','')}\n\n{ticket.get('message','')}")
+    msg.add_alternative(html, subtype="html")
+    try:
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as s:
+            s.ehlo(); s.starttls(context=ctx); s.ehlo()
+            s.login(user, pwd); s.send_message(msg)
+        return "sent"
+    except Exception:
+        log.exception("Ticket alert email failed")
+        return "failed"

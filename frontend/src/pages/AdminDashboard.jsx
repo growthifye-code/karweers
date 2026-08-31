@@ -7,6 +7,7 @@ import ThemeToggle from "@/components/ThemeToggle";
 import { Users, FileText, Inbox, Sparkles, Trash2, Wand2, Mail, LifeBuoy, UserCircle, ChevronDown, Tag, AlertTriangle, Star, Target, Package, Pencil, TrendingUp, TrendingDown, ShieldAlert, Unlock } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from "recharts";
 import api from "@/lib/api";
+import VaultPanel from "@/pages/VaultPanel";
 
 const CATS = [
   { key: "news", label: "News" },
@@ -341,7 +342,7 @@ export default function AdminDashboard() {
         <p className="mt-1 text-sm text-muted-foreground">Signed in as {user?.email}</p>
 
         <div className="mt-8 flex flex-wrap gap-2 border-b border-border pb-4">
-          {["overview", "crm", "leads", "tickets", "articles", "create", "subscribers"].map((t) => (
+          {["overview", "crm", "leads", "tickets", "articles", "create", "subscribers", "vault"].map((t) => (
             <button key={t} onClick={() => setTab(t)} data-testid={`admin-tab-${t}`}
               className={`rounded-full px-4 py-2 text-sm font-medium capitalize transition-colors ${tab === t ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]" : "border border-border text-muted-foreground hover:bg-secondary"}`}>
               {t === "create" ? "Create + AI" : t === "crm" ? "CRM" : t === "tickets" ? "Service Desk" : t}
@@ -1050,6 +1051,7 @@ export default function AdminDashboard() {
             </table>
           </div>
         )}
+        {tab === "vault" && <VaultPanel />}
         {activeClient && (
           <div className="fixed inset-0 z-50 flex justify-end bg-black/50" onClick={() => setActiveClient(null)} data-testid="client-drawer">
             <div className="h-full w-full max-w-lg overflow-y-auto bg-background p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>

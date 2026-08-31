@@ -348,11 +348,16 @@ async def ban_ip(ip: str, reason: str, detail: str, minutes: int = BAN_MINUTES, 
     await _apply_block(ip, "ip", reason, detail, minutes, severity)
 
 
+_audit_retention_days = 90
+
+
 async def audit(request: Request, actor: str, action: str, target: str = "", meta: str = ""):
-    """Tamper-evident admin action trail."""
+    """Tamper-evident admin action trail (auto-expires per retention policy)."""
+    now = datetime.now(timezone.utc)
     await db.audit_log.insert_one({
         "id": str(uuid.uuid4()), "actor": actor or "unknown", "action": action,
-        "target": target, "meta": meta, "ip": _client_ip(request), "at": now_iso()})
+        "target": target, "meta": meta, "ip": _client_ip(request), "at": now_iso(),
+        "expire_at": now + timedelta(days=_audit_retention_days)})
 
 
 async def _apply_block(target: str, scope: str, reason: str, detail: str,
@@ -992,8 +997,278 @@ async def admin_unblock_country(body: CountryIn, request: Request, admin: dict =
 
 @api_router.get("/admin/audit-log")
 async def admin_audit_log(admin: dict = Depends(require_admin)):
-    logs = await db.audit_log.find({}, {"_id": 0}).sort("at", -1).to_list(100)
-    return {"logs": logs}
+    logs = await db.audit_log.find({}, {"_id": 0, "expire_at": 0}).sort("at", -1).to_list(100)
+    return {"logs": logs, "retention_days": _audit_retention_days}
+
+
+class RetentionIn(BaseModel):
+    days: int = 90
+
+
+@api_router.post("/admin/audit-retention")
+async def admin_audit_retention(body: RetentionIn, request: Request, admin: dict = Depends(require_admin)):
+    global _audit_retention_days
+    days = max(1, min(3650, int(body.days)))
+    _audit_retention_days = days
+    await db.app_meta.update_one({"_id": "audit_retention"}, {"$set": {"days": days}}, upsert=True)
+    now = datetime.now(timezone.utc)
+    async for d in db.audit_log.find({}, {"_id": 1, "at": 1}):
+        try:
+            base = datetime.fromisoformat(d["at"])
+            if base.tzinfo is None:
+                base = base.replace(tzinfo=timezone.utc)
+        except Exception:
+            base = now
+        await db.audit_log.update_one({"_id": d["_id"]}, {"$set": {"expire_at": base + timedelta(days=days)}})
+    await audit(request, admin.get("email"), "audit_retention_set", str(days))
+    return {"retention_days": days}
+
+
+# ---------------- Super-Admin Vault (MFA: TOTP + WebAuthn passkey) ----------------
+import base64 as _base64
+import secrets as _secrets
+from cryptography.fernet import Fernet as _Fernet
+from webauthn import (generate_registration_options, verify_registration_response,
+                      generate_authentication_options, verify_authentication_response,
+                      base64url_to_bytes)
+from webauthn.helpers import options_to_json
+from webauthn.helpers.structs import (AuthenticatorSelectionCriteria, AuthenticatorAttachment,
+                                      ResidentKeyRequirement, UserVerificationRequirement,
+                                      PublicKeyCredentialDescriptor)
+
+_ENC_KEY = os.environ.get("ENCRYPTION_KEY", "")
+_fernet = _Fernet(_ENC_KEY.encode()) if _ENC_KEY else None
+WEBAUTHN_RP_ID = os.environ.get("WEBAUTHN_RP_ID", "")
+WEBAUTHN_ORIGIN = os.environ.get("WEBAUTHN_ORIGIN", "")
+WEBAUTHN_RP_NAME = os.environ.get("WEBAUTHN_RP_NAME", "Super Admin")
+VAULT_TTL = 300  # unlock capability lifetime, seconds
+
+
+def _enc(s: str) -> str:
+    return _fernet.encrypt(s.encode()).decode()
+
+
+def _dec(s: str) -> str:
+    return _fernet.decrypt(s.encode()).decode()
+
+
+def _b64u(b: bytes) -> str:
+    return _base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+
+
+def _issue_vault_jwt(email: str, stage: str) -> str:
+    return pyjwt.encode({"purpose": "vault", "stage": stage, "email": email,
+                         "exp": datetime.now(timezone.utc) + timedelta(seconds=VAULT_TTL)},
+                        get_jwt_secret(), algorithm="HS256")
+
+
+def _read_vault_jwt(token, stage: str):
+    if not token:
+        return None
+    try:
+        d = pyjwt.decode(token, get_jwt_secret(), algorithms=["HS256"])
+        if d.get("purpose") == "vault" and d.get("stage") == stage:
+            return d.get("email")
+    except Exception:
+        return None
+    return None
+
+
+async def require_vault_unlocked(request: Request, admin: dict = Depends(require_admin)):
+    if _read_vault_jwt(request.cookies.get("vault_unlock"), "unlocked") != admin.get("email"):
+        raise HTTPException(status_code=403, detail="Vault locked — complete MFA to unlock.")
+    return admin
+
+
+class VaultCodeIn(BaseModel):
+    code: str = ""
+
+
+class VaultKeyIn(BaseModel):
+    label: str
+    value: str
+
+
+class WACredIn(BaseModel):
+    id: str
+    rawId: str = ""
+    response: dict
+    type: str = "public-key"
+    clientExtensionResults: dict = {}
+    authenticatorAttachment: Optional[str] = None
+
+
+@api_router.get("/admin/vault/status")
+async def vault_status(request: Request, admin: dict = Depends(require_admin)):
+    email = admin.get("email")
+    mfa = await db.superadmin_mfa.find_one({"email": email})
+    pk = await db.webauthn_credentials.count_documents({"user_id": email})
+    return {"totp_enrolled": bool(mfa and mfa.get("totp_enrolled")),
+            "passkey_enrolled": pk > 0,
+            "unlocked": _read_vault_jwt(request.cookies.get("vault_unlock"), "unlocked") == email,
+            "ready": bool(_fernet and WEBAUTHN_RP_ID),
+            "key_count": await db.vault_secrets.count_documents({})}
+
+
+@api_router.post("/admin/vault/enroll/totp")
+async def vault_enroll_totp(admin: dict = Depends(require_admin)):
+    email = admin.get("email")
+    secret = pyotp.random_base32()
+    await db.superadmin_mfa.update_one({"email": email}, {"$set": {
+        "email": email, "totp_secret_enc": _enc(secret), "totp_enrolled": False}}, upsert=True)
+    uri = pyotp.TOTP(secret).provisioning_uri(name=email, issuer_name=WEBAUTHN_RP_NAME)
+    import io as _io, qrcode as _qr
+    img = _qr.make(uri)
+    buf = _io.BytesIO()
+    img.save(buf, format="PNG")
+    return {"otpauth_uri": uri, "qr": "data:image/png;base64," + _base64.b64encode(buf.getvalue()).decode(),
+            "secret": secret}
+
+
+@api_router.post("/admin/vault/enroll/totp/verify")
+async def vault_enroll_totp_verify(body: VaultCodeIn, admin: dict = Depends(require_admin)):
+    email = admin.get("email")
+    mfa = await db.superadmin_mfa.find_one({"email": email})
+    if not mfa or not mfa.get("totp_secret_enc"):
+        raise HTTPException(status_code=400, detail="Start enrollment first")
+    if not pyotp.TOTP(_dec(mfa["totp_secret_enc"])).verify(body.code, valid_window=1):
+        raise HTTPException(status_code=401, detail="Invalid code")
+    await db.superadmin_mfa.update_one({"email": email}, {"$set": {"totp_enrolled": True}})
+    return {"enrolled": True}
+
+
+@api_router.post("/admin/vault/unlock/totp")
+async def vault_unlock_totp(body: VaultCodeIn, request: Request, response: Response, admin: dict = Depends(require_admin)):
+    email = admin.get("email")
+    mfa = await db.superadmin_mfa.find_one({"email": email})
+    if not mfa or not mfa.get("totp_enrolled"):
+        raise HTTPException(status_code=400, detail="Enroll authenticator first")
+    if not pyotp.TOTP(_dec(mfa["totp_secret_enc"])).verify(body.code, valid_window=1):
+        await audit(request, email, "vault_totp_fail")
+        raise HTTPException(status_code=401, detail="Invalid authenticator code")
+    response.set_cookie("vault_totp", _issue_vault_jwt(email, "totp"), httponly=True, secure=True,
+                        samesite="none", path="/", max_age=VAULT_TTL)
+    return {"stage": "totp_ok",
+            "passkey_required": await db.webauthn_credentials.count_documents({"user_id": email}) > 0}
+
+
+def _ceremony_valid(cer) -> bool:
+    return bool(cer) and cer.get("exp", 0) >= datetime.now(timezone.utc).timestamp()
+
+
+@api_router.post("/admin/vault/webauthn/register/options")
+async def vault_wa_reg_options(admin: dict = Depends(require_admin)):
+    if not WEBAUTHN_RP_ID:
+        raise HTTPException(status_code=400, detail="WebAuthn not configured")
+    email = admin.get("email")
+    rows = await db.webauthn_credentials.find({"user_id": email}, {"credential_id": 1}).to_list(50)
+    existing = [PublicKeyCredentialDescriptor(id=base64url_to_bytes(x["credential_id"])) for x in rows]
+    options = generate_registration_options(
+        rp_id=WEBAUTHN_RP_ID, rp_name=WEBAUTHN_RP_NAME, user_name=email, user_id=email.encode(),
+        challenge=_secrets.token_bytes(32),
+        authenticator_selection=AuthenticatorSelectionCriteria(
+            authenticator_attachment=AuthenticatorAttachment.PLATFORM,
+            resident_key=ResidentKeyRequirement.PREFERRED,
+            user_verification=UserVerificationRequirement.REQUIRED),
+        exclude_credentials=existing)
+    await db.webauthn_ceremonies.update_one({"email": email, "kind": "reg"}, {"$set": {
+        "email": email, "kind": "reg", "challenge": _b64u(options.challenge),
+        "exp": (datetime.now(timezone.utc) + timedelta(minutes=5)).timestamp()}}, upsert=True)
+    return json.loads(options_to_json(options))
+
+
+@api_router.post("/admin/vault/webauthn/register/verify")
+async def vault_wa_reg_verify(payload: WACredIn, request: Request, admin: dict = Depends(require_admin)):
+    email = admin.get("email")
+    cer = await db.webauthn_ceremonies.find_one_and_delete({"email": email, "kind": "reg"})
+    if not _ceremony_valid(cer):
+        raise HTTPException(status_code=400, detail="Ceremony expired")
+    try:
+        v = verify_registration_response(
+            credential=payload.model_dump(), expected_challenge=base64url_to_bytes(cer["challenge"]),
+            expected_rp_id=WEBAUTHN_RP_ID, expected_origin=WEBAUTHN_ORIGIN, require_user_verification=True)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Passkey registration failed: {e}")
+    await db.webauthn_credentials.update_one({"credential_id": _b64u(v.credential_id)}, {"$set": {
+        "user_id": email, "credential_id": _b64u(v.credential_id),
+        "public_key": _b64u(v.credential_public_key), "sign_count": v.sign_count,
+        "created_at": now_iso()}}, upsert=True)
+    await audit(request, email, "vault_passkey_registered")
+    return {"ok": True}
+
+
+@api_router.post("/admin/vault/webauthn/auth/options")
+async def vault_wa_auth_options(request: Request, admin: dict = Depends(require_admin)):
+    email = admin.get("email")
+    if _read_vault_jwt(request.cookies.get("vault_totp"), "totp") != email:
+        raise HTTPException(status_code=403, detail="Enter authenticator code first")
+    rows = await db.webauthn_credentials.find({"user_id": email}).to_list(50)
+    if not rows:
+        raise HTTPException(status_code=400, detail="No passkey registered")
+    options = generate_authentication_options(
+        rp_id=WEBAUTHN_RP_ID, challenge=_secrets.token_bytes(32),
+        user_verification=UserVerificationRequirement.REQUIRED,
+        allow_credentials=[PublicKeyCredentialDescriptor(id=base64url_to_bytes(r["credential_id"])) for r in rows])
+    await db.webauthn_ceremonies.update_one({"email": email, "kind": "auth"}, {"$set": {
+        "email": email, "kind": "auth", "challenge": _b64u(options.challenge),
+        "exp": (datetime.now(timezone.utc) + timedelta(minutes=5)).timestamp()}}, upsert=True)
+    return json.loads(options_to_json(options))
+
+
+@api_router.post("/admin/vault/webauthn/auth/verify")
+async def vault_wa_auth_verify(payload: WACredIn, request: Request, response: Response, admin: dict = Depends(require_admin)):
+    email = admin.get("email")
+    if _read_vault_jwt(request.cookies.get("vault_totp"), "totp") != email:
+        raise HTTPException(status_code=403, detail="Enter authenticator code first")
+    cer = await db.webauthn_ceremonies.find_one_and_delete({"email": email, "kind": "auth"})
+    if not _ceremony_valid(cer):
+        raise HTTPException(status_code=400, detail="Ceremony expired")
+    row = await db.webauthn_credentials.find_one({"user_id": email, "credential_id": payload.id})
+    if not row:
+        raise HTTPException(status_code=400, detail="Unknown passkey")
+    try:
+        v = verify_authentication_response(
+            credential=payload.model_dump(), expected_challenge=base64url_to_bytes(cer["challenge"]),
+            expected_rp_id=WEBAUTHN_RP_ID, expected_origin=WEBAUTHN_ORIGIN,
+            credential_public_key=base64url_to_bytes(row["public_key"]),
+            credential_current_sign_count=row["sign_count"], require_user_verification=True)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Passkey authentication failed: {e}")
+    await db.webauthn_credentials.update_one({"_id": row["_id"]}, {"$set": {"sign_count": v.new_sign_count}})
+    response.set_cookie("vault_unlock", _issue_vault_jwt(email, "unlocked"), httponly=True, secure=True,
+                        samesite="none", path="/", max_age=VAULT_TTL)
+    response.delete_cookie("vault_totp", path="/")
+    await audit(request, email, "vault_unlocked")
+    return {"vault_unlocked": True}
+
+
+@api_router.post("/admin/vault/lock")
+async def vault_lock(response: Response, admin: dict = Depends(require_admin)):
+    response.delete_cookie("vault_unlock", path="/")
+    return {"locked": True}
+
+
+@api_router.get("/admin/vault/keys")
+async def vault_keys(admin: dict = Depends(require_vault_unlocked)):
+    docs = await db.vault_secrets.find({}, {"_id": 0}).sort("label", 1).to_list(200)
+    return {"keys": [{"id": d["id"], "label": d["label"], "value": _dec(d["value_enc"]),
+                      "updated_at": d.get("updated_at")} for d in docs]}
+
+
+@api_router.post("/admin/vault/keys")
+async def vault_add_key(body: VaultKeyIn, request: Request, admin: dict = Depends(require_vault_unlocked)):
+    vid = str(uuid.uuid4())
+    await db.vault_secrets.insert_one({"id": vid, "label": body.label,
+                                       "value_enc": _enc(body.value), "updated_at": now_iso()})
+    await audit(request, admin.get("email"), "vault_add_key", body.label)
+    return {"id": vid}
+
+
+@api_router.delete("/admin/vault/keys/{vid}")
+async def vault_del_key(vid: str, request: Request, admin: dict = Depends(require_vault_unlocked)):
+    await db.vault_secrets.delete_one({"id": vid})
+    await audit(request, admin.get("email"), "vault_del_key", vid)
+    return {"deleted": True}
 
 
 _last_networks = []
@@ -1997,6 +2272,11 @@ async def startup():
     await db.blocked_ips.create_index("ip", unique=True)
     await db.security_alerts.create_index("created_at")
     await db.audit_log.create_index("at")
+    await db.audit_log.create_index("expire_at", expireAfterSeconds=0)
+    _meta = await db.app_meta.find_one({"_id": "audit_retention"})
+    if _meta and _meta.get("days"):
+        global _audit_retention_days
+        _audit_retention_days = int(_meta["days"])
     await db.articles.create_index("slug", unique=True)
     # Warm the in-memory ban cache with any still-active bans.
     now = datetime.now(timezone.utc)

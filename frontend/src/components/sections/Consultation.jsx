@@ -13,6 +13,19 @@ const AREAS = [
   "Green / Climate Financing", "Government Asset Monetisation", "Business Coaching",
 ];
 
+const inr = (v) => "\u20b9" + Number(v || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+
+function loadRazorpay() {
+  return new Promise((resolve) => {
+    if (window.Razorpay) return resolve(true);
+    const s = document.createElement("script");
+    s.src = "https://checkout.razorpay.com/v1/checkout.js";
+    s.onload = () => resolve(true);
+    s.onerror = () => resolve(false);
+    document.body.appendChild(s);
+  });
+}
+
 export default function Consultation({ testimonials = [] }) {
   const [packages, setPackages] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -61,22 +74,66 @@ export default function Consultation({ testimonials = [] }) {
           package_id: selected, name: form.name, email: form.email, phone: form.phone,
           area: form.area, message: form.message, date: selDate, time: selTime, captcha_token: captcha,
         });
-        toast.success(data.message || "Your slot is reserved and pending confirmation.");
-        setSelected(null); setSelDate(""); setSelTime("");
+        await openCheckout(data);
       } else {
         const { data } = await api.post("/consultations", {
           name: form.name, email: form.email, phone: form.phone, company: form.company,
           area: form.area, message: form.message, captcha_token: captcha,
         });
         toast.success(data.message || "Request received!");
+        setForm({ name: "", email: "", phone: "", company: "", area: AREAS[0], message: "" });
       }
-      setForm({ name: "", email: "", phone: "", company: "", area: AREAS[0], message: "" });
-      api.get("/consultation/availability").then((r) => setAvail(r.data)).catch(() => {});
     } catch (err) {
       toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Something went wrong.");
     } finally {
       setBusy(false);
     }
+  };
+
+  const refreshAvail = () => api.get("/consultation/availability").then((r) => setAvail(r.data)).catch(() => {});
+
+  const openCheckout = async (data) => {
+    const ok = await loadRazorpay();
+    if (!ok) {
+      toast.error("Couldn't load the secure payment window. Please try again.");
+      await api.post(`/payments/abandon/${data.booking_id}`).catch(() => {});
+      return;
+    }
+    const rzp = new window.Razorpay({
+      key: data.key_id,
+      amount: data.amount,
+      currency: data.currency,
+      name: "Sudarshan Karweer",
+      description: `${data.package} · ${selDate} ${selTime} IST`,
+      order_id: data.order_id,
+      prefill: data.prefill,
+      theme: { color: "#0A0A0A" },
+      handler: async (resp) => {
+        try {
+          const v = await api.post("/payments/verify", {
+            booking_id: data.booking_id,
+            razorpay_order_id: resp.razorpay_order_id,
+            razorpay_payment_id: resp.razorpay_payment_id,
+            razorpay_signature: resp.razorpay_signature,
+          });
+          toast.success(v.data.message || "Payment received! Your slot is reserved and pending confirmation.");
+          setSelected(null); setSelDate(""); setSelTime("");
+          setForm({ name: "", email: "", phone: "", company: "", area: AREAS[0], message: "" });
+          refreshAvail();
+        } catch (e) {
+          toast.error("We couldn't verify the payment. If any amount was deducted, it is automatically refunded.");
+        }
+      },
+      modal: {
+        ondismiss: async () => {
+          await api.post(`/payments/abandon/${data.booking_id}`).catch(() => {});
+          toast("Payment cancelled — the slot has been released.");
+          refreshAvail();
+        },
+      },
+    });
+    rzp.on("payment.failed", () => toast.error("Payment failed. Please try again or use another method."));
+    rzp.open();
   };
 
   return (

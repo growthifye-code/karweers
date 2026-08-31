@@ -11,6 +11,7 @@ const COOKIE_GROUPS = [
       "Authentication session (keeps you securely signed in)",
       "Your cookie consent choice",
       "Security & bot protection (hCaptcha)",
+      "Secure payment processing (Razorpay) when you book a paid session",
     ],
   },
   {

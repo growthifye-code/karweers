@@ -10,6 +10,7 @@ import logging
 import uuid
 import time
 import io
+import razorpay
 import requests
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -32,6 +33,7 @@ from emailer import send_security_alert_email
 from emailer import send_new_booking_alert_email, send_session_reminder_email, send_weekly_agenda_email, send_waitlist_opening_email
 from emailer import send_consent_receipt_email
 from emailer import send_signals_digest_email, render_signals_digest_html, send_test_email
+from emailer import send_payment_receipt_email, send_refund_email
 import xml.etree.ElementTree as ET
 from datetime import datetime as _dt
 
@@ -2621,21 +2623,39 @@ async def newsletter_resubscribe(token: str = ""):
 
 
 # ---------------- Consultation packages, availability & booking ----------------
+# Base prices in INR (exclusive of GST). GST added on top at checkout.
+GST_PCT = 18
 PACKAGES = {
-    "discovery": {"name": "Discovery Call", "amount": 99.0, "minutes": 30, "duration": "30 minutes",
+    "discovery": {"name": "Discovery Call", "amount": 9999.0, "minutes": 30, "duration": "30 minutes",
                   "features": ["Focused problem framing", "Direct next-step guidance", "Ideal first touchpoint"]},
-    "strategy": {"name": "1:1 Strategy Session", "amount": 299.0, "minutes": 60, "duration": "60 minutes",
+    "strategy": {"name": "1:1 Strategy Session", "amount": 99999.0, "minutes": 60, "duration": "60 minutes",
                  "features": ["Deep strategy & fundraising review", "Actionable roadmap", "Follow-up notes"]},
-    "deepdive": {"name": "Deep-Dive Advisory", "amount": 599.0, "minutes": 90, "duration": "90 minutes",
+    "deepdive": {"name": "Deep-Dive Advisory", "amount": 999999.0, "minutes": 90, "duration": "90 minutes",
                  "features": ["Full business / deal deep-dive", "Bankability & scaling plan", "Priority follow-up access"]},
 }
+
+
+def _pkg_amounts(pkg: dict) -> dict:
+    base = float(pkg["amount"])
+    gst = round(base * GST_PCT / 100, 2)
+    total = round(base + gst, 2)
+    return {"base": base, "gst_pct": GST_PCT, "gst_amount": gst, "total": total,
+            "amount_paise": int(round(total * 100)), "currency": "INR"}
+
+
+def _razorpay_client():
+    kid = os.environ.get("RAZORPAY_KEY_ID")
+    ks = os.environ.get("RAZORPAY_KEY_SECRET")
+    if not kid or not ks:
+        return None
+    return razorpay.Client(auth=(kid, ks))
 
 # Booking window: Mon–Fri, 09:30–19:00, 30-minute start slots.
 WORK_START_MIN = 9 * 60 + 30
 WORK_END_MIN = 19 * 60
 SLOT_MIN = 30
 WORK_DAYS = {0, 1, 2, 3, 4}
-ACTIVE_BOOKING_STATUSES = ["pending_confirmation", "confirmed"]
+ACTIVE_BOOKING_STATUSES = ["pending_payment", "pending_confirmation", "confirmed"]
 
 
 def _slot_times():
@@ -2693,7 +2713,12 @@ def _week_days(week_start: date):
 
 @api_router.get("/consultation/packages")
 async def get_packages():
-    return [{"id": k, **v} for k, v in PACKAGES.items()]
+    return [{"id": k, **v, **_pkg_amounts(v)} for k, v in PACKAGES.items()]
+
+
+@api_router.get("/payments/config")
+async def payments_config():
+    return {"key_id": os.environ.get("RAZORPAY_KEY_ID", ""), "enabled": _razorpay_client() is not None, "currency": "INR"}
 
 
 @api_router.get("/consultation/availability")
@@ -2750,6 +2775,9 @@ async def book_consultation(body: BookIn, request: Request, background_tasks: Ba
     pkg = PACKAGES.get(body.package_id)
     if not pkg:
         raise HTTPException(status_code=400, detail="Invalid package")
+    client = _razorpay_client()
+    if not client:
+        raise HTTPException(status_code=503, detail="Payments are not configured yet. Please try again shortly.")
     try:
         d = date.fromisoformat(body.date)
     except Exception:
@@ -2770,20 +2798,102 @@ async def book_consultation(body: BookIn, request: Request, background_tasks: Ba
     booked = await _booked_slots_for([body.date], buffer_min)
     if blocked & set(occupied) or booked.get(body.date, set()) & set(occupied):
         raise HTTPException(status_code=409, detail="Sorry, that slot was just taken. Please choose another.")
+    amt = _pkg_amounts(pkg)
+    bid = str(uuid.uuid4())
+    try:
+        order = await asyncio.to_thread(client.order.create, {
+            "amount": amt["amount_paise"], "currency": "INR", "payment_capture": 1,
+            "receipt": bid[:40], "notes": {"package": pkg["name"], "email": body.email.lower()}})
+    except Exception:
+        logger.exception("razorpay order create failed")
+        raise HTTPException(status_code=502, detail="Could not start the payment. Please try again.")
     doc = {
-        "id": str(uuid.uuid4()), "name": body.name, "email": body.email.lower(),
+        "id": bid, "name": body.name, "email": body.email.lower(),
         "phone": body.phone or "", "company": "", "area": body.area or pkg["name"],
-        "message": body.message or "", "status": "pending_confirmation",
-        "package": pkg["name"], "package_id": body.package_id, "amount": pkg["amount"],
+        "message": body.message or "", "status": "pending_payment",
+        "package": pkg["name"], "package_id": body.package_id,
+        "amount": amt["base"], "gst_pct": GST_PCT, "gst_amount": amt["gst_amount"], "amount_total": amt["total"],
+        "currency": "INR", "paid": False,
+        "razorpay_order_id": order["id"], "amount_paise": amt["amount_paise"],
         "minutes": pkg["minutes"], "slot_date": body.date, "slot_time": body.time,
         "occupied": occupied, "source": "booking-form", "created_at": now_iso(),
     }
     await db.consultations.insert_one(doc)
+    return {"success": True, "status": "pending_payment", "booking_id": bid,
+            "order_id": order["id"], "amount": amt["amount_paise"], "currency": "INR",
+            "key_id": os.environ.get("RAZORPAY_KEY_ID", ""),
+            "package": pkg["name"], "breakdown": {"base": amt["base"], "gst_pct": GST_PCT,
+                                                  "gst_amount": amt["gst_amount"], "total": amt["total"]},
+            "prefill": {"name": body.name, "email": body.email.lower(), "contact": body.phone or ""}}
+
+
+class PaymentVerifyIn(BaseModel):
+    booking_id: str
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+
+
+@api_router.post("/payments/verify")
+async def verify_payment(body: PaymentVerifyIn, request: Request, background_tasks: BackgroundTasks):
+    client = _razorpay_client()
+    if not client:
+        raise HTTPException(status_code=503, detail="Payments are not configured.")
+    b = await db.consultations.find_one({"id": body.booking_id})
+    if not b or b.get("razorpay_order_id") != body.razorpay_order_id:
+        raise HTTPException(status_code=404, detail="Booking not found for this payment.")
+    if b.get("paid"):
+        return {"success": True, "status": b.get("status", "pending_confirmation")}
+    try:
+        client.utility.verify_payment_signature({
+            "razorpay_order_id": body.razorpay_order_id,
+            "razorpay_payment_id": body.razorpay_payment_id,
+            "razorpay_signature": body.razorpay_signature})
+    except Exception:
+        raise HTTPException(status_code=400, detail="Payment could not be verified.")
+    upd = {"status": "pending_confirmation", "paid": True,
+           "razorpay_payment_id": body.razorpay_payment_id, "paid_at": now_iso()}
+    await db.consultations.update_one({"id": body.booking_id}, {"$set": upd})
+    b.update(upd)
+    background_tasks.add_task(send_payment_receipt_email, b["email"], b)
     admin_to = os.environ.get("BOOKING_ADMIN_EMAIL") or os.environ.get("ADMIN_EMAIL")
     if admin_to:
-        background_tasks.add_task(send_new_booking_alert_email, admin_to, doc)
+        background_tasks.add_task(send_new_booking_alert_email, admin_to, b)
     return {"success": True, "status": "pending_confirmation",
-            "message": "Thanks! Your slot is reserved and pending confirmation \u2014 we'll confirm your session shortly."}
+            "message": "Payment received! Your slot is reserved and pending confirmation — we'll confirm your session shortly."}
+
+
+@api_router.post("/payments/abandon/{bid}")
+async def abandon_payment(bid: str):
+    """Release a slot if the client closes checkout without paying."""
+    await db.consultations.delete_one({"id": bid, "status": "pending_payment", "paid": {"$ne": True}})
+    return {"success": True}
+
+
+async def _refund_booking(b: dict, reason: str = "") -> bool:
+    """Full refund to the client's original payment method (Razorpay). Idempotent."""
+    if not b or not b.get("paid") or b.get("refunded") or not b.get("razorpay_payment_id"):
+        return False
+    client = _razorpay_client()
+    if not client:
+        logger.warning("refund requested but Razorpay not configured: booking %s", b.get("id"))
+        return False
+    try:
+        refund = await asyncio.to_thread(client.payment.refund, b["razorpay_payment_id"], {
+            "amount": int(b.get("amount_paise", 0)) or None,
+            "speed": "optimum",
+            "notes": {"reason": reason or "Session not confirmed", "booking_id": b.get("id", "")}})
+    except Exception:
+        logger.exception("razorpay refund failed for booking %s", b.get("id"))
+        return False
+    upd = {"refunded": True, "refund_id": refund.get("id", ""), "refund_at": now_iso(), "refund_reason": reason or ""}
+    await db.consultations.update_one({"id": b["id"]}, {"$set": upd})
+    b.update(upd)
+    try:
+        await asyncio.to_thread(send_refund_email, b.get("email", ""), b, reason)
+    except Exception:
+        pass
+    return True
 
 
 # ---------------- Admin availability management ----------------
@@ -3024,8 +3134,9 @@ async def decline_booking(bid: str, body: BookingActionIn, request: Request, adm
     if b and b.get("gcal_event_id"):
         await sync_booking_to_calendar(b, "delete")
         await db.consultations.update_one({"id": bid}, {"$unset": {"gcal_event_id": ""}})
+    refunded = await _refund_booking(b, body.reason or "Session could not be accommodated") if b else False
     await audit(request, admin.get("email"), "booking_declined", bid)
-    return {"success": True}
+    return {"success": True, "refunded": refunded}
 
 
 @api_router.post("/admin/bookings/{bid}/reschedule")
@@ -3098,11 +3209,12 @@ async def booking_cancel(body: TokenIn, background_tasks: BackgroundTasks):
         await db.consultations.update_one({"id": bid}, {"$unset": {"gcal_event_id": ""}})
     if b.get("slot_date"):
         await _notify_waitlist(b["slot_date"])
+    refunded = await _refund_booking(b, "Client cancelled the session")
     admin_to = os.environ.get("BOOKING_ADMIN_EMAIL") or os.environ.get("ADMIN_EMAIL")
     if admin_to:
         note = dict(b); note["message"] = f"CLIENT CANCELLED this session ({b.get('slot_date')} {b.get('slot_time')} IST)."
         background_tasks.add_task(send_new_booking_alert_email, admin_to, note)
-    return {"success": True, "status": "cancelled"}
+    return {"success": True, "status": "cancelled", "refunded": refunded}
 
 
 @api_router.post("/booking/reschedule-request")

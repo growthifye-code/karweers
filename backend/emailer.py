@@ -472,3 +472,68 @@ def send_test_email(to_email: str) -> str:
     msg.add_alternative(_shell("Deliverability test", inner), subtype="html")
     return _smtp_send(msg)
 
+
+
+def _inr(v) -> str:
+    try:
+        return "\u20b9" + f"{float(v):,.2f}"
+    except Exception:
+        return "\u20b9" + str(v)
+
+
+def send_payment_receipt_email(to_email: str, booking: dict) -> str:
+    """Receipt to the client after a successful consultation payment (INERT until SMTP configured)."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email:
+        return "skipped"
+    rows = (
+        f'<tr><td style="padding:6px 0;color:#6b7280;">Session</td><td style="padding:6px 0;text-align:right;font-weight:600;color:#111;">{booking.get("package","")}</td></tr>'
+        f'<tr><td style="padding:6px 0;color:#6b7280;">When</td><td style="padding:6px 0;text-align:right;font-weight:600;color:#111;">{booking.get("slot_date","")} {booking.get("slot_time","")} IST</td></tr>'
+        f'<tr><td style="padding:6px 0;color:#6b7280;">Base fee</td><td style="padding:6px 0;text-align:right;color:#111;">{_inr(booking.get("amount",0))}</td></tr>'
+        f'<tr><td style="padding:6px 0;color:#6b7280;">GST ({booking.get("gst_pct",18)}%)</td><td style="padding:6px 0;text-align:right;color:#111;">{_inr(booking.get("gst_amount",0))}</td></tr>'
+        f'<tr><td style="padding:10px 0 0;color:#111;font-weight:700;border-top:1px solid #e5e7eb;">Total paid</td><td style="padding:10px 0 0;text-align:right;font-weight:700;color:#111;border-top:1px solid #e5e7eb;">{_inr(booking.get("amount_total",0))}</td></tr>'
+        f'<tr><td style="padding:6px 0;color:#6b7280;">Payment ID</td><td style="padding:6px 0;text-align:right;color:#111;">{booking.get("razorpay_payment_id","")}</td></tr>'
+    )
+    inner = (
+        f'<p style="font-size:15px;color:#111;">Hi {booking.get("name","there")},</p>'
+        f'<p style="font-size:14px;color:#374151;">Thank you — your payment was received. Your slot is reserved and pending confirmation; '
+        f'we\'ll confirm your session and send a calendar invite with the meeting link shortly.</p>'
+        f'<table style="width:100%;border-collapse:collapse;margin-top:14px;font-size:13px;">{rows}</table>'
+        f'<p style="font-size:12px;color:#9ca3af;margin-top:16px;">If your session cannot be accommodated, this payment is refunded in full to your original payment method.</p>'
+        f'<p style="font-size:13px;color:#374151;margin-top:16px;">— Team Sudarshan Karweer</p>'
+    )
+    msg = EmailMessage()
+    msg["Subject"] = "Payment received — your consultation booking"
+    msg["From"] = user
+    msg["To"] = to_email
+    msg.set_content(f"Payment received for {booking.get('package','')} on {booking.get('slot_date','')} {booking.get('slot_time','')} IST. "
+                    f"Total {booking.get('amount_total','')} INR. Payment ID {booking.get('razorpay_payment_id','')}. — Team Sudarshan Karweer")
+    msg.add_alternative(_shell("Payment receipt", inner), subtype="html")
+    return _smtp_send(msg)
+
+
+def send_refund_email(to_email: str, booking: dict, reason: str = "") -> str:
+    """Notify the client that their consultation payment has been refunded (INERT until SMTP configured)."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email:
+        return "skipped"
+    inner = (
+        f'<p style="font-size:15px;color:#111;">Hi {booking.get("name","there")},</p>'
+        f'<p style="font-size:14px;color:#374151;">Your consultation ({booking.get("package","")}, {booking.get("slot_date","")} {booking.get("slot_time","")} IST) '
+        f'could not be confirmed{(" — " + reason) if reason else ""}, so we\'ve refunded <strong>{_inr(booking.get("amount_total",0))}</strong> in full '
+        f'to your original payment method. It typically appears within 5–7 business days.</p>'
+        f'<p style="font-size:13px;color:#374151;margin-top:12px;">Payment ID: {booking.get("razorpay_payment_id","")}<br>Refund ID: {booking.get("refund_id","")}</p>'
+        f'<p style="font-size:13px;color:#374151;margin-top:16px;">We\'d be glad to help you find another slot — just reply to this email.</p>'
+        f'<p style="font-size:13px;color:#374151;margin-top:12px;">— Team Sudarshan Karweer</p>'
+    )
+    msg = EmailMessage()
+    msg["Subject"] = "Your consultation payment has been refunded"
+    msg["From"] = user
+    msg["To"] = to_email
+    msg.set_content(f"We refunded {booking.get('amount_total','')} INR for {booking.get('package','')} to your original payment method. "
+                    f"Refund ID {booking.get('refund_id','')}. — Team Sudarshan Karweer")
+    msg.add_alternative(_shell("Refund processed", inner), subtype="html")
+    return _smtp_send(msg)
+

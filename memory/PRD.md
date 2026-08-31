@@ -167,3 +167,7 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 ## Iteration 5.12 (Jun 2026) — Login brute-force protection
 - POST /api/auth/login now rate-limits by ip+email: 5 failed attempts trigger a 15-min lockout (login_attempts collection, unique index on identifier). Locked requests return 429 with a friendly "Try again in N minute(s)." message + Retry-After header. Successful login clears the counter. Applies to email/password login (admin + client); captcha still runs first.
 - Verified via direct function test: 5 fails → 429 lockout with Retry-After; clear on success releases the lock.
+
+## Iteration 5.13 (Jun 2026) — Login Security visibility (admin)
+- GET /api/admin/login-attempts returns recent failed-login records (ip, email, recent/total fails, locked flag + locked_until, last attempt) + locked_now count and policy (max_attempts, lockout_minutes). register_failed_login now stores ip/email + cumulative fail_total.
+- Admin Overview: "Login Security" card (testid login-attempts-card) with a "N locked now" / "No active lockouts" badge and a table (login-attempts-table, rows login-attempt-row-N) showing each attacker's email/IP/fails/last-attempt/status (Locked vs Cleared). Verified via curl + screenshot.

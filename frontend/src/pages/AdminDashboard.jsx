@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useAuth, formatApiErrorDetail } from "@/context/AuthContext";
 import { Logo } from "@/components/Navbar";
 import ThemeToggle from "@/components/ThemeToggle";
-import { Users, FileText, Inbox, Sparkles, Trash2, Wand2, Mail, LifeBuoy, UserCircle, ChevronDown, Tag, AlertTriangle, Star, Target, Package, Pencil, TrendingUp, TrendingDown } from "lucide-react";
+import { Users, FileText, Inbox, Sparkles, Trash2, Wand2, Mail, LifeBuoy, UserCircle, ChevronDown, Tag, AlertTriangle, Star, Target, Package, Pencil, TrendingUp, TrendingDown, ShieldAlert } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from "recharts";
 import api from "@/lib/api";
 
@@ -42,6 +42,7 @@ export default function AdminDashboard() {
   const [goalInput, setGoalInput] = useState("");
   const [goalEditing, setGoalEditing] = useState(false);
   const [savingGoal, setSavingGoal] = useState(false);
+  const [loginAttempts, setLoginAttempts] = useState(null);
 
   const [form, setForm] = useState({ title: "", category: "news", sector: SECTORS[0], summary: "", content: "", tags: "", image: DEFAULT_IMG, featured: false });
   const [aiTopic, setAiTopic] = useState("");
@@ -56,6 +57,7 @@ export default function AdminDashboard() {
     api.get("/admin/clients").then((r) => setClients(r.data)).catch(() => {});
     api.get("/admin/tickets").then((r) => setTickets(r.data)).catch(() => {});
     api.get("/admin/lead-analytics").then((r) => setAnalytics(r.data)).catch(() => {});
+    api.get("/admin/login-attempts").then((r) => setLoginAttempts(r.data)).catch(() => {});
   };
   useEffect(load, []);
 
@@ -382,6 +384,60 @@ export default function AdminDashboard() {
                   )}
                 </div>
               </div>
+
+              {loginAttempts && (
+                <div className="mt-6 rounded-2xl border border-border bg-card p-6" data-testid="login-attempts-card">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="flex items-center gap-2 font-display text-lg font-bold"><ShieldAlert className="h-4 w-4 text-amber-500" /> Login Security</h3>
+                      <p className="text-sm text-muted-foreground">Recent blocked / failed sign-in attempts ({loginAttempts.max_attempts} fails = {loginAttempts.lockout_minutes}-min lockout)</p>
+                    </div>
+                    {loginAttempts.locked_now > 0 ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-red-500/15 px-3 py-1.5 text-xs font-semibold text-red-500" data-testid="locked-now-badge">
+                        <AlertTriangle className="h-3.5 w-3.5" /> {loginAttempts.locked_now} locked now
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-[hsl(var(--primary))]/15 px-3 py-1.5 text-xs font-semibold text-[hsl(var(--primary))]">
+                        <ShieldAlert className="h-3.5 w-3.5" /> No active lockouts
+                      </span>
+                    )}
+                  </div>
+                  {loginAttempts.attempts.length > 0 ? (
+                    <div className="mt-4 overflow-x-auto">
+                      <table className="w-full text-left text-sm" data-testid="login-attempts-table">
+                        <thead>
+                          <tr className="border-b border-border text-xs uppercase tracking-wider text-muted-foreground">
+                            <th className="pb-2 pr-4 font-semibold">Email</th>
+                            <th className="pb-2 pr-4 font-semibold">IP</th>
+                            <th className="pb-2 pr-4 font-semibold">Fails</th>
+                            <th className="pb-2 pr-4 font-semibold">Last attempt</th>
+                            <th className="pb-2 font-semibold">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {loginAttempts.attempts.map((a, i) => (
+                            <tr key={i} className="border-b border-border/50" data-testid={`login-attempt-row-${i}`}>
+                              <td className="py-2.5 pr-4 font-medium">{a.email || "—"}</td>
+                              <td className="py-2.5 pr-4 font-mono text-xs text-muted-foreground">{a.ip}</td>
+                              <td className="py-2.5 pr-4">{a.total_fails}</td>
+                              <td className="py-2.5 pr-4 text-xs text-muted-foreground">{a.updated_at ? new Date(a.updated_at).toLocaleString() : "—"}</td>
+                              <td className="py-2.5">
+                                {a.locked ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-red-500/15 px-2.5 py-1 text-xs font-semibold text-red-500">Locked</span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-xs font-medium text-muted-foreground">Cleared</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="mt-5 text-sm text-muted-foreground" data-testid="login-attempts-empty">No failed sign-in attempts recorded — all quiet.</p>
+                  )}
+                </div>
+              )}
 
               <div className="mt-6 rounded-2xl border border-border bg-card p-6" data-testid="lead-source-chart">
                 <div className="flex flex-wrap items-center justify-between gap-3">

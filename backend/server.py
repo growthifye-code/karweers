@@ -265,11 +265,12 @@ async def check_login_lockout(identifier: str):
                             headers={"Retry-After": str(retry)})
 
 
-async def register_failed_login(identifier: str):
+async def register_failed_login(identifier: str, ip: str, email: str):
     """Increment failed-attempt counter; lock the account after the threshold."""
     doc = await db.login_attempts.find_one({"identifier": identifier})
     count = (doc or {}).get("count", 0) + 1
-    update = {"count": count, "updated_at": now_iso()}
+    fail_total = (doc or {}).get("fail_total", 0) + 1
+    update = {"count": count, "fail_total": fail_total, "ip": ip, "email": email, "updated_at": now_iso()}
     if count >= LOGIN_MAX_ATTEMPTS:
         update["locked_until"] = (datetime.now(timezone.utc) + timedelta(minutes=LOGIN_LOCKOUT_MINUTES)).isoformat()
         update["count"] = 0  # reset counter; lockout window now governs access
@@ -288,7 +289,7 @@ async def login(body: LoginIn, request: Request):
     await check_login_lockout(identifier)
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(body.password, user["password_hash"]):
-        await register_failed_login(identifier)
+        await register_failed_login(identifier, request.client.host if request.client else "unknown", email)
         raise HTTPException(status_code=401, detail="Invalid email or password")
     await clear_login_attempts(identifier)
     # Enforce allowlist: role always reflects the allowlist, never drifts.
@@ -585,6 +586,39 @@ async def _auto_escalate_tickets():
             # Bump priority WITHOUT touching updated_at (keeps the SLA clock honest).
             await db.support_tickets.update_one({"id": t["id"]}, {"$set": {
                 "priority": ESCALATE_NEXT[pr], "auto_escalated": True, "escalated_at": now_iso()}})
+
+
+@api_router.get("/admin/login-attempts")
+async def admin_login_attempts(admin: dict = Depends(require_admin)):
+    """Recent failed-login activity so admins can spot brute-force attacks at a glance."""
+    docs = await db.login_attempts.find({}, {"_id": 0}).sort("updated_at", -1).to_list(50)
+    now = datetime.now(timezone.utc)
+    out = []
+    locked_now = 0
+    for d in docs:
+        locked = False
+        lu = d.get("locked_until")
+        if lu:
+            try:
+                t = datetime.fromisoformat(lu)
+                if t.tzinfo is None:
+                    t = t.replace(tzinfo=timezone.utc)
+                locked = t > now
+            except Exception:
+                locked = False
+        if locked:
+            locked_now += 1
+        out.append({
+            "ip": d.get("ip", "unknown"),
+            "email": d.get("email", ""),
+            "recent_fails": d.get("count", 0),
+            "total_fails": d.get("fail_total", d.get("count", 0)),
+            "locked": locked,
+            "locked_until": lu if locked else None,
+            "updated_at": d.get("updated_at"),
+        })
+    return {"attempts": out, "locked_now": locked_now, "max_attempts": LOGIN_MAX_ATTEMPTS,
+            "lockout_minutes": LOGIN_LOCKOUT_MINUTES}
 
 
 @api_router.get("/admin/lead-analytics")

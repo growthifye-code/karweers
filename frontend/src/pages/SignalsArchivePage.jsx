@@ -85,8 +85,14 @@ export default function SignalsArchivePage() {
 
   return (
     <div className="min-h-screen bg-background text-left text-foreground">
-      <Seo title={date ? `Market Signals — ${date} | Sudarshan Karweer` : "Market Signals — Archive | Sudarshan Karweer"}
-        description="Browse past daily Market Signals: sharp, timely reads on the energy transition, storage, green hydrogen, climate finance and strategy." />
+      <Seo
+        title={date ? `Market Signals — ${formatDate(single?.generated_at || date)} | Sudarshan Karweer` : "Market Signals — Archive | Sudarshan Karweer"}
+        description={date
+          ? (single?.insights?.[0] || "A daily read on the energy transition, capital and strategy from Sudarshan Karweer.")
+          : "Browse past daily Market Signals: sharp, timely reads on the energy transition, storage, green hydrogen, climate finance and strategy."}
+        image="https://www.sudarshankarweer.com/og-signals.png"
+        type={date ? "article" : "website"}
+        path={date ? `/signals/${date}` : "/signals"} />
       <Navbar />
       <section className="grain relative overflow-hidden pt-32 lg:pt-40" data-testid="signals-archive">
         <div className="pointer-events-none absolute -right-32 top-10 h-80 w-80 rounded-full bg-[hsl(var(--primary))] opacity-20 blur-[120px]" />

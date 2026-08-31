@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, Depends, BackgroundTasks
-from fastapi.responses import StreamingResponse, JSONResponse, RedirectResponse
+from fastapi.responses import StreamingResponse, JSONResponse, RedirectResponse, HTMLResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -1096,7 +1096,10 @@ async def admin_run_signals_digest(admin: dict = Depends(require_admin)):
 async def my_consent(user: dict = Depends(get_current_user)):
     """The signed-in user's own consent history + current status (for export)."""
     logs = await db.consent_logs.find({"email": user["email"]}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return {"consent": user.get("consent"), "history": logs, "policy_version": CONSENT_POLICY_VERSION}
+    c = user.get("consent") or {}
+    needs_renewal = not (c.get("agreed") and c.get("version") == CONSENT_POLICY_VERSION)
+    return {"consent": user.get("consent"), "history": logs, "policy_version": CONSENT_POLICY_VERSION,
+            "needs_renewal": needs_renewal}
 
 
 @api_router.post("/me/consent/withdraw")
@@ -1111,6 +1114,14 @@ async def withdraw_consent(request: Request, user: dict = Depends(get_current_us
     await db.users.update_one({"id": user["id"]}, {"$set": {
         "consent": {"agreed": False, "version": CONSENT_POLICY_VERSION, "at": ts, "action": "withdraw"}}})
     return {"withdrawn": True, "at": ts}
+
+
+@api_router.post("/me/consent/renew")
+async def renew_consent(request: Request, user: dict = Depends(get_current_user)):
+    """Re-agree to the current Terms & Privacy version (used by the renewal prompt / after withdrawal)."""
+    ts = now_iso()
+    await record_consent(request, user["email"], user.get("name", ""), "renew", user_id=user["id"])
+    return {"renewed": True, "version": CONSENT_POLICY_VERSION, "at": ts}
 
 
 class RetentionIn(BaseModel):
@@ -1953,7 +1964,8 @@ async def _send_signals_digest():
     subs = await db.subscribers.find({}, {"_id": 0, "email": 1, "name": 1}).to_list(5000)
     loop = asyncio.get_event_loop()
     for c in subs:
-        await loop.run_in_executor(None, lambda cc=c: send_signals_digest_email(cc["email"], cc.get("name", "there"), items))
+        await loop.run_in_executor(None, lambda cc=c: send_signals_digest_email(
+            cc["email"], cc.get("name", "there"), items, unsubscribe_url=_unsub_url(cc["email"])))
     await db.app_meta.update_one({"_id": "signals_digest"}, {"$set": {"last_run": now_iso()}}, upsert=True)
 
 
@@ -2377,6 +2389,50 @@ async def subscribe(body: NewsletterIn, request: Request):
 @api_router.get("/newsletter")
 async def list_subscribers(admin: dict = Depends(require_admin)):
     return await db.subscribers.find({}, {"_id": 0}).sort("created_at", -1).to_list(2000)
+
+
+PUBLIC_SITE = "https://www.sudarshankarweer.com"
+
+
+def _unsub_token(email: str) -> str:
+    return pyjwt.encode({"purpose": "unsubscribe", "email": (email or "").lower()},
+                        get_jwt_secret(), algorithm="HS256")
+
+
+def _unsub_url(email: str) -> str:
+    return f"{PUBLIC_SITE}/api/newsletter/unsubscribe?token={_unsub_token(email)}"
+
+
+@api_router.get("/newsletter/unsubscribe")
+async def newsletter_unsubscribe(token: str = ""):
+    """One-click unsubscribe from the email footer link (no login needed)."""
+    email = ""
+    try:
+        data = pyjwt.decode(token, get_jwt_secret(), algorithms=["HS256"])
+        if data.get("purpose") == "unsubscribe":
+            email = data.get("email", "")
+    except Exception:
+        email = ""
+    ok = False
+    if email:
+        res = await db.subscribers.delete_many({"email": email})
+        ok = res.deleted_count > 0
+    body = (
+        '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
+        '<title>Unsubscribed</title></head>'
+        '<body style="margin:0;background:#050505;color:#fff;font-family:Arial,sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center;">'
+        '<div style="max-width:480px;padding:40px;text-align:center;">'
+        '<div style="font-size:26px;font-weight:800;">S<span style="color:#C6F135;">K.</span></div>'
+        + (f'<h1 style="font-size:22px;margin-top:24px;">You\'re unsubscribed</h1>'
+           f'<p style="color:#9ca3af;font-size:14px;">{email} will no longer receive the weekly Market Signals digest. '
+           f'Changed your mind? You can resubscribe anytime on the site.</p>'
+           if (ok or email) else
+           '<h1 style="font-size:22px;margin-top:24px;">Link expired</h1>'
+           '<p style="color:#9ca3af;font-size:14px;">This unsubscribe link is invalid or has already been used.</p>')
+        + f'<a href="{PUBLIC_SITE}" style="display:inline-block;margin-top:20px;background:#C6F135;color:#0A0A0A;padding:10px 22px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Back to site</a>'
+        '</div></body></html>'
+    )
+    return HTMLResponse(content=body)
 
 
 # ---------------- Consultation packages, availability & booking ----------------

@@ -5,6 +5,7 @@ import { useAuth } from "@/context/AuthContext";
 import { Logo } from "@/components/Navbar";
 import ThemeToggle from "@/components/ThemeToggle";
 import VideoCard from "@/components/VideoCard";
+import ConsentRenewalPrompt from "@/components/ConsentRenewalPrompt";
 import api, { track } from "@/lib/api";
 import {
   Sparkles, Calendar, BookOpen, GraduationCap, ArrowUpRight, LifeBuoy,
@@ -185,6 +186,7 @@ export default function ClientDashboard() {
 
   return (
     <div className="min-h-screen bg-background text-left text-foreground">
+      <ConsentRenewalPrompt />
       <header className="border-b border-border">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <Logo />

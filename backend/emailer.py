@@ -408,7 +408,7 @@ def send_consent_receipt_email(to_email: str, name: str, action: str, version: s
     return _smtp_send(msg)
 
 
-def send_signals_digest_email(to_email: str, name: str, items: list, site: str = "https://www.sudarshankarweer.com") -> str:
+def send_signals_digest_email(to_email: str, name: str, items: list, site: str = "https://www.sudarshankarweer.com", unsubscribe_url: str = "") -> str:
     """Weekly round-up of the best Market Signals to a subscriber (INERT until SMTP configured)."""
     user = os.environ.get("GMAIL_USER")
     pwd = os.environ.get("GMAIL_APP_PASSWORD")
@@ -422,18 +422,28 @@ def send_signals_digest_email(to_email: str, name: str, items: list, site: str =
             f'<p style="font-size:15px;font-weight:700;color:#111;margin:8px 0 4px;">{it.get("title","")}</p>'
             f'<p style="font-size:13px;color:#374151;margin:0;">{it.get("take","")}</p></div>'
         )
+    unsub = (f'<p style="font-size:12px;color:#9ca3af;margin-top:20px;text-align:center;">'
+             f'You receive this because you subscribed to Sudarshan Karweer updates. '
+             f'<a href="{unsubscribe_url}" style="color:#9ca3af;text-decoration:underline;">Unsubscribe</a> anytime.</p>'
+             if unsubscribe_url else "")
     inner = (
         f'<p style="font-size:15px;color:#111;">Hi {name or "there"},</p>'
         f'<p style="font-size:14px;color:#374151;">Here are this week\'s sharpest Market Signals on the energy transition, capital and strategy.</p>'
         f'<div style="margin-top:14px;">{cards}</div>'
         f'<a href="{site}/signals" style="display:inline-block;margin-top:8px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Browse the full archive</a>'
         f'<p style="font-size:13px;color:#374151;margin-top:16px;">— Team Sudarshan Karweer</p>'
+        f'{unsub}'
     )
     msg = EmailMessage()
     msg["Subject"] = "This week in Market Signals"
     msg["From"] = user
     msg["To"] = to_email
-    msg.set_content("This week's Market Signals: " + " | ".join(i.get("title", "") for i in items) + f"  Read more: {site}/signals")
+    if unsubscribe_url:
+        msg["List-Unsubscribe"] = f"<{unsubscribe_url}>"
+        msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+    msg.set_content("This week's Market Signals: " + " | ".join(i.get("title", "") for i in items)
+                    + f"  Read more: {site}/signals"
+                    + (f"  Unsubscribe: {unsubscribe_url}" if unsubscribe_url else ""))
     msg.add_alternative(_shell("Weekly Market Signals", inner), subtype="html")
     return _smtp_send(msg)
 

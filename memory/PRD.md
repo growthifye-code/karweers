@@ -144,5 +144,9 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 ## Iteration 5.7 (Aug 31, 2026) — Revenue Ranking + CSV Export
 - **Conversion by value**: analytics now sums `amount` for paid leads per source; conversion cards ranked by revenue with a "Most valuable channel" highlight (testid top-channel). Fixed projection to include `amount`.
 - **Export report**: GET /admin/lead-analytics/export streams a CSV (Source, Total Leads, Paid, Conversion %, Revenue); admin "Export CSV" button (testid export-analytics) downloads it. Verified via API + UI.
+
+## Iteration 5.8 (Aug 31, 2026) — Revenue Trend + Scheduled Report
+- **Revenue trend**: analytics returns per-bucket `revenue` alongside `weeks`; chart has a Leads/Revenue metric toggle (testid chart-metric-toggle, metric-volume, metric-revenue) with $-scaled axis/tooltip. Verified.
+- **Scheduled report**: POST /admin/report/run emails Sudarshan the analytics CSV (send_report_email, CSV attachment); scheduler sends on the 1st of each month. Admin "Email report" button (testid email-report). INERT until GMAIL_APP_PASSWORD set (returns skipped:email_not_configured; UI shows an informative toast).
 - **Security audit** (deployment static scan + manual): PASS. No hardcoded secrets; URLs env-driven; admin routes gated by require_admin; auth (JWT + Google session cookie, HttpOnly/Secure/SameSite=None); admin allowlist strict; hCaptcha strict. Fixed: N+1 in /admin/clients → now MongoDB aggregations (4 queries total).
 - Advisories (not fixed): tighten CORS to explicit origin; escape user input in outbound email HTML when SMTP is enabled; consider rate-limit/captcha on public /chat/lead.

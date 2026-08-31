@@ -529,18 +529,21 @@ async def admin_lead_analytics(period: str = "8w", admin: dict = Depends(require
             buckets.append((s, s + timedelta(days=7))); labels.append(s.strftime("%d %b"))
 
     rows = [{"week": labels[i], **{s: 0 for s in SOURCES}} for i in range(len(buckets))]
+    rev_rows = [{"week": labels[i], **{s: 0 for s in SOURCES}} for i in range(len(buckets))]
     conversion = {s: {"total": 0, "paid": 0, "revenue": 0} for s in SOURCES}
     for l in leads:
         src = l.get("source") or "other"
         if src not in SOURCES:
             src = "other"
         conversion[src]["total"] += 1
-        if l.get("status") in PAID_STATUSES:
+        try:
+            amt = int(l.get("amount") or 0)
+        except Exception:
+            amt = 0
+        is_paid = l.get("status") in PAID_STATUSES
+        if is_paid:
             conversion[src]["paid"] += 1
-            try:
-                conversion[src]["revenue"] += int(l.get("amount") or 0)
-            except Exception:
-                pass
+            conversion[src]["revenue"] += amt
         try:
             ts = datetime.fromisoformat(l["created_at"])
             if ts.tzinfo is None:
@@ -550,6 +553,8 @@ async def admin_lead_analytics(period: str = "8w", admin: dict = Depends(require
         for i, (bs, be) in enumerate(buckets):
             if bs <= ts < be:
                 rows[i][src] += 1
+                if is_paid:
+                    rev_rows[i][src] += amt
                 break
     for s in SOURCES:
         t = conversion[s]["total"]
@@ -558,12 +563,18 @@ async def admin_lead_analytics(period: str = "8w", admin: dict = Depends(require
     ranked = sorted(
         [{"source": s, **conversion[s]} for s in SOURCES if conversion[s]["total"] > 0],
         key=lambda x: (x["revenue"], x["paid"]), reverse=True)
-    return {"weeks": rows, "sources": SOURCES, "totals": totals, "granularity": granularity,
-            "period": period, "conversion": conversion, "ranked": ranked}
+    return {"weeks": rows, "revenue": rev_rows, "sources": SOURCES, "totals": totals,
+            "granularity": granularity, "period": period, "conversion": conversion, "ranked": ranked}
 
 
 @api_router.get("/admin/lead-analytics/export")
 async def admin_lead_analytics_export(admin: dict = Depends(require_admin)):
+    csv = await _analytics_csv()
+    return Response(content=csv, media_type="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=lead-source-analytics.csv"})
+
+
+async def _analytics_csv() -> str:
     leads = await db.consultations.find({}, {"_id": 0, "source": 1, "status": 1, "amount": 1}).to_list(10000)
     SOURCES = ["booking-form", "ask-sk-chatbot", "consultation-checkout", "whatsapp", "other"]
     LABELS = {"booking-form": "Booking Form", "ask-sk-chatbot": "Ask SK Bot",
@@ -588,9 +599,24 @@ async def admin_lead_analytics_export(admin: dict = Depends(require_admin)):
             continue
         rate = round(100 * a["paid"] / a["total"]) if a["total"] else 0
         lines.append(f'{LABELS[s]},{a["total"]},{a["paid"]},{rate},{a["revenue"]}')
-    csv = "\r\n".join(lines) + "\r\n"
-    return Response(content=csv, media_type="text/csv",
-                    headers={"Content-Disposition": "attachment; filename=lead-source-analytics.csv"})
+    return "\r\n".join(lines) + "\r\n"
+
+
+async def _send_monthly_report():
+    if not os.environ.get("GMAIL_APP_PASSWORD"):
+        return {"sent": False, "skipped": "email_not_configured"}
+    from emailer import send_report_email
+    csv = await _analytics_csv()
+    to = os.environ.get("BOOKING_ADMIN_EMAIL") or os.environ.get("ADMIN_EMAIL")
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, lambda: send_report_email(to, csv))
+    await db.app_meta.update_one({"_id": "report"}, {"$set": {"last_run": now_iso()}}, upsert=True)
+    return {"sent": res == "sent", "to": to}
+
+
+@api_router.post("/admin/report/run")
+async def admin_run_report(admin: dict = Depends(require_admin)):
+    return await _send_monthly_report()
 
 
 # ---------------- Service Desk (tickets) ----------------
@@ -727,6 +753,11 @@ async def _digest_scheduler():
                 last = (meta or {}).get("last_run", "")
                 if not last or last[:10] != now.strftime("%Y-%m-%d"):
                     await _send_weekly_digest()
+            if now.day == 1 and os.environ.get("GMAIL_APP_PASSWORD"):  # 1st of month
+                rmeta = await db.app_meta.find_one({"_id": "report"})
+                rlast = (rmeta or {}).get("last_run", "")
+                if not rlast or rlast[:7] != now.strftime("%Y-%m"):
+                    await _send_monthly_report()
         except Exception:
             logger.exception("scheduler error")
         await asyncio.sleep(3600)

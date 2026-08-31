@@ -37,6 +37,7 @@ export default function AdminDashboard() {
   const [leadSource, setLeadSource] = useState("all");
   const [analytics, setAnalytics] = useState(null);
   const [chartPeriod, setChartPeriod] = useState("8w");
+  const [chartMetric, setChartMetric] = useState("volume");
   const [ticketReplies, setTicketReplies] = useState({});
 
   const [form, setForm] = useState({ title: "", category: "news", sector: SECTORS[0], summary: "", content: "", tags: "", image: DEFAULT_IMG, featured: false });
@@ -120,6 +121,13 @@ export default function AdminDashboard() {
       URL.revokeObjectURL(url);
       toast.success("Analytics exported.");
     } catch { toast.error("Export failed."); }
+  };
+  const emailReport = async () => {
+    try {
+      const { data } = await api.post("/admin/report/run");
+      if (data.sent) toast.success(`Report emailed to ${data.to}.`);
+      else toast.info("Email isn't configured yet — add a Gmail App Password to enable monthly reports.");
+    } catch { toast.error("Could not send report."); }
   };
 
   const SOURCE_META = {
@@ -249,10 +257,16 @@ export default function AdminDashboard() {
               <div className="rounded-2xl border border-border bg-card p-6" data-testid="lead-source-chart">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h3 className="font-display text-lg font-bold">Lead volume by source</h3>
-                    <p className="text-sm text-muted-foreground">Where your enquiries come from</p>
+                    <h3 className="font-display text-lg font-bold">{chartMetric === "revenue" ? "Revenue by source" : "Lead volume by source"}</h3>
+                    <p className="text-sm text-muted-foreground">{chartMetric === "revenue" ? "Paid consultation revenue over time" : "Where your enquiries come from"}</p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex gap-1 rounded-full border border-border p-1" data-testid="chart-metric-toggle">
+                    {[["volume", "Leads"], ["revenue", "Revenue"]].map(([v, l]) => (
+                      <button key={v} onClick={() => setChartMetric(v)} data-testid={`metric-${v}`}
+                        className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${chartMetric === v ? "bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]" : "text-muted-foreground hover:bg-secondary"}`}>{l}</button>
+                    ))}
+                  </div>
                   <div className="flex gap-1 rounded-full border border-border p-1" data-testid="chart-period-toggle">
                     {[["8w", "8 weeks"], ["3m", "3 months"], ["12m", "12 months"]].map(([v, l]) => (
                       <button key={v} onClick={() => setChartPeriod(v)} data-testid={`period-${v}`}
@@ -262,6 +276,10 @@ export default function AdminDashboard() {
                   <button onClick={exportAnalytics} data-testid="export-analytics"
                     className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-2 text-xs font-medium hover:bg-secondary">
                     <FileText className="h-3.5 w-3.5" /> Export CSV
+                  </button>
+                  <button onClick={emailReport} data-testid="email-report"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-2 text-xs font-medium hover:bg-secondary">
+                    <Mail className="h-3.5 w-3.5" /> Email report
                   </button>
                   </div>
                 </div>
@@ -275,11 +293,11 @@ export default function AdminDashboard() {
                 </div>
                 <div className="mt-6 h-64 w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={analytics.weeks} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
+                    <BarChart data={chartMetric === "revenue" ? analytics.revenue : analytics.weeks} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
                       <XAxis dataKey="week" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
-                      <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
-                      <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12 }} cursor={{ fill: "hsl(var(--secondary))", opacity: 0.4 }} />
+                      <YAxis allowDecimals={false} tickFormatter={(v) => chartMetric === "revenue" ? `$${v}` : v} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
+                      <Tooltip formatter={(v, n) => [chartMetric === "revenue" ? `$${Number(v).toLocaleString()}` : v, n]} contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12 }} cursor={{ fill: "hsl(var(--secondary))", opacity: 0.4 }} />
                       {analytics.sources.map((s) => (
                         <Bar key={s} dataKey={s} stackId="a" name={SOURCE_LABELS[s]} fill={SOURCE_COLORS[s]} radius={s === "other" ? [4, 4, 0, 0] : 0} />
                       ))}

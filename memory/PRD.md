@@ -128,3 +128,7 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - **GDPR consent detail**: banner "What we collect" panel lists Strictly necessary (always on) vs Analytics & personalisation (optional); Accept all / Essential only. Tracking gated on 'accepted'.
 - **CRM saved segments**: save a tag filter as a one-click view (localStorage sk_crm_segments). testids save-segment/saved-segments/segment-<tag>.
 - **Ticket auto-escalate**: backend _auto_escalate_tickets() bumps open|in-progress past SLA (low→medium, medium→high), sets auto_escalated; runs on GET /admin/tickets + hourly scheduler. Badge auto-escalated-<id>. Verified: 2d-old medium → high.
+
+## Iteration 5.4 (Aug 31, 2026) — Lead Source View
+- Every consultation now records a `source`: booking-form (create_consultation), consultation-checkout (create_checkout), ask-sk-chatbot (chat bot). WhatsApp is a direct link (no DB record) — mapped for future WA API capture.
+- Admin Leads tab: source filter chips (All / per-source with counts, testid lead-source-filters, lead-source-<key>) + colour-coded Source column badge (lead-source-badge-<id>). Verified in UI.

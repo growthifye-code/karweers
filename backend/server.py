@@ -692,7 +692,7 @@ async def create_consultation(body: ConsultationIn, request: Request):
     verify_captcha(body.captcha_token, request.client.host if request.client else None)
     doc = body.model_dump()
     doc.pop("captcha_token", None)
-    doc.update({"id": str(uuid.uuid4()), "status": "new", "created_at": now_iso()})
+    doc.update({"id": str(uuid.uuid4()), "status": "new", "source": "booking-form", "created_at": now_iso()})
     await db.consultations.insert_one(doc)
     return {"success": True, "message": "Your consultation request has been received. Sudarshan's team will reach out shortly."}
 
@@ -912,7 +912,7 @@ async def create_checkout(body: CheckoutIn, request: Request):
         "id": str(uuid.uuid4()), "name": body.name, "email": body.email, "phone": body.phone or "",
         "company": "", "area": body.area or pkg["name"], "message": body.message or "",
         "status": "payment_pending", "package": pkg["name"], "amount": pkg["amount"],
-        "session_id": session.session_id, "created_at": now_iso(),
+        "source": "consultation-checkout", "session_id": session.session_id, "created_at": now_iso(),
     })
     return {"checkout_url": session.url, "session_id": session.session_id}
 

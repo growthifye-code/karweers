@@ -33,6 +33,7 @@ export default function AdminDashboard() {
   const [clientTags, setClientTags] = useState("");
   const [crmTag, setCrmTag] = useState("all");
   const [segments, setSegments] = useState([]);
+  const [leadSource, setLeadSource] = useState("all");
   const [ticketReplies, setTicketReplies] = useState({});
 
   const [form, setForm] = useState({ title: "", category: "news", sector: SECTORS[0], summary: "", content: "", tags: "", image: DEFAULT_IMG, featured: false });
@@ -102,6 +103,17 @@ export default function AdminDashboard() {
     toast.success(`Saved segment: ${crmTag}`);
   };
   const removeSegment = (s) => persistSegments(segments.filter((x) => x !== s));
+
+  const SOURCE_META = {
+    "booking-form": { label: "Booking Form", cls: "bg-[hsl(var(--primary))]/15 text-[hsl(var(--primary))]" },
+    "ask-sk-chatbot": { label: "Ask SK Bot", cls: "bg-[hsl(var(--accent))]/15 text-[hsl(var(--accent))]" },
+    "consultation-checkout": { label: "Checkout", cls: "bg-blue-500/15 text-blue-400" },
+    "whatsapp": { label: "WhatsApp", cls: "bg-[#25D366]/15 text-[#25D366]" },
+    "": { label: "Other", cls: "bg-secondary text-muted-foreground" },
+  };
+  const srcMeta = (s) => SOURCE_META[s] || SOURCE_META[""];
+  const leadSources = [...new Set(leads.map((l) => l.source || ""))];
+  const filteredLeads = leadSource === "all" ? leads : leads.filter((l) => (l.source || "") === leadSource);
 
   const generate = async () => {
     if (!aiTopic.trim()) { toast.error("Enter a topic for the AI to write about."); return; }
@@ -323,19 +335,32 @@ export default function AdminDashboard() {
         )}
 
         {tab === "leads" && (
-          <div className="mt-8 overflow-x-auto rounded-2xl border border-border" data-testid="admin-leads">
+          <div className="mt-8" data-testid="admin-leads">
+            <div className="mb-4 flex flex-wrap items-center gap-2" data-testid="lead-source-filters">
+              <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Source</span>
+              <button onClick={() => setLeadSource("all")} data-testid="lead-source-all"
+                className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${leadSource === "all" ? "border-[hsl(var(--primary))] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]" : "border-border text-muted-foreground hover:bg-secondary"}`}>All ({leads.length})</button>
+              {leadSources.map((s) => (
+                <button key={s || "other"} onClick={() => setLeadSource(s)} data-testid={`lead-source-${s || "other"}`}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${leadSource === s ? "border-[hsl(var(--primary))] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]" : "border-border text-muted-foreground hover:bg-secondary"}`}>
+                  {srcMeta(s).label} ({leads.filter((l) => (l.source || "") === s).length})
+                </button>
+              ))}
+            </div>
+            <div className="overflow-x-auto rounded-2xl border border-border">
             <table className="w-full text-left text-sm">
               <thead className="bg-card text-muted-foreground">
                 <tr>
-                  <th className="p-4">Name</th><th className="p-4">Contact</th><th className="p-4">Area / Package</th><th className="p-4">Message</th><th className="p-4">Status</th>
+                  <th className="p-4">Name</th><th className="p-4">Contact</th><th className="p-4">Source</th><th className="p-4">Area / Package</th><th className="p-4">Message</th><th className="p-4">Status</th>
                 </tr>
               </thead>
               <tbody>
-                {leads.length === 0 && <tr><td colSpan="5" className="p-8 text-center text-muted-foreground">No consultation leads yet.</td></tr>}
-                {leads.map((l) => (
+                {filteredLeads.length === 0 && <tr><td colSpan="6" className="p-8 text-center text-muted-foreground">No consultation leads yet.</td></tr>}
+                {filteredLeads.map((l) => (
                   <tr key={l.id} className="border-t border-border align-top">
                     <td className="p-4 font-medium">{l.name}<div className="text-xs text-muted-foreground">{l.company}</div></td>
                     <td className="p-4 text-muted-foreground">{l.email}<div className="text-xs">{l.phone}</div></td>
+                    <td className="p-4"><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${srcMeta(l.source || "").cls}`} data-testid={`lead-source-badge-${l.id}`}>{srcMeta(l.source || "").label}</span></td>
                     <td className="p-4 text-muted-foreground">{l.area}{l.package && <div className="mt-1 text-xs font-semibold text-[hsl(var(--primary))]">{l.package} · ${l.amount}</div>}</td>
                     <td className="p-4 max-w-xs text-muted-foreground">{l.message}</td>
                     <td className="p-4">
@@ -355,6 +380,7 @@ export default function AdminDashboard() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         )}
 

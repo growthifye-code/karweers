@@ -215,3 +215,6 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 
 ## Iteration 5.21 (Jun 2026) — Vault auto-lock countdown
 - vault_status now returns unlock_seconds_left (decoded from the vault_unlock JWT exp). VaultPanel shows a live "auto-locks in M:SS" countdown in the Unlocked badge (testid vault-countdown); at 0 it auto-locks the UI and refetches status. Verified via CDP full-flow screenshot (4:57 → 4:54 ticking).
+
+## Iteration 5.22 (Jun 2026) — Vault access log line
+- vault_status returns last_unlock (most recent audit_log "vault_unlocked": actor, ip, at). VaultPanel shows "Last unlocked {time} by {actor} · {ip}" (testid vault-last-unlock) so admins spot unexpected access. Verified via CDP screenshot.

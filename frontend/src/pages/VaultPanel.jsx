@@ -105,6 +105,12 @@ export default function VaultPanel() {
 
         {!status.ready && <p className="mt-4 rounded-xl bg-red-500/10 px-4 py-3 text-sm text-red-500">Vault not configured (missing encryption / WebAuthn env).</p>}
 
+        {status.last_unlock && (
+          <p className="mt-3 text-xs text-muted-foreground" data-testid="vault-last-unlock">
+            Last unlocked {new Date(status.last_unlock.at).toLocaleString()} by <span className="font-semibold text-foreground">{status.last_unlock.actor}</span> · <span className="font-mono">{status.last_unlock.ip}</span>
+          </p>
+        )}
+
         {/* Setup */}
         {status.ready && !status.unlocked && (
           <div className="mt-5 grid gap-5 lg:grid-cols-2">

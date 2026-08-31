@@ -1116,10 +1116,12 @@ async def vault_status(request: Request, admin: dict = Depends(require_admin)):
     mfa = await db.superadmin_mfa.find_one({"email": email})
     pk = await db.webauthn_credentials.count_documents({"user_id": email})
     left = _vault_seconds_left(request.cookies.get("vault_unlock")) if _read_vault_jwt(request.cookies.get("vault_unlock"), "unlocked") == email else 0
+    last = await db.audit_log.find_one({"action": "vault_unlocked"}, sort=[("at", -1)], projection={"_id": 0, "actor": 1, "ip": 1, "at": 1})
     return {"totp_enrolled": bool(mfa and mfa.get("totp_enrolled")),
             "passkey_enrolled": pk > 0,
             "unlocked": left > 0,
             "unlock_seconds_left": left,
+            "last_unlock": last,
             "ready": bool(_fernet and WEBAUTHN_RP_ID),
             "key_count": await db.vault_secrets.count_documents({})}
 

@@ -22,6 +22,14 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - Client auth + admin panel
 
 ## Implemented (2026-06)
+### Discount / Promo Codes (2026-06, latest)
+- **Promo codes** for downloads & cohorts, server-side validated (never trust client). Collection `promo_codes`: {code (unique, uppercased), type: percent|flat, value, applies_to: all|product|cohort, min_amount, max_uses (0=unlimited), used_count, expires_at, active}.
+- Public: `POST /api/promo/validate` {code, kind, ref_id} → {valid, label, discount, final_price}. Checkout modal has a "Promo code" field (data-testid promo-input/promo-apply/promo-applied) showing the discounted total live.
+- `commerce_order` re-validates the code and computes the discounted Razorpay amount server-side (clamped to leave ≥ ₹1 to charge); stores promo_code/discount/list_price on the order. `commerce_verify` increments the code's `used_count` on successful payment (conversion tracking).
+- Admin: managed in the Revenue tab → "Promo Codes" sub-tab (full CRUD via generic `/api/admin/cms/promo-codes`), with a Used column for conversions. Order records carry the applied code so per-code revenue is visible in Orders.
+- Verified via curl: ₹999 → ₹799 with a 20% code; invalid code → 400 on order; duplicate code → 400 on create. Checkout modal + admin panel render correctly. Test promo/orders cleaned up (no live codes left active).
+
+
 ### Tier 1 Direct Revenue + CMS (2026-06, latest)
 - **Digital Products / paid downloads** (`/products`): catalogue with LIVE Razorpay checkout. Seeded: SK Leadership Blueprint (Pro) ₹1,499, CXO Strategy Playbook ₹999, Fundraising & Bankability Toolkit ₹1,299. Backend: `/api/products`, `/api/commerce/order`, `/api/commerce/verify`.
 - **Leadership Blueprint PDF** (`blueprint_pdf.py`, reportlab): (a) FREE evergreen "Starter" PDF via lead-magnet email capture → `/api/blueprint/starter.pdf`; (b) PAID personalised Pro PDF generated from the buyer's Big-Five assessment after payment → `/api/blueprint/download/{order_id}`. Upsell lives on `/assessment` result view.

@@ -5094,6 +5094,34 @@ def _pub(d: dict) -> dict:
     return d
 
 
+async def _resolve_promo(code, kind, price):
+    """Validate a promo code against an item price. Returns (promo_doc|None, discount, final_price, message)."""
+    code = (code or "").strip().upper()
+    price = float(price)
+    if not code:
+        return None, 0.0, price, ""
+    p = await db.promo_codes.find_one({"code": code, "active": True})
+    if not p:
+        return None, 0.0, price, "That code isn't valid."
+    exp = p.get("expires_at")
+    if exp and str(exp) < now_iso():
+        return None, 0.0, price, "That code has expired."
+    if int(p.get("max_uses", 0) or 0) > 0 and int(p.get("used_count", 0) or 0) >= int(p["max_uses"]):
+        return None, 0.0, price, "That code has reached its usage limit."
+    applies = p.get("applies_to", "all") or "all"
+    if applies not in ("all", kind):
+        return None, 0.0, price, "That code isn't valid for this item."
+    min_amt = float(p.get("min_amount", 0) or 0)
+    if price < min_amt:
+        return None, 0.0, price, f"This code needs a minimum order of \u20b9{int(min_amt)}."
+    if (p.get("type") or "percent") == "flat":
+        disc = min(float(p.get("value", 0) or 0), price)
+    else:
+        disc = round(price * float(p.get("value", 0) or 0) / 100.0)
+    disc = max(0.0, min(disc, price - 1))  # always leave at least ₹1 to charge
+    return p, disc, price - disc, "Code applied!"
+
+
 async def _seed_commerce():
     if await db.products.count_documents({}) == 0:
         await db.products.insert_many([
@@ -5238,6 +5266,7 @@ class CommerceOrderIn(BaseModel):
     name: str
     email: str
     phone: Optional[str] = ""
+    promo_code: Optional[str] = None
     meta: Optional[dict] = None  # e.g. assessment result for a personalised Blueprint
     captcha_token: Optional[str] = None
 
@@ -5260,19 +5289,26 @@ async def commerce_order(body: CommerceOrderIn, request: Request):
         raise HTTPException(status_code=400, detail="Invalid kind")
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
-    amount_paise = int(round(float(item["price"]) * 100))
+    list_price = float(item["price"])
+    promo, discount, final_price, _ = await _resolve_promo(body.promo_code, body.kind, list_price)
+    if body.promo_code and not promo:
+        raise HTTPException(status_code=400, detail="That promo code isn't valid for this item.")
+    amount_paise = int(round(final_price * 100))
     oid = str(uuid.uuid4())
     try:
         order = await asyncio.to_thread(client.order.create, {
             "amount": amount_paise, "currency": "INR", "payment_capture": 1, "receipt": oid[:40],
-            "notes": {"kind": body.kind, "item": title, "email": body.email.lower()}})
+            "notes": {"kind": body.kind, "item": title, "email": body.email.lower(),
+                      "promo": (promo or {}).get("code", "")}})
     except Exception:
         logger.exception("razorpay commerce order failed")
         raise HTTPException(status_code=502, detail="Could not start the payment. Please try again.")
     await db.orders.insert_one({
         "id": oid, "kind": body.kind, "ref_id": body.ref_id, "ref_title": title,
         "name": body.name, "email": body.email.lower(), "phone": body.phone or "",
-        "amount": item["price"], "currency": "INR", "amount_paise": amount_paise,
+        "amount": final_price, "list_price": list_price, "discount": discount,
+        "promo_code": (promo or {}).get("code") or None,
+        "currency": "INR", "amount_paise": amount_paise,
         "meta": body.meta or {},
         "status": "pending_payment", "paid": False, "delivered": False,
         "razorpay_order_id": order["id"], "source": f"{body.kind}-checkout", "created_at": now_iso()})
@@ -5323,6 +5359,8 @@ async def commerce_verify(body: CommerceVerifyIn):
     await db.orders.update_one({"id": o["id"]}, {"$set": {
         "paid": True, "status": "paid", "delivered": True, "download_url": download_url,
         "razorpay_payment_id": body.razorpay_payment_id, "paid_at": now_iso()}})
+    if o.get("promo_code"):
+        await db.promo_codes.update_one({"code": o["promo_code"]}, {"$inc": {"used_count": 1}})
     if os.environ.get("GMAIL_APP_PASSWORD"):
         loop = asyncio.get_event_loop()
         loop.run_in_executor(None, lambda: send_purchase_email(
@@ -5336,6 +5374,28 @@ async def commerce_verify(body: CommerceVerifyIn):
             else "Payment received! Your seat is booked — details are on the way to your inbox."}
 
 
+class PromoValidateIn(BaseModel):
+    code: str
+    kind: str
+    ref_id: str
+
+
+@api_router.post("/promo/validate")
+async def promo_validate(body: PromoValidateIn):
+    coll = db.products if body.kind == "product" else db.cohorts if body.kind == "cohort" else None
+    if coll is None:
+        raise HTTPException(status_code=400, detail="Invalid kind")
+    item = await coll.find_one({"slug": body.ref_id, "active": True}, {"_id": 0})
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    p, disc, final, msg = await _resolve_promo(body.code, body.kind, item["price"])
+    if not p:
+        return {"valid": False, "message": msg or "That code isn't valid."}
+    label = f"{int(p['value'])}% off" if (p.get("type") or "percent") == "percent" else f"\u20b9{int(p['value'])} off"
+    return {"valid": True, "message": msg, "code": p["code"], "label": label,
+            "discount": disc, "final_price": final, "original_price": item["price"]}
+
+
 @api_router.post("/cohorts/{slug}/waitlist")
 async def cohort_waitlist(slug: str, body: LeadMagnetIn, request: Request):
     verify_captcha(body.captcha_token, _client_ip(request), request)
@@ -5347,7 +5407,8 @@ async def cohort_waitlist(slug: str, body: LeadMagnetIn, request: Request):
 
 
 # ---- Admin CMS (upsert / delete) ----
-_CMS = {"products": db.products, "cohorts": db.cohorts, "case-studies": db.case_studies, "testimonials": db.testimonials}
+_CMS = {"products": db.products, "cohorts": db.cohorts, "case-studies": db.case_studies,
+        "testimonials": db.testimonials, "promo-codes": db.promo_codes}
 
 
 @api_router.get("/admin/cms/{collection}")
@@ -5364,6 +5425,10 @@ async def cms_upsert(collection: str, body: dict, admin: dict = Depends(require_
     if coll is None:
         raise HTTPException(status_code=404, detail="Unknown collection")
     body.pop("_id", None)
+    if collection == "promo-codes":
+        body["code"] = (body.get("code") or "").strip().upper()
+        if not body["code"]:
+            raise HTTPException(status_code=400, detail="Promo code is required.")
     if body.get("id"):
         body["updated_at"] = now_iso()
         await coll.update_one({"id": body["id"]}, {"$set": body})
@@ -5375,6 +5440,10 @@ async def cms_upsert(collection: str, body: dict, admin: dict = Depends(require_
     if collection == "cohorts":
         body.setdefault("seats_taken", 0)
         body.setdefault("waitlist", [])
+    if collection == "promo-codes":
+        body.setdefault("used_count", 0)
+        if await coll.find_one({"code": body["code"]}):
+            raise HTTPException(status_code=400, detail="A code with that name already exists.")
     await coll.insert_one(body)
     return {"success": True, "id": body["id"]}
 

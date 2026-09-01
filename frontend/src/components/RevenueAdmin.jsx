@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, X, Package, Users, FileText, Quote, Receipt } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Package, Users, FileText, Quote, Receipt, Tag } from "lucide-react";
 import api from "@/lib/api";
 import { formatApiErrorDetail } from "@/context/AuthContext";
 
@@ -66,6 +66,20 @@ const COLLECTIONS = {
       { key: "company", label: "Company (optional)", type: "text" },
       { key: "sort", label: "Sort order", type: "number" },
       { key: "featured", label: "Featured", type: "bool" },
+    ],
+  },
+  "promo-codes": {
+    label: "Promo Codes", icon: Tag, key: "code",
+    columns: [["code", "Code"], ["type", "Type"], ["value", "Value"], ["used_count", "Used"], ["active", "Active"]],
+    fields: [
+      { key: "code", label: "Code (e.g. LAUNCH20)", type: "text" },
+      { key: "type", label: "Discount type", type: "select", options: ["percent", "flat"] },
+      { key: "value", label: "Value (% or ₹ off)", type: "number" },
+      { key: "applies_to", label: "Applies to", type: "select", options: ["all", "product", "cohort"] },
+      { key: "min_amount", label: "Min order amount (₹, 0 = none)", type: "number" },
+      { key: "max_uses", label: "Max uses (0 = unlimited)", type: "number" },
+      { key: "expires_at", label: "Expires (YYYY-MM-DD, blank = never)", type: "text" },
+      { key: "active", label: "Active", type: "bool" },
     ],
   },
 };

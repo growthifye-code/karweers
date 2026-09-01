@@ -108,10 +108,14 @@ def verify_captcha(token, ip=None, request=None):
         if ip:
             form["remoteip"] = ip
         r = requests.post("https://api.hcaptcha.com/siteverify", data=form, timeout=10)
-        ok = r.json().get("success", False)
+        data = r.json()
+        ok = data.get("success", False)
     except Exception:
         raise HTTPException(status_code=503, detail="Captcha service unavailable")
     if not ok:
+        # Diagnostic only: hCaptcha error-codes + hostname (never the token/secret).
+        logger.warning("hCaptcha verification failed: error-codes=%s hostname=%s sitekey=%s",
+                       data.get("error-codes"), data.get("hostname"), HCAPTCHA_SITEKEY)
         raise HTTPException(status_code=403, detail="Captcha verification failed")
     return True
 

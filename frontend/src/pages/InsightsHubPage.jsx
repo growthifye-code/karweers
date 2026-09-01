@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowUpRight, History, Search, Sparkles, TrendingUp } from "lucide-react";
+import { ArrowUpRight, History, Search, Sparkles, TrendingUp, Flame } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import Seo from "@/components/Seo";
@@ -16,11 +16,14 @@ const CAT_DOT = {
   "Strategy Failure": "bg-rose-400",
 };
 
-function BlogCard({ b, i }) {
+function BlogCard({ b, i, trending }) {
   return (
     <motion.div initial={{ opacity: 0, y: 18 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.4, delay: (i % 6) * 0.05 }}>
       <Link to={`/insight/${b.slug}`} data-testid={`hub-blog-${b.slug}`} className="group flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-card transition-transform hover:-translate-y-1 hover:border-[hsl(var(--primary))]/50">
-        <div className="aspect-[16/10] overflow-hidden"><img src={b.hero_image} alt="" loading="lazy" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" /></div>
+        <div className="relative aspect-[16/10] overflow-hidden">
+          <img src={b.hero_image} alt="" loading="lazy" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
+          {trending && <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-[hsl(var(--primary))] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[hsl(var(--primary-foreground))]" data-testid="flame-badge"><Flame className="h-3 w-3" /> Trending</span>}
+        </div>
         <div className="flex flex-1 flex-col p-5">
           <p className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"><span className={`h-2 w-2 rounded-full ${CAT_DOT[b.category] || "bg-[hsl(var(--primary))]"}`} />{b.category} · {b.read_time}</p>
           <h3 className="mt-2.5 font-display text-lg font-bold leading-snug group-hover:text-[hsl(var(--primary))]">{b.title}</h3>
@@ -37,6 +40,8 @@ export default function InsightsHubPage() {
   const [services, setServices] = useState([]);
   const [featured, setFeatured] = useState(null);
   const [trending, setTrending] = useState([]);
+  const [trendSet, setTrendSet] = useState(new Set());
+  const [themes, setThemes] = useState([]);
   const [svc, setSvc] = useState("all");
   const [cat, setCat] = useState("all");
   const [q, setQ] = useState("");
@@ -47,6 +52,8 @@ export default function InsightsHubPage() {
     api.get("/service-insights/services").then((r) => setServices(r.data)).catch(() => {});
     api.get("/service-insights-featured").then((r) => setFeatured(r.data && r.data.slug ? r.data : null)).catch(() => {});
     api.get("/service-insights-trending?limit=6").then((r) => setTrending(r.data)).catch(() => {});
+    api.get("/service-insights-trending-slugs").then((r) => setTrendSet(new Set(r.data || []))).catch(() => {});
+    api.get("/service-insights-themes").then((r) => setThemes(r.data)).catch(() => {});
   }, []);
 
   const cats = useMemo(() => Array.from(new Set(blogs.map((b) => b.category))), [blogs]);
@@ -69,6 +76,17 @@ export default function InsightsHubPage() {
           <h1 className="mt-4 max-w-3xl font-display text-4xl font-black leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl">Consulting-grade insights, refreshed continuously</h1>
           <p className="mt-5 max-w-2xl text-lg text-muted-foreground">Case studies, deal learnings and practical playbooks across strategy, M&A, capital, energy and leadership — the thinking that separates decisions that compound from ones that quietly leak value.</p>
           <Link to="/archive" className="mt-6 inline-flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-sm font-semibold hover:border-[hsl(var(--primary))]" data-testid="hub-archive-link"><History className="h-4 w-4" /> Browse the full archive</Link>
+          {themes.length > 0 && (
+            <div className="mt-8 flex flex-wrap gap-2" data-testid="hub-theme-chips">
+              <span className="mr-1 self-center text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">Explore by theme</span>
+              {themes.map((t) => (
+                <Link key={t.slug} to={`/insights/theme/${t.slug}`} data-testid={`hub-theme-${t.slug}`}
+                  className="rounded-full border border-border bg-card/60 px-3.5 py-1.5 text-sm font-medium transition-colors hover:border-[hsl(var(--primary))] hover:text-[hsl(var(--primary))]">
+                  {t.theme} <span className="opacity-50">{t.count}</span>
+                </Link>
+              ))}
+            </div>
+          )}
         </div>
       </section>
 
@@ -121,7 +139,7 @@ export default function InsightsHubPage() {
           </div>
 
           <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3" data-testid="hub-grid">
-            {shown.map((b, i) => <BlogCard key={b.slug} b={b} i={i} />)}
+            {shown.map((b, i) => <BlogCard key={b.slug} b={b} i={i} trending={trendSet.has(b.slug)} />)}
           </div>
           {shown.length === 0 && <p className="py-16 text-center text-muted-foreground">No insights match your filters yet.</p>}
         </div>

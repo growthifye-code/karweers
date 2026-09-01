@@ -82,13 +82,24 @@ export default function InsightsAdmin() {
   const [busy, setBusy] = useState("");
   const [sending, setSending] = useState(false);
   const [recapping, setRecapping] = useState(false);
+  const [cadence, setCadence] = useState("weekly");
 
   const load = () => {
     api.get("/admin/service-insights").then((r) => setBlogs(r.data)).catch(() => toast.error("Couldn't load insights — please re-login."));
     api.get("/admin/insights/analytics").then((r) => setAnalytics(r.data)).catch(() => {});
     api.get("/admin/featured-queue").then((r) => setQueue(r.data.queue || [])).catch(() => {});
+    api.get("/admin/insights/recap-settings").then((r) => setCadence(r.data.cadence || "weekly")).catch(() => {});
   };
   useEffect(() => { load(); }, []);
+
+  const changeCadence = async (v) => {
+    const prev = cadence;
+    setCadence(v);
+    setBusy("cadence");
+    try { await api.post("/admin/insights/recap-settings", { cadence: v }); toast.success(`Recap set to ${v}`); }
+    catch { setCadence(prev); toast.error("Couldn't update cadence"); }
+    finally { setBusy(""); }
+  };
 
   const feature = async (slug) => {
     try { await api.post(`/admin/service-insights/${slug}/feature`); toast.success("Pinned as featured"); load(); }
@@ -128,6 +139,15 @@ export default function InsightsAdmin() {
           <p className="text-sm text-muted-foreground">{blogs.length} insights · edit, reorder, feature, refresh and track performance.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs">
+            <span className="text-muted-foreground">Recap</span>
+            <select value={cadence} onChange={(e) => changeCadence(e.target.value)} disabled={busy === "cadence"} data-testid="recap-cadence" className="bg-transparent text-sm font-semibold outline-none disabled:opacity-50">
+              <option value="weekly">Weekly</option>
+              <option value="fortnightly">Fortnightly</option>
+              <option value="monthly">Monthly</option>
+              <option value="off">Off</option>
+            </select>
+          </label>
           <button onClick={sendRecap} disabled={recapping} data-testid="send-recap" className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-sm font-semibold hover:border-[hsl(var(--primary))] disabled:opacity-60"><TrendingUp className="h-4 w-4" />{recapping ? "Sending…" : "Email me the recap"}</button>
           <button onClick={sendNewsletter} disabled={sending} data-testid="send-newsletter" className="inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-5 py-2.5 text-sm font-semibold text-[hsl(var(--primary-foreground))] disabled:opacity-60"><Mail className="h-4 w-4" />{sending ? "Sending…" : "Send newsletter now"}</button>
         </div>

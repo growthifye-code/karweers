@@ -2192,10 +2192,10 @@ async def _digest_scheduler():
                     fm = await db.app_meta.find_one({"_id": "featured_insight"})
                     if (fm or {}).get("rotated_at", "")[:10] != ist_now.date().isoformat():
                         await _auto_feature_winner(_prev_iso_week())
-                # Weekly performance recap to the admin — Monday ~07:00 IST.
+                # Weekly performance recap to the admin — Monday ~07:00 IST (respects cadence).
                 if ist_now.weekday() == 0 and ist_now.hour == 7:
                     rc = await db.app_meta.find_one({"_id": "insights_recap"})
-                    if (rc or {}).get("last_run", "")[:10] != ist_now.date().isoformat():
+                    if (rc or {}).get("last_run", "")[:10] != ist_now.date().isoformat() and _recap_due((rc or {}).get("cadence", "weekly"), ist_now):
                         await _send_weekly_recap(_prev_iso_week())
                 # Weekly Library shelf digest to subscribers — Monday ~09:00 IST.
                 if ist_now.weekday() == 0 and ist_now.hour == 9:
@@ -5111,6 +5111,7 @@ async def get_service_insight(slug: str):
     pool = await db.service_blogs.find({"slug": {"$ne": slug}}, {"_id": 0}).sort("updated_at", -1).to_list(200)
     same = [r for r in pool if _insight_theme(r.get("service_slug"), r.get("category")) == theme][:4]
     d["theme"] = theme
+    d["theme_slug"] = THEME_SLUGS.get(theme, "strategy")
     d["related_by_theme"] = [_blog_card(r) for r in same]
     return d
 
@@ -5139,6 +5140,22 @@ async def admin_service_insights_regenerate(force: bool = False, admin: dict = D
     return {"success": True, "message": "Insight generation started in the background."}
 
 INSIGHT_THEMES = ["Strategy", "M&A", "Capital & Finance", "Markets", "Economy", "Technology", "Energy & Climate", "Leadership"]
+THEME_SLUGS = {
+    "Strategy": "strategy", "M&A": "m-and-a", "Capital & Finance": "capital-finance",
+    "Markets": "markets", "Economy": "economy", "Technology": "technology",
+    "Energy & Climate": "energy-climate", "Leadership": "leadership",
+}
+_SLUG_TO_THEME = {v: k for k, v in THEME_SLUGS.items()}
+_THEME_BLURB = {
+    "Strategy": "How great companies choose where to play, what to kill and when to bet — corporate strategy, portfolio and market entry.",
+    "M&A": "Dealmaking that creates value and the mergers that destroyed it — diligence, integration and the first 100 days.",
+    "Capital & Finance": "Raising capital on the right terms — IPOs, private rounds, debt and the discipline behind fundable stories.",
+    "Markets": "Competitive dynamics, sector shifts and the market signals that separate winners from also-rans.",
+    "Economy": "Macro, policy and public-asset economics — from monetisation pipelines to infrastructure capital.",
+    "Technology": "Where AI and technology actually change the decision — not the hype, the operating reality.",
+    "Energy & Climate": "The energy transition and climate capital — renewables, storage, hydrogen and bankable green finance.",
+    "Leadership": "Building leaders who scale — the founder-to-CEO transition, culture, succession and executive judgement.",
+}
 _SERVICE_THEME = {
     "business-strategy": "Strategy", "ma-advisory": "M&A",
     "fund-raising": "Capital & Finance", "premium-consultation": "Leadership",
@@ -5250,6 +5267,37 @@ async def trending_insights(limit: int = 6):
     return [_blog_card(d) for d in docs[:limit]]
 
 
+@api_router.get("/service-insights-trending-slugs")
+async def trending_slugs(limit: int = 8, min_reads: int = 2):
+    """Slugs genuinely spiking this week (for the flame badge)."""
+    wk = _iso_week()
+    stats = await db.insight_stats.find({"week": wk}, {"_id": 0, "slug": 1, "reads_week": 1}).sort("reads_week", -1).to_list(50)
+    return [s["slug"] for s in stats if int(s.get("reads_week", 0) or 0) >= min_reads][:limit]
+
+
+@api_router.get("/service-insights-themes")
+async def list_insight_themes():
+    """All themes with counts + slugs for theme landing pages / navigation."""
+    docs = await db.service_blogs.find({}, {"_id": 0, "service_slug": 1, "category": 1}).to_list(300)
+    counts = {}
+    for d in docs:
+        th = _insight_theme(d.get("service_slug"), d.get("category"))
+        counts[th] = counts.get(th, 0) + 1
+    return [{"theme": t, "slug": THEME_SLUGS[t], "count": counts.get(t, 0), "blurb": _THEME_BLURB.get(t, "")}
+            for t in INSIGHT_THEMES if counts.get(t, 0) > 0]
+
+
+@api_router.get("/service-insights-theme/{theme_slug}")
+async def insights_by_theme(theme_slug: str):
+    theme = _SLUG_TO_THEME.get(theme_slug)
+    if not theme:
+        raise HTTPException(status_code=404, detail="Theme not found")
+    docs = await db.service_blogs.find({}, {"_id": 0}).sort("updated_at", -1).to_list(300)
+    items = [_blog_card(d) for d in docs if _insight_theme(d.get("service_slug"), d.get("category")) == theme]
+    return {"theme": theme, "slug": theme_slug, "blurb": _THEME_BLURB.get(theme, ""),
+            "count": len(items), "items": items}
+
+
 def _prev_iso_week() -> str:
     return (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%G-W%V")
 
@@ -5334,6 +5382,36 @@ async def admin_auto_feature_run(week: str = "current", admin: dict = Depends(re
     wk = _prev_iso_week() if week == "prev" else _iso_week()
     winner = await _auto_feature_winner(wk)
     return {"success": True, "winner": winner}
+
+
+@api_router.get("/admin/insights/recap-settings")
+async def admin_recap_settings_get(admin: dict = Depends(require_admin)):
+    meta = await db.app_meta.find_one({"_id": "insights_recap"}) or {}
+    return {"cadence": meta.get("cadence", "weekly"), "last_run": meta.get("last_run")}
+
+
+class RecapSettingsIn(BaseModel):
+    cadence: str  # weekly | fortnightly | monthly
+
+
+@api_router.post("/admin/insights/recap-settings")
+async def admin_recap_settings_set(body: RecapSettingsIn, admin: dict = Depends(require_admin)):
+    if body.cadence not in ("weekly", "fortnightly", "monthly", "off"):
+        raise HTTPException(status_code=400, detail="Invalid cadence")
+    await db.app_meta.update_one({"_id": "insights_recap"}, {"$set": {"cadence": body.cadence}}, upsert=True)
+    return {"success": True, "cadence": body.cadence}
+
+
+def _recap_due(cadence: str, ist_now) -> bool:
+    if cadence == "off":
+        return False
+    if cadence == "weekly":
+        return True
+    if cadence == "fortnightly":
+        return (ist_now.isocalendar()[1] % 2) == 0
+    if cadence == "monthly":
+        return ist_now.day <= 7  # first Monday of the month
+    return True
 
 
 # ---------------- Reading & share analytics ----------------

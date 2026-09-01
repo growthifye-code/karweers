@@ -22,6 +22,7 @@ export default function ServiceInsightPage({ archived = false }) {
   const { slug, id } = useParams();
   const [a, setA] = useState(null);
   const [notFound, setNotFound] = useState(false);
+  const [progress, setProgress] = useState(0);
   const viewed = useRef(null);
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -33,6 +34,17 @@ export default function ServiceInsightPage({ archived = false }) {
       api.post("/insights/track", { slug, event: "view" }).catch(() => {});
     }
   }, [slug, id, archived]);
+
+  useEffect(() => {
+    const onScroll = () => {
+      const h = document.documentElement;
+      const max = h.scrollHeight - h.clientHeight;
+      setProgress(max > 0 ? Math.min(100, (h.scrollTop / max) * 100) : 0);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [a]);
 
   const recordShare = (platform) => {
     if (!archived && a?.slug) api.post("/insights/track", { slug: a.slug, event: "share", platform }).catch(() => {});
@@ -58,6 +70,7 @@ export default function ServiceInsightPage({ archived = false }) {
       <Seo title={`${a.title} — SK Insights`} description={a.dek} image={a.hero_image} type="article"
         jsonLd={{ "@context": "https://schema.org", "@type": "Article", headline: a.title, description: a.dek, image: a.hero_image, author: { "@type": "Person", name: "Sudarshan Karweer" } }} />
       <Navbar />
+      {!archived && <div className="fixed left-0 top-0 z-50 h-1 bg-[hsl(var(--primary))] transition-[width] duration-150" style={{ width: `${progress}%` }} data-testid="reading-progress" />}
 
       <div className="relative h-[46vh] min-h-[340px] w-full overflow-hidden">
         <img src={a.hero_image} alt={a.title} className="h-full w-full object-cover" />
@@ -141,6 +154,9 @@ export default function ServiceInsightPage({ archived = false }) {
           <div className="mt-5 flex flex-wrap gap-3">
             <Link to={`/services/${a.service_slug}`} className="inline-flex items-center gap-1.5 rounded-full bg-[hsl(var(--primary))] px-6 py-3 text-sm font-semibold text-[hsl(var(--primary-foreground))]">Explore {a.service_title} <ArrowUpRight className="h-4 w-4" /></Link>
             <a href="/#consult" className="inline-flex items-center gap-1.5 rounded-full border border-border px-6 py-3 text-sm font-semibold hover:bg-secondary">Book a consultation</a>
+            {a.sk_insight?.take && !archived && (
+              <button onClick={shareTake} data-testid="share-sk-take-end" className="inline-flex items-center gap-1.5 rounded-full border border-[hsl(var(--primary))] px-6 py-3 text-sm font-semibold text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary))]/10"><Quote className="h-4 w-4" /> Share SK's take</button>
+            )}
           </div>
         </div>
 
@@ -160,7 +176,10 @@ export default function ServiceInsightPage({ archived = false }) {
 
         {Array.isArray(a.related_by_theme) && a.related_by_theme.length > 0 && (
           <div className="mt-16" data-testid="related-by-theme">
-            <h3 className="font-display text-2xl font-bold">More in {a.theme}</h3>
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="font-display text-2xl font-bold">More in {a.theme}</h3>
+              <Link to={`/insights/theme/${a.theme_slug}`} className="inline-flex items-center gap-1 text-sm font-semibold text-[hsl(var(--primary))]" data-testid="view-theme-page">View all <ArrowUpRight className="h-4 w-4" /></Link>
+            </div>
             <div className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
               {a.related_by_theme.map((r) => (
                 <Link key={r.slug} to={`/insight/${r.slug}`} className="group overflow-hidden rounded-2xl border border-border bg-card transition-transform hover:-translate-y-1" data-testid={`theme-rel-${r.slug}`}>

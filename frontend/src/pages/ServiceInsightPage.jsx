@@ -1,11 +1,12 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowLeft, ArrowUpRight, Sparkles, CheckCircle2, History } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, Sparkles, CheckCircle2, History, Quote } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import Seo from "@/components/Seo";
 import ShareBar from "@/components/ShareBar";
+import { toast } from "sonner";
 import api from "@/lib/api";
 
 const CAT_COLORS = {
@@ -35,6 +36,15 @@ export default function ServiceInsightPage({ archived = false }) {
 
   const recordShare = (platform) => {
     if (!archived && a?.slug) api.post("/insights/track", { slug: a.slug, event: "share", platform }).catch(() => {});
+  };
+
+  const shareTake = async () => {
+    const url = window.location.href;
+    const quote = `"${a.sk_insight.take}"\n\n— Sudarshan Karweer, on ${a.title}\n\n${url}`;
+    try { await navigator.clipboard.writeText(quote); toast.success("SK's take copied — ready to paste on LinkedIn"); }
+    catch { /* clipboard blocked */ }
+    recordShare("quote");
+    window.open(`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(url)}`, "_blank", "noopener");
   };
 
   if (notFound) return (
@@ -106,6 +116,12 @@ export default function ServiceInsightPage({ archived = false }) {
                   <p className="text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">What this means for corporates</p>
                   <p className="mt-2 leading-relaxed text-muted-foreground">{a.sk_insight.corporate_relevance}</p>
                 </div>
+              )}
+              {a.sk_insight.take && (
+                <button onClick={shareTake} data-testid="share-sk-take"
+                  className="inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-5 py-2.5 text-sm font-semibold text-[hsl(var(--primary-foreground))] transition-transform hover:-translate-y-0.5">
+                  <Quote className="h-4 w-4" /> Share SK's take
+                </button>
               )}
             </div>
           </div>

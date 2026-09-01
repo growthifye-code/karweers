@@ -2186,6 +2186,11 @@ async def _digest_scheduler():
                     inl = await db.app_meta.find_one({"_id": "insights_newsletter"})
                     if (inl or {}).get("last_run", "")[:10] != ist_now.date().isoformat():
                         await _send_insights_newsletter()
+                # Rotate the featured insight queue — Monday ~06:00 IST.
+                if ist_now.weekday() == 0 and ist_now.hour == 6:
+                    fm = await db.app_meta.find_one({"_id": "featured_insight"})
+                    if (fm or {}).get("rotated_at", "")[:10] != ist_now.date().isoformat():
+                        await _rotate_featured()
                 # Weekly Library shelf digest to subscribers — Monday ~09:00 IST.
                 if ist_now.weekday() == 0 and ist_now.hour == 9:
                     ld = await db.app_meta.find_one({"_id": "library_digest"})
@@ -3757,6 +3762,7 @@ class PrefsIn(BaseModel):
     token: str
     sectors: List[str] = []
     agencies: List[str] = []
+    themes: List[str] = []
 
 
 class FollowIn(BaseModel):
@@ -3774,6 +3780,8 @@ async def get_preferences(token: str = ""):
     return {"email": email, "subscribed": bool(sub),
             "selected_sectors": (sub or {}).get("interests_sectors", []),
             "selected_agencies": (sub or {}).get("interests_agencies", []),
+            "selected_themes": (sub or {}).get("interests_themes", []),
+            "all_themes": INSIGHT_THEMES,
             "all_sectors": [{"slug": k, "name": v["name"]} for k, v in SECTORS.items()],
             "all_agencies": [{"slug": k, "name": v["name"], "group": v["group"]} for k, v in AGENCIES.items()]}
 
@@ -3785,10 +3793,11 @@ async def set_preferences(body: PrefsIn):
         raise HTTPException(status_code=400, detail="Invalid or expired link")
     sec = [s for s in body.sectors if s in SECTORS][:20]
     ag = [a for a in body.agencies if a in AGENCIES][:30]
+    th = [t for t in body.themes if t in INSIGHT_THEMES][:8]
     await db.subscribers.update_one({"email": email},
-        {"$set": {"interests_sectors": sec, "interests_agencies": ag},
+        {"$set": {"interests_sectors": sec, "interests_agencies": ag, "interests_themes": th},
          "$setOnInsert": {"id": str(uuid.uuid4()), "email": email, "created_at": now_iso()}}, upsert=True)
-    return {"success": True, "message": "Your weekly topics are saved."}
+    return {"success": True, "message": "Your topics are saved."}
 
 
 @api_router.post("/newsletter/follow")
@@ -5111,11 +5120,40 @@ async def admin_service_insights_regenerate(force: bool = False, admin: dict = D
     asyncio.create_task(_run())
     return {"success": True, "message": "Insight generation started in the background."}
 
-# ---------------- Featured insight (pinned to hub + homepage) ----------------
+INSIGHT_THEMES = ["Strategy", "M&A", "Capital & Finance", "Markets", "Economy", "Technology", "Energy & Climate", "Leadership"]
+_SERVICE_THEME = {
+    "business-strategy": "Strategy", "ma-advisory": "M&A",
+    "fund-raising": "Capital & Finance", "premium-consultation": "Leadership",
+    "re-storage-hydrogen": "Energy & Climate", "green-climate-financing": "Energy & Climate",
+    "asset-monetisation": "Economy", "business-coaching": "Leadership",
+}
+
+
+def _insight_theme(service_slug: str, category: str) -> str:
+    if category == "AI & Technology":
+        return "Technology"
+    return _SERVICE_THEME.get(service_slug, "Strategy")
+
+
+async def _resolve_featured_slug() -> Optional[str]:
+    """Current featured slug: rotates through the queue if set, else the single pin."""
+    meta = await db.app_meta.find_one({"_id": "featured_insight"}) or {}
+    queue = [s for s in (meta.get("queue") or []) if s]
+    if queue:
+        idx = int(meta.get("index", 0)) % len(queue)
+        return queue[idx]
+    return meta.get("slug")
+
+
+def _iso_week(dt=None) -> str:
+    dt = dt or datetime.now(timezone.utc)
+    return dt.strftime("%G-W%V")
+
+
+# ---------------- Featured insight (pinned/rotating on hub + homepage) ----------------
 @api_router.get("/service-insights-featured")
 async def get_featured_insight():
-    meta = await db.app_meta.find_one({"_id": "featured_insight"})
-    slug = (meta or {}).get("slug")
+    slug = await _resolve_featured_slug()
     d = None
     if slug:
         d = await db.service_blogs.find_one({"slug": slug}, {"_id": 0})
@@ -5130,12 +5168,68 @@ async def get_featured_insight():
 
 @api_router.post("/admin/service-insights/{slug}/feature")
 async def admin_feature_insight(slug: str, admin: dict = Depends(require_admin)):
+    """Toggle a slug in the featured rotation queue."""
     d = await db.service_blogs.find_one({"slug": slug}, {"_id": 0, "slug": 1})
     if not d:
         raise HTTPException(status_code=404, detail="Insight not found")
+    meta = await db.app_meta.find_one({"_id": "featured_insight"}) or {}
+    queue = [s for s in (meta.get("queue") or []) if s]
+    current = queue[int(meta.get("index", 0)) % len(queue)] if queue else None
+    if slug in queue:
+        queue.remove(slug)
+        in_queue = False
+    else:
+        queue.append(slug)
+        in_queue = True
+    # Preserve the currently-live slug across edits so rotation doesn't jump mid-week.
+    new_index = queue.index(current) if (current in queue) else 0
     await db.app_meta.update_one({"_id": "featured_insight"},
-                                 {"$set": {"slug": slug, "set_at": now_iso()}}, upsert=True)
-    return {"success": True, "featured": slug}
+                                 {"$set": {"queue": queue, "index": new_index,
+                                           "slug": queue[new_index] if queue else None,
+                                           "set_at": now_iso()}}, upsert=True)
+    return {"success": True, "in_queue": in_queue, "queue": queue}
+
+
+@api_router.get("/admin/featured-queue")
+async def admin_featured_queue(admin: dict = Depends(require_admin)):
+    meta = await db.app_meta.find_one({"_id": "featured_insight"}) or {}
+    queue = [s for s in (meta.get("queue") or []) if s]
+    current = await _resolve_featured_slug()
+    titles = {}
+    if queue:
+        async for b in db.service_blogs.find({"slug": {"$in": queue}}, {"_id": 0, "slug": 1, "title": 1, "service_title": 1}):
+            titles[b["slug"]] = b
+    return {"queue": [{"slug": s, "title": titles.get(s, {}).get("title", s),
+                       "service_title": titles.get(s, {}).get("service_title", ""),
+                       "current": s == current} for s in queue],
+            "rotated_at": meta.get("rotated_at"), "cadence": "weekly"}
+
+
+async def _rotate_featured():
+    meta = await db.app_meta.find_one({"_id": "featured_insight"}) or {}
+    queue = [s for s in (meta.get("queue") or []) if s]
+    if len(queue) < 2:
+        return
+    idx = (int(meta.get("index", 0)) + 1) % len(queue)
+    await db.app_meta.update_one({"_id": "featured_insight"},
+                                 {"$set": {"index": idx, "slug": queue[idx], "rotated_at": now_iso()}})
+
+
+# ---------------- Trending (most read this week) ----------------
+@api_router.get("/service-insights-trending")
+async def trending_insights(limit: int = 6):
+    wk = _iso_week()
+    stats = await db.insight_stats.find({"week": wk}, {"_id": 0}).sort("reads_week", -1).to_list(50)
+    slugs = [s["slug"] for s in stats if int(s.get("reads_week", 0) or 0) > 0][:limit]
+    docs = []
+    if slugs:
+        by_slug = {d["slug"]: d for d in await db.service_blogs.find({"slug": {"$in": slugs}}, {"_id": 0}).to_list(limit)}
+        docs = [by_slug[s] for s in slugs if s in by_slug]
+    if len(docs) < limit:  # top up with freshest so the strip is never empty
+        have = {d["slug"] for d in docs}
+        extra = await db.service_blogs.find({"slug": {"$nin": list(have)}}, {"_id": 0}).sort("updated_at", -1).to_list(limit - len(docs))
+        docs += extra
+    return [_blog_card(d) for d in docs[:limit]]
 
 
 # ---------------- Reading & share analytics ----------------
@@ -5145,6 +5239,9 @@ class InsightTrackIn(BaseModel):
     platform: Optional[str] = None
 
 
+SHARE_PLATFORMS = {"linkedin", "twitter", "whatsapp", "email", "quote", "copy", "native"}
+
+
 @api_router.post("/insights/track")
 async def track_insight(body: InsightTrackIn):
     if body.event not in ("view", "share"):
@@ -5152,26 +5249,28 @@ async def track_insight(body: InsightTrackIn):
     blog = await db.service_blogs.find_one({"slug": body.slug}, {"_id": 0, "slug": 1, "title": 1, "service_slug": 1, "category": 1})
     if not blog:
         return {"ok": True}  # ignore unknown slugs silently
-    field = "reads" if body.event == "view" else "shares"
-    inc = {field: 1}
-    if body.event == "share" and body.platform:
-        inc[f"share_by.{body.platform}"] = 1
+    theme = _insight_theme(blog.get("service_slug"), blog.get("category"))
+    base = {"title": blog.get("title"), "service_slug": blog.get("service_slug"),
+            "category": blog.get("category"), "theme": theme, "updated_at": now_iso()}
+    if body.event == "share":
+        inc = {"shares": 1}
+        if body.platform in SHARE_PLATFORMS:
+            inc[f"share_by.{body.platform}"] = 1
+        await db.insight_stats.update_one({"slug": body.slug}, {"$inc": inc, "$set": base}, upsert=True)
+        return {"ok": True}
+    # view: maintain cumulative reads + a weekly rolling counter
+    wk = _iso_week()
+    existing = await db.insight_stats.find_one({"slug": body.slug}, {"_id": 0, "week": 1, "reads_week": 1})
+    reads_week = int((existing or {}).get("reads_week", 0) or 0) + 1 if (existing or {}).get("week") == wk else 1
     await db.insight_stats.update_one(
         {"slug": body.slug},
-        {"$inc": inc, "$set": {"title": blog.get("title"), "service_slug": blog.get("service_slug"),
-                               "category": blog.get("category"), "updated_at": now_iso()}},
+        {"$inc": {"reads": 1}, "$set": {**base, "week": wk, "reads_week": reads_week}},
         upsert=True)
     return {"ok": True}
 
 
 @api_router.get("/admin/insights/analytics")
 async def admin_insights_analytics(admin: dict = Depends(require_admin)):
-    SERVICE_THEME = {
-        "business-strategy": "Strategy", "ma-advisory": "M&A",
-        "fund-raising": "Capital & Finance", "premium-consultation": "Leadership",
-        "re-storage-hydrogen": "Energy & Climate", "green-climate-financing": "Energy & Climate",
-        "asset-monetisation": "Economy", "business-coaching": "Leadership",
-    }
     stats = await db.insight_stats.find({}, {"_id": 0}).to_list(500)
     total_reads = sum(int(s.get("reads", 0) or 0) for s in stats)
     total_shares = sum(int(s.get("shares", 0) or 0) for s in stats)
@@ -5179,7 +5278,7 @@ async def admin_insights_analytics(admin: dict = Depends(require_admin)):
     top_shared = sorted(stats, key=lambda s: s.get("shares", 0) or 0, reverse=True)[:8]
     theme = {}
     for s in stats:
-        th = "Technology" if s.get("category") == "AI & Technology" else SERVICE_THEME.get(s.get("service_slug"), "Strategy")
+        th = s.get("theme") or _insight_theme(s.get("service_slug"), s.get("category"))
         t = theme.setdefault(th, {"theme": th, "reads": 0, "shares": 0})
         t["reads"] += int(s.get("reads", 0) or 0)
         t["shares"] += int(s.get("shares", 0) or 0)
@@ -5197,7 +5296,9 @@ async def admin_insights_analytics(admin: dict = Depends(require_admin)):
 @api_router.get("/admin/service-insights")
 async def admin_list_service_insights(admin: dict = Depends(require_admin)):
     docs = await db.service_blogs.find({}, {"_id": 0}).sort([("service_slug", 1), ("sort", 1)]).to_list(300)
-    feat = (await db.app_meta.find_one({"_id": "featured_insight"}) or {}).get("slug")
+    meta = await db.app_meta.find_one({"_id": "featured_insight"}) or {}
+    queue = set(s for s in (meta.get("queue") or []) if s)
+    current = await _resolve_featured_slug()
     stats = {s["slug"]: s for s in await db.insight_stats.find({}, {"_id": 0}).to_list(500)}
     arch = {}
     async for d in db.service_blogs_archive.aggregate([{"$group": {"_id": "$slug", "n": {"$sum": 1}}}]):
@@ -5208,7 +5309,8 @@ async def admin_list_service_insights(admin: dict = Depends(require_admin)):
         out.append({"slug": d["slug"], "title": d["title"], "service_slug": d["service_slug"],
                     "service_title": d["service_title"], "category": d["category"], "sort": d.get("sort", 0),
                     "hero_image": d.get("hero_image"), "version": d.get("version", 1),
-                    "updated_at": d.get("updated_at"), "featured": d["slug"] == feat,
+                    "updated_at": d.get("updated_at"), "featured": d["slug"] in queue,
+                    "is_current": d["slug"] == current,
                     "reads": int(st.get("reads", 0) or 0), "shares": int(st.get("shares", 0) or 0),
                     "editions": arch.get(d["slug"], 0)})
     return out
@@ -5263,25 +5365,42 @@ async def admin_insight_editions(slug: str, admin: dict = Depends(require_admin)
 
 
 # ---------------- Insights newsletter (weekly, freshest 5) ----------------
-async def _collect_fresh_insights(limit: int = 5) -> list:
-    docs = await db.service_blogs.find({}, {"_id": 0}).sort("updated_at", -1).to_list(limit)
-    return [{"slug": d.get("slug"), "title": d.get("title"), "dek": d.get("dek"),
-             "category": d.get("category"), "service_title": d.get("service_title"),
-             "hero_image": d.get("hero_image")} for d in docs]
+async def _collect_fresh_insights(limit: int = 5, pool: int = 30) -> list:
+    docs = await db.service_blogs.find({}, {"_id": 0}).sort("updated_at", -1).to_list(pool)
+    out = []
+    for d in docs:
+        out.append({"slug": d.get("slug"), "title": d.get("title"), "dek": d.get("dek"),
+                    "category": d.get("category"), "service_title": d.get("service_title"),
+                    "service_slug": d.get("service_slug"), "hero_image": d.get("hero_image"),
+                    "theme": _insight_theme(d.get("service_slug"), d.get("category"))})
+    return out[:limit] if limit and pool <= limit else out
+
+
+def _pick_for_subscriber(pool: list, themes: list, limit: int = 5) -> list:
+    """Freshest N insights, preferring the subscriber's chosen themes."""
+    if themes:
+        matched = [p for p in pool if p.get("theme") in themes]
+        if matched:
+            picks = matched[:limit]
+            if len(picks) < limit:
+                picks += [p for p in pool if p not in picks][:limit - len(picks)]
+            return picks
+    return pool[:limit]
 
 
 async def _send_insights_newsletter():
-    """Email newsletter subscribers the freshest 5 SK Insights."""
-    items = await _collect_fresh_insights(5)
-    if not items:
+    """Email newsletter subscribers the freshest SK Insights, tailored to their chosen themes."""
+    pool = await _collect_fresh_insights(limit=0, pool=30)
+    if not pool:
         return {"sent": False, "reason": "no_insights"}
-    subs = await db.subscribers.find({}, {"_id": 0, "email": 1, "name": 1}).to_list(5000)
+    subs = await db.subscribers.find({}, {"_id": 0, "email": 1, "name": 1, "interests_themes": 1}).to_list(5000)
     loop = asyncio.get_event_loop()
     for c in subs:
-        await loop.run_in_executor(None, lambda cc=c: send_insights_newsletter_email(
-            cc["email"], cc.get("name", "there"), items, PUBLIC_SITE, _unsub_url(cc["email"])))
+        items = _pick_for_subscriber(pool, c.get("interests_themes") or [], 5)
+        await loop.run_in_executor(None, lambda cc=c, it=items: send_insights_newsletter_email(
+            cc["email"], cc.get("name", "there"), it, PUBLIC_SITE, _unsub_url(cc["email"])))
     await db.app_meta.update_one({"_id": "insights_newsletter"}, {"$set": {"last_run": now_iso()}}, upsert=True)
-    return {"sent": True, "subscribers": len(subs), "items": len(items)}
+    return {"sent": True, "subscribers": len(subs), "items": len(pool[:5])}
 
 
 @api_router.post("/admin/insights-newsletter/run")

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowUpRight, History, Search, Sparkles } from "lucide-react";
+import { ArrowUpRight, History, Search, Sparkles, TrendingUp } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import Seo from "@/components/Seo";
@@ -36,6 +36,7 @@ export default function InsightsHubPage() {
   const [blogs, setBlogs] = useState([]);
   const [services, setServices] = useState([]);
   const [featured, setFeatured] = useState(null);
+  const [trending, setTrending] = useState([]);
   const [svc, setSvc] = useState("all");
   const [cat, setCat] = useState("all");
   const [q, setQ] = useState("");
@@ -45,6 +46,7 @@ export default function InsightsHubPage() {
     api.get("/service-insights?limit=200").then((r) => setBlogs(r.data)).catch(() => {});
     api.get("/service-insights/services").then((r) => setServices(r.data)).catch(() => {});
     api.get("/service-insights-featured").then((r) => setFeatured(r.data && r.data.slug ? r.data : null)).catch(() => {});
+    api.get("/service-insights-trending?limit=6").then((r) => setTrending(r.data)).catch(() => {});
   }, []);
 
   const cats = useMemo(() => Array.from(new Set(blogs.map((b) => b.category))), [blogs]);
@@ -72,6 +74,21 @@ export default function InsightsHubPage() {
 
       <section className="border-t border-border py-10">
         <div className="mx-auto max-w-7xl px-6 lg:px-10">
+          {trending.length > 0 && (
+            <div className="mb-12" data-testid="trending-strip">
+              <div className="flex items-center gap-2"><TrendingUp className="h-5 w-5 text-[hsl(var(--primary))]" /><h2 className="font-display text-xl font-bold">Most read this week</h2></div>
+              <div className="mt-5 flex snap-x gap-4 overflow-x-auto pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                {trending.map((b, i) => (
+                  <Link key={b.slug} to={`/insight/${b.slug}`} data-testid={`trending-${b.slug}`}
+                    className="group relative w-64 flex-shrink-0 snap-start overflow-hidden rounded-2xl border border-border bg-card transition-transform hover:-translate-y-1">
+                    <div className="aspect-[16/10] overflow-hidden"><img src={b.hero_image} alt="" loading="lazy" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" /></div>
+                    <span className="absolute left-3 top-3 grid h-7 w-7 place-items-center rounded-full bg-[hsl(var(--primary))] text-sm font-bold text-[hsl(var(--primary-foreground))]">{i + 1}</span>
+                    <div className="p-4"><p className="text-[11px] font-semibold uppercase tracking-wider text-[hsl(var(--primary))]">{b.category}</p><h3 className="mt-1.5 line-clamp-2 text-sm font-semibold leading-snug">{b.title}</h3></div>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
           {featured && (
             <Link to={`/insight/${featured.slug}`} data-testid="featured-insight"
               className="group mb-10 grid overflow-hidden rounded-3xl border border-[hsl(var(--primary))]/30 bg-card lg:grid-cols-2">

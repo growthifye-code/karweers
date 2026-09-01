@@ -75,6 +75,7 @@ function EditionsModal({ blog, onClose }) {
 export default function InsightsAdmin() {
   const [blogs, setBlogs] = useState([]);
   const [analytics, setAnalytics] = useState(null);
+  const [queue, setQueue] = useState([]);
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState(null);
   const [editions, setEditions] = useState(null);
@@ -84,6 +85,7 @@ export default function InsightsAdmin() {
   const load = () => {
     api.get("/admin/service-insights").then((r) => setBlogs(r.data)).catch(() => toast.error("Couldn't load insights — please re-login."));
     api.get("/admin/insights/analytics").then((r) => setAnalytics(r.data)).catch(() => {});
+    api.get("/admin/featured-queue").then((r) => setQueue(r.data.queue || [])).catch(() => {});
   };
   useEffect(() => { load(); }, []);
 
@@ -163,6 +165,20 @@ export default function InsightsAdmin() {
       <div className="relative mb-4 max-w-md">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search insights…" data-testid="insights-admin-search" className="w-full rounded-full border border-border bg-card pl-10 pr-4 py-2.5 text-sm outline-none focus:border-[hsl(var(--primary))]" />
+      </div>
+
+      <div className="mb-6 rounded-2xl border border-border bg-card p-5" data-testid="featured-queue-panel">
+        <div className="flex items-center gap-2"><Star className="h-4 w-4 fill-[hsl(var(--primary))] text-[hsl(var(--primary))]" /><h3 className="font-display text-base font-bold">Featured rotation</h3></div>
+        <p className="mt-1 text-xs text-muted-foreground">Star insights below to queue them. The homepage & hub auto-rotate through the queue weekly (Mondays). {queue.length === 0 ? "Queue is empty — the freshest insight shows by default." : `${queue.length} queued.`}</p>
+        {queue.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {queue.map((item) => (
+              <span key={item.slug} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium ${item.current ? "border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10 text-[hsl(var(--primary))]" : "border-border"}`} data-testid={`queue-${item.slug}`}>
+                {item.current && <span className="text-[10px] font-bold uppercase">Live</span>}{item.title.length > 40 ? item.title.slice(0, 40) + "…" : item.title}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-border">

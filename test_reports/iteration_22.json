@@ -1,0 +1,35 @@
+{
+  "summary": "Iteration 22 — Featured Rotation queue, Trending strip, Quote share tracking, Subscriber theme preferences, and Newsletter background-send auth-gating all validated end-to-end. Backend: 12/12 pytest cases pass against the external URL (POST /admin/service-insights/{slug}/feature toggles in/out and returns in_queue true→false; GET /admin/featured-queue lists with `current` flag; GET /service-insights-featured returns queue[index] slug or falls back to freshest; 401 on both admin endpoints without token; 404 on unknown slug; POST /insights/track {event:view} increments cumulative reads + weekly rolling counter; GET /service-insights-trending?limit=6 returns ≤6 ranked cards and is never empty (tops up with freshest); POST /insights/track {event:share,platform:quote} returns {ok:true} and increments share_by.quote — verified via GET /admin/insights/analytics; GET /newsletter/preferences returns all 8 themes and selected_themes; POST persists themes and filters unknown themes; invalid token → 400; POST /admin/insights-newsletter/run without token → 401 — no authorized send performed to avoid emailing real subscribers). Frontend: /insights-hub renders trending-strip (7 trending-<slug> cards) and featured-insight banner; /insight/<slug> shows share-sk-take button which fires POST /insights/track with platform=quote AND opens the LinkedIn share URL; /preferences?token=<t> shows pref-theme-<Theme> pills, save writes and shows prefs-saved (verified via API); /admin → SK Insights tab shows featured-queue-panel with feature-<slug> stars, click adds to queue and 'Live' marker appears with 'Pinned as featured' toast. Regression: reader still renders insight-section, sk-insight callout and share-bar; key takeaways use testid 'key-takeaways' (present).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Admin dashboard", "issues": ["Recharts warnings: 'width(-1) and height(-1) of chart should be greater than 0' — analytics chart container renders before layout settles. Not user-facing but pollutes console."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration22_insights_rotation.py",
+    "/app/test_reports/pytest/iteration22.xml"
+  ],
+  "action_items": [
+    "Non-blocking: Recharts container in InsightsAdmin renders with -1x-1 dims on mount; wrap ResponsiveContainer with a minHeight or delay mount until parent has size.",
+    "Non-blocking (carried from it21): ServiceInsightPage POST /insights/track view fires twice in dev under React 18 StrictMode; add a useRef guard.",
+    "Non-blocking: On toggle add, endpoint always resets index=0 which means the newly-added slug becomes 'current' only if the queue was empty (otherwise it lands at the tail). Not a bug per the review spec (rotation advances Mondays), but if admin expects 'add this now → it becomes current', consider inserting at index or documenting."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 6,643 lines — SK Insights (featured queue, trending, tracking, analytics, tailored newsletter) is ~350 LOC and should be split into a router module.",
+    "POST /admin/service-insights/{slug}/feature resets index=0 on every toggle — this can jerk the visible featured to a different slug mid-week when admins edit the queue. Consider preserving current-slug identity across writes (find new index of previous current in updated queue).",
+    "_send_insights_newsletter uses `asyncio.create_task` but still iterates subscribers sequentially and awaits run_in_executor per subscriber — a fire-and-forget background task is fine, but consider chunking via asyncio.gather for throughput on large lists.",
+    "POST /insights/track accepts arbitrary body.platform and writes `share_by.<platform>` — no allow-list. A malicious client can pollute the share_by map (e.g., platform='__proto__' or very long strings). Whitelist to {linkedin, twitter, whatsapp, email, quote, copy}.",
+    "GET /newsletter/preferences trusts token but does not validate the subscriber row still exists / is not unsubscribed. Consider returning 410 or a flag for tombstoned rows."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration22_insights_rotation.py"],
+  "success_rate": {"backend": "100% (12/12)", "frontend": "100% (all flows)"},
+  "test_credentials": "Admin: sudarshan@karweers.com / Sudarshan@2026 (consent:true + captcha_token='test-token'). JWT injected via page.add_init_script → localStorage['sk_token'] before /admin navigation (browser login is geo-guarded).",
+  "seed_data_creation": "Created ~4 ephemeral subscribers via POST /newsletter/follow with pw_test_*/test_* @example.com emails (used only to mint prefs tokens). Toggled real_slug 'the-new-rules-of-corporate-strategy-from-five-year-plans-to-rolling-bets' into and back to the featured queue. Recorded 1 view + 1 share (platform=quote) on same slug via /insights/track.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Run: cd /app/backend && REACT_APP_BACKEND_URL=<public> MONGO_URL=mongodb://localhost:27017 DB_NAME=test_database pytest tests/test_iteration22_insights_rotation.py -v. Do NOT call /admin/insights-newsletter/run WITH an admin token — it emails real subscribers via GMAIL. Test only asserts 401 without token. The 'energy-strategy-hub' slug in the review is not a real blog slug (host-name confusion — see it20/it21 notes); tests use real slug from /api/service-insights[0]. Frontend admin panel: use page.add_init_script to inject sk_token before navigating to /admin; then click admin-tab-insights → featured-queue-panel and feature-<slug> star.",
+  "rca of the issue": "N/A — no bugs found; all four enhancements ship correctly."
+}

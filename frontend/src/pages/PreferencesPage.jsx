@@ -12,13 +12,14 @@ export default function PreferencesPage() {
   const [data, setData] = useState(null);
   const [sectors, setSectors] = useState([]);
   const [agencies, setAgencies] = useState([]);
+  const [themes, setThemes] = useState([]);
   const [status, setStatus] = useState("loading"); // loading | ready | error | saved
 
   useEffect(() => { window.scrollTo(0, 0); }, []);
   useEffect(() => {
     if (!token) { setStatus("error"); return; }
     api.get(`/newsletter/preferences?token=${encodeURIComponent(token)}`)
-      .then((r) => { setData(r.data); setSectors(r.data.selected_sectors || []); setAgencies(r.data.selected_agencies || []); setStatus("ready"); })
+      .then((r) => { setData(r.data); setSectors(r.data.selected_sectors || []); setAgencies(r.data.selected_agencies || []); setThemes(r.data.selected_themes || []); setStatus("ready"); })
       .catch(() => setStatus("error"));
   }, [token]);
 
@@ -26,7 +27,7 @@ export default function PreferencesPage() {
 
   const save = async () => {
     try {
-      await api.post("/newsletter/preferences", { token, sectors, agencies });
+      await api.post("/newsletter/preferences", { token, sectors, agencies, themes });
       setStatus("saved");
     } catch { setStatus("error"); }
   };
@@ -58,6 +59,17 @@ export default function PreferencesPage() {
         {(status === "ready" || status === "saved") && data && (
           <div className="mt-8 space-y-8" data-testid="prefs-form">
             <p className="text-xs text-muted-foreground">Signed in as <span className="font-semibold text-foreground">{data.email}</span></p>
+            {(data.all_themes || []).length > 0 && (
+              <div>
+                <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-[hsl(var(--primary))]">Insight themes</h2>
+                <p className="mt-1 text-xs text-muted-foreground">Your weekly SK Insights email will lead with these themes.</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {data.all_themes.map((t) => (
+                    <Pill key={t} active={themes.includes(t)} onClick={() => toggle(themes, setThemes, t)} testid={`pref-theme-${t}`}>{t}</Pill>
+                  ))}
+                </div>
+              </div>
+            )}
             <div>
               <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-[hsl(var(--primary))]">Sectors</h2>
               <div className="mt-3 flex flex-wrap gap-2">

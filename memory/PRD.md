@@ -22,6 +22,12 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - Client auth + admin panel
 
 ## Implemented (2026-06)
+### Gift a Seat + Countdown Urgency (2026-06, latest)
+- **Gift a Seat**: checkout modal has a "This is a gift" toggle that reveals recipient name/email/optional message. `commerce_order` stores `gift` on the order; `commerce_verify` emails access straight to the recipient (`send_gift_email`) — product/bundle download link or cohort seat joining note — while still confirming the purchase to the buyer, and skips auto-opening the download for the buyer (returns `gifted:true`). Works for products, cohorts and bundles.
+- **Countdown Urgency**: cohorts and bundles support an `offer_ends_at` ISO datetime. A live `<Countdown>` badge ("Launch offer ends in Xd HH:MM:SS") shows on the Cohorts cards and Products bundle cards while the offer is in the future; renders nothing once passed. Editable in the Revenue CMS (cohorts + bundles have an "offer_ends_at" field). Seeded a 7-day launch offer on the sample cohort + bundle so it's visible immediately.
+- Verified: backend gift store/deliver path + offer_ends_at returned in list endpoints; screenshots confirm the live countdown and the gift toggle revealing recipient fields. Frontend compiles clean.
+
+
 ### Revenue Dashboard + Bundle Offers (2026-06, latest)
 - **Revenue Dashboard**: Revenue tab now opens on a "Dashboard" sub-tab — KPI cards (total revenue, paid orders, AOV), a 30-day revenue bar chart (recharts) and a Top-Sellers table. Backed by `GET /api/admin/commerce/revenue-analytics` (daily series + top items by revenue). Shows a friendly empty state until the first paid order.
 - **Bundle Offers**: new `bundles` collection — sell a product + a cohort seat at one combined price. `commerce_order`/`commerce_verify` handle `kind="bundle"` (delivers the product download AND books the cohort seat, or waitlists if full). `GET /api/bundles` resolves included titles, separate price and savings. Public Bundles section on `/products` shows the combined price, struck-through separate price and a "Save ₹X" badge; checkout reuses the shared modal (promo codes apply to bundles via applies_to=all). Seeded: "Leadership Accelerator Bundle" (CXO Playbook + Cohort) ₹22,999 (save ₹2,999). Admin CMS: "Bundles" sub-tab (CRUD).

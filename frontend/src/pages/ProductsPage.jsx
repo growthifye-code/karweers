@@ -7,6 +7,7 @@ import Seo from "@/components/Seo";
 import api from "@/lib/api";
 import BlueprintLeadMagnet from "@/components/BlueprintLeadMagnet";
 import CommerceCheckoutModal from "@/components/CommerceCheckoutModal";
+import Countdown from "@/components/Countdown";
 
 const inr = (v) => "\u20b9" + Number(v || 0).toLocaleString("en-IN");
 
@@ -66,6 +67,7 @@ export default function ProductsPage() {
                     <h3 className="font-display text-2xl font-bold leading-tight">{b.title}</h3>
                     {b.subtitle && <p className="mt-1.5 text-sm font-medium text-[hsl(var(--primary))]">{b.subtitle}</p>}
                     <p className="mt-3 flex-1 text-sm leading-relaxed text-muted-foreground">{b.description}</p>
+                    {b.offer_ends_at && <div className="mt-3"><Countdown target={b.offer_ends_at} label="Launch offer ends in" testid={`bundle-countdown-${b.slug}`} /></div>}
                     <div className="mt-4 space-y-1.5 rounded-2xl bg-card/60 p-4 text-sm">
                       {b.product_title && <p className="flex items-center gap-2"><Check className="h-4 w-4 text-[hsl(var(--primary))]" /> {b.product_title}</p>}
                       {b.cohort_title && <p className="flex items-center gap-2"><Check className="h-4 w-4 text-[hsl(var(--primary))]" /> {b.cohort_title}</p>}

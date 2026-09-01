@@ -41,6 +41,7 @@ from emailer import send_payment_receipt_email, send_refund_email
 from emailer import send_gst_invoice_email, send_abandoned_nudge_email
 from emailer import send_admin_notify, send_nurture_welcome_email, send_purchase_email
 from emailer import send_commerce_abandoned_email
+from emailer import send_gift_email
 import xml.etree.ElementTree as ET
 import contextvars
 from urllib.parse import quote_plus
@@ -5324,6 +5325,7 @@ class CommerceOrderIn(BaseModel):
     email: str
     phone: Optional[str] = ""
     promo_code: Optional[str] = None
+    gift: Optional[dict] = None  # {recipient_name, recipient_email, message}
     meta: Optional[dict] = None  # e.g. assessment result for a personalised Blueprint
     captcha_token: Optional[str] = None
 
@@ -5374,6 +5376,7 @@ async def commerce_order(body: CommerceOrderIn, request: Request):
         "promo_code": (promo or {}).get("code") or None,
         "currency": "INR", "amount_paise": amount_paise,
         "meta": body.meta or {},
+        "gift": body.gift or None,
         "status": "pending_payment", "paid": False, "delivered": False,
         "razorpay_order_id": order["id"], "source": f"{body.kind}-checkout", "created_at": now_iso()})
     return {"success": True, "our_order_id": oid, "order_id": order["id"], "amount": amount_paise,
@@ -5436,16 +5439,28 @@ async def commerce_verify(body: CommerceVerifyIn):
         "razorpay_payment_id": body.razorpay_payment_id, "paid_at": now_iso()}})
     if o.get("promo_code"):
         await db.promo_codes.update_one({"code": o["promo_code"]}, {"$inc": {"used_count": 1}})
+    gift = o.get("gift") or {}
+    recipient = (gift.get("recipient_email") or "").strip().lower()
     if os.environ.get("GMAIL_APP_PASSWORD"):
         loop = asyncio.get_event_loop()
+        # Always confirm the purchase to the buyer.
         loop.run_in_executor(None, lambda: send_purchase_email(
-            o["email"], o["name"], o["kind"], o["ref_title"], download_url, PUBLIC_SITE))
+            o["email"], o["name"], o["kind"], o["ref_title"], "" if recipient else download_url, PUBLIC_SITE))
+        # If it's a gift, deliver access to the recipient.
+        if recipient:
+            loop.run_in_executor(None, lambda: send_gift_email(
+                recipient, gift.get("recipient_name", ""), o["name"], o["ref_title"], o["kind"],
+                download_url, gift.get("message", ""), PUBLIC_SITE))
         if NOTIFY_EMAIL:
             loop.run_in_executor(None, lambda: _smtp_notify(
                 f"New {o['kind']} purchase: {o['ref_title']}",
-                f"{o['name']} ({o['email']}) paid ₹{o['amount']} for {o['ref_title']}."))
+                f"{o['name']} ({o['email']}) paid ₹{o['amount']} for {o['ref_title']}."
+                + (f" (gift to {recipient})" if recipient else "")))
+    if recipient:
+        return {"success": True, "kind": o["kind"], "gifted": True, "download_url": "",
+                "message": f"Payment received! We've emailed access to {recipient}."}
     return {"success": True, "kind": o["kind"], "download_url": download_url,
-            "message": "Payment received! Check your email for access." if o["kind"] == "product"
+            "message": "Payment received! Check your email for access." if o["kind"] in ("product", "bundle")
             else "Payment received! Your seat is booked — details are on the way to your inbox."}
 
 

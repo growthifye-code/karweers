@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { X, Lock, ShieldCheck, Tag, Check } from "lucide-react";
+import { X, Lock, ShieldCheck, Tag, Check, Gift } from "lucide-react";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { formatApiErrorDetail } from "@/context/AuthContext";
@@ -15,6 +15,8 @@ export default function CommerceCheckoutModal({ open, item, meta, initialCode, o
   const [code, setCode] = useState("");
   const [applying, setApplying] = useState(false);
   const [promo, setPromo] = useState(null); // {code, label, final_price, discount}
+  const [isGift, setIsGift] = useState(false);
+  const [gift, setGift] = useState({ recipient_name: "", recipient_email: "", message: "" });
 
   const validateCode = useCallback(async (raw, silent = false) => {
     const c = (raw || "").trim();
@@ -48,11 +50,13 @@ export default function CommerceCheckoutModal({ open, item, meta, initialCode, o
   const pay = async (e) => {
     e.preventDefault();
     if (!form.name || !form.email) { toast.error("Please add your name and email."); return; }
+    if (isGift && (!gift.recipient_name || !gift.recipient_email)) { toast.error("Please add the recipient's name and email."); return; }
     if (!captcha) { toast.error("Please complete the captcha."); return; }
     setBusy(true);
     const res = await startCommerceCheckout({
       kind: item.kind, ref_id: item.ref_id, name: form.name, email: form.email,
       phone: form.phone, captcha_token: captcha, promo_code: promo ? promo.code : undefined,
+      gift: isGift ? gift : undefined,
       meta: meta || undefined,
     }, (result) => { onDone && onDone(result); onClose(); });
     setBusy(false);
@@ -82,6 +86,22 @@ export default function CommerceCheckoutModal({ open, item, meta, initialCode, o
             className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm outline-none focus:border-[hsl(var(--primary))]" />
           <input value={form.phone} onChange={set("phone")} placeholder="Phone (optional)" data-testid="checkout-phone"
             className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm outline-none focus:border-[hsl(var(--primary))]" />
+
+          <label className="flex cursor-pointer items-center gap-2.5 rounded-xl border border-border bg-background px-4 py-3 text-sm" data-testid="gift-toggle">
+            <input type="checkbox" checked={isGift} onChange={(e) => setIsGift(e.target.checked)} data-testid="gift-checkbox" />
+            <Gift className="h-4 w-4 text-[hsl(var(--primary))]" /> This is a gift for someone else
+          </label>
+          {isGift && (
+            <div className="space-y-3 rounded-xl border border-[hsl(var(--primary))]/30 bg-[hsl(var(--primary))]/5 p-3" data-testid="gift-fields">
+              <input value={gift.recipient_name} onChange={(e) => setGift({ ...gift, recipient_name: e.target.value })} placeholder="Recipient's name" data-testid="gift-name"
+                className="w-full rounded-xl border border-border bg-background px-4 py-2.5 text-sm outline-none focus:border-[hsl(var(--primary))]" />
+              <input value={gift.recipient_email} onChange={(e) => setGift({ ...gift, recipient_email: e.target.value })} type="email" placeholder="Recipient's email" data-testid="gift-email"
+                className="w-full rounded-xl border border-border bg-background px-4 py-2.5 text-sm outline-none focus:border-[hsl(var(--primary))]" />
+              <textarea value={gift.message} onChange={(e) => setGift({ ...gift, message: e.target.value })} rows={2} placeholder="Add a short message (optional)" data-testid="gift-message"
+                className="w-full rounded-xl border border-border bg-background px-4 py-2.5 text-sm outline-none focus:border-[hsl(var(--primary))]" />
+              <p className="text-xs text-muted-foreground">We'll email access straight to them.</p>
+            </div>
+          )}
 
           {promo ? (
             <div className="flex items-center justify-between rounded-xl border border-[hsl(var(--primary))]/40 bg-[hsl(var(--primary))]/8 px-4 py-2.5 text-sm" data-testid="promo-applied">

@@ -849,3 +849,33 @@ def send_commerce_abandoned_email(to_email: str, name: str, item_title: str, res
     msg.add_alternative(_shell("Complete your order", inner), subtype="html")
     return _smtp_send(msg)
 
+
+
+def send_gift_email(to_email: str, recipient_name: str, buyer_name: str, item_title: str, kind: str, download_url: str = "", message: str = "", site: str = "https://www.sudarshankarweer.com") -> str:
+    """Notify a gift recipient that someone bought them a product/cohort seat."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email:
+        return "skipped"
+    if kind == "cohort":
+        cta = f'<a href="{site}" style="display:inline-block;margin-top:14px;background:#C6F135;color:#0A0A0A;padding:11px 22px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">See the details</a>'
+        line = f'<strong>{buyer_name or "Someone"}</strong> has gifted you a seat in <strong>{item_title}</strong>. Joining details and the schedule will follow shortly.'
+    else:
+        cta = (f'<a href="{download_url}" style="display:inline-block;margin-top:14px;background:#C6F135;color:#0A0A0A;padding:11px 22px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Open your gift</a>'
+               if download_url else "")
+        line = f'<strong>{buyer_name or "Someone"}</strong> has gifted you <strong>{item_title}</strong>. It\'s ready for you below.'
+    note = (f'<div style="margin-top:14px;border-left:3px solid #C6F135;padding:6px 0 6px 14px;color:#374151;font-size:14px;font-style:italic;">"{message}"</div>' if message else "")
+    inner = (
+        f'<p style="font-size:15px;color:#111;">Hi {recipient_name or "there"},</p>'
+        f'<p style="font-size:14px;color:#374151;line-height:1.6;">{line}</p>'
+        f'{note}{cta}'
+        f'<p style="font-size:13px;color:#374151;margin-top:18px;">— Team Sudarshan Karweer</p>'
+    )
+    msg = EmailMessage()
+    msg["Subject"] = f"You've been gifted: {item_title}"
+    msg["From"] = user
+    msg["To"] = to_email
+    msg.set_content(f"Hi {recipient_name or 'there'}, {buyer_name or 'someone'} gifted you {item_title}. {download_url}")
+    msg.add_alternative(_shell("A gift for you", inner), subtype="html")
+    return _smtp_send(msg)
+

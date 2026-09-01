@@ -9,6 +9,7 @@ import api from "@/lib/api";
 import { formatApiErrorDetail } from "@/context/AuthContext";
 import Captcha from "@/components/Captcha";
 import CommerceCheckoutModal from "@/components/CommerceCheckoutModal";
+import Countdown from "@/components/Countdown";
 
 const inr = (v) => "\u20b9" + Number(v || 0).toLocaleString("en-IN");
 
@@ -98,6 +99,7 @@ export default function CohortsPage() {
                     </span>
                   </div>
                   <p className="mt-4 flex-1 text-sm leading-relaxed text-muted-foreground">{c.description}</p>
+                  {c.offer_ends_at && <div className="mt-4"><Countdown target={c.offer_ends_at} label="Launch offer ends in" testid={`cohort-countdown-${c.slug}`} /></div>}
                   <div className="mt-5 flex flex-wrap gap-4 text-xs text-muted-foreground">
                     {c.schedule && <span className="inline-flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 text-[hsl(var(--primary))]" /> {c.schedule}</span>}
                     {c.start_date && <span className="inline-flex items-center gap-1.5"><CalendarClock className="h-3.5 w-3.5 text-[hsl(var(--primary))]" /> Starts {c.start_date}</span>}

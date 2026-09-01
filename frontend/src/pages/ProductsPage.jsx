@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Download, ArrowUpRight, Check, Sparkles } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
@@ -14,10 +14,20 @@ export default function ProductsPage() {
   const [items, setItems] = useState([]);
   const [checkout, setCheckout] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [params] = useSearchParams();
+  const promoCode = params.get("code") || "";
+  const autoProduct = params.get("product") || "";
 
   useEffect(() => {
     api.get("/products").then((r) => setItems(r.data)).catch(() => {}).finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (autoProduct && items.length) {
+      const p = items.find((x) => x.slug === autoProduct && x.type !== "blueprint");
+      if (p) setCheckout({ kind: "product", ref_id: p.slug, title: p.title, price: p.price });
+    }
+  }, [autoProduct, items]);
 
   return (
     <div className="min-h-screen bg-background text-left text-foreground">
@@ -70,7 +80,7 @@ export default function ProductsPage() {
         )}
       </div>
 
-      <CommerceCheckoutModal open={!!checkout} item={checkout} onClose={() => setCheckout(null)}
+      <CommerceCheckoutModal open={!!checkout} item={checkout} initialCode={promoCode} onClose={() => setCheckout(null)}
         onDone={(r) => { if (r.download_url) window.open(r.download_url, "_blank"); }} />
       <Footer />
     </div>

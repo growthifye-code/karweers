@@ -22,6 +22,12 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - Client auth + admin panel
 
 ## Implemented (2026-06)
+### Coupon Analytics + Auto-Apply Links (2026-06, latest)
+- **Coupon Analytics**: `GET /api/admin/promo/analytics` returns per-code `started` (orders begun), `uses` (paid), `conversion_rate` (paid/started %), `revenue` and `discount_given`. Revenue tab → Promo Codes sub-tab now renders a `PromoPanel` with summary cards (active codes, redemptions, revenue-via-codes) and a per-code table (Code, Discount, Started, Uses, Conv%, Revenue, Active) + New/Edit/Delete.
+- **Auto-Apply campaign links**: checkout modal accepts `initialCode` and auto-validates it. Public pages read `?code=` (pre-applies on any checkout) and optional `?product=slug` / `?cohort=slug` (auto-opens that item's checkout with the code applied). Admin PromoPanel has a per-code "Copy campaign link" button (data-testid promo-copy-<code>) that copies `{origin}/products?code=X` or `/cohorts?code=X` based on applies_to.
+- Verified via curl + screenshot: analytics returns started/uses/conv/revenue; `/products?code=CAMPAIGN10&product=fundraising-toolkit` auto-opens checkout with ₹1,299 → ₹1,169 (10% off) pre-applied. Test promo/orders cleaned up.
+
+
 ### Discount / Promo Codes (2026-06, latest)
 - **Promo codes** for downloads & cohorts, server-side validated (never trust client). Collection `promo_codes`: {code (unique, uppercased), type: percent|flat, value, applies_to: all|product|cohort, min_amount, max_uses (0=unlimited), used_count, expires_at, active}.
 - Public: `POST /api/promo/validate` {code, kind, ref_id} → {valid, label, discount, final_price}. Checkout modal has a "Promo code" field (data-testid promo-input/promo-apply/promo-applied) showing the discounted total live.

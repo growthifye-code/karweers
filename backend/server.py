@@ -5462,6 +5462,23 @@ async def admin_commerce_orders(admin: dict = Depends(require_admin)):
     return [_pub(d) for d in await db.orders.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)]
 
 
+@api_router.get("/admin/promo/analytics")
+async def admin_promo_analytics(admin: dict = Depends(require_admin)):
+    codes = await db.promo_codes.find({}, {"_id": 0}).sort("sort", 1).to_list(500)
+    out = []
+    for c in codes:
+        started = await db.orders.count_documents({"promo_code": c["code"]})
+        paid = await db.orders.find({"promo_code": c["code"], "paid": True},
+                                    {"_id": 0, "amount": 1, "discount": 1}).to_list(2000)
+        uses = len(paid)
+        revenue = round(sum(float(o.get("amount", 0) or 0) for o in paid), 2)
+        discount_given = round(sum(float(o.get("discount", 0) or 0) for o in paid), 2)
+        conv = round(uses / started * 100) if started else 0
+        out.append({**c, "started": started, "uses": uses, "revenue": revenue,
+                    "discount_given": discount_given, "conversion_rate": conv})
+    return out
+
+
 @api_router.get("/blueprint/starter.pdf")
 async def blueprint_starter():
     from blueprint_pdf import build_starter_pdf

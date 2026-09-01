@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Users, CalendarClock, ArrowUpRight, Clock } from "lucide-react";
 import Navbar from "@/components/Navbar";
@@ -44,9 +45,19 @@ export default function CohortsPage() {
   const [loading, setLoading] = useState(true);
   const [checkout, setCheckout] = useState(null);
   const [waitlist, setWaitlist] = useState(null);
+  const [params] = useSearchParams();
+  const promoCode = params.get("code") || "";
+  const autoCohort = params.get("cohort") || "";
 
   const load = () => api.get("/cohorts").then((r) => setItems(r.data)).catch(() => {}).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    if (autoCohort && items.length) {
+      const c = items.find((x) => x.slug === autoCohort && x.seats_left > 0);
+      if (c) setCheckout({ kind: "cohort", ref_id: c.slug, title: c.title, price: c.price });
+    }
+  }, [autoCohort, items]);
 
   return (
     <div className="min-h-screen bg-background text-left text-foreground">
@@ -107,7 +118,7 @@ export default function CohortsPage() {
         )}
       </div>
 
-      <CommerceCheckoutModal open={!!checkout} item={checkout} onClose={() => setCheckout(null)} onDone={() => load()} />
+      <CommerceCheckoutModal open={!!checkout} item={checkout} initialCode={promoCode} onClose={() => setCheckout(null)} onDone={() => load()} />
       <Footer />
     </div>
   );

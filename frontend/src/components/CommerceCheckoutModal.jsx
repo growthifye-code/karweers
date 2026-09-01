@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { X, Lock, ShieldCheck, Tag, Check } from "lucide-react";
 import { toast } from "sonner";
 import api from "@/lib/api";
@@ -8,31 +8,41 @@ import { startCommerceCheckout } from "@/lib/checkout";
 
 const inr = (v) => "\u20b9" + Number(v || 0).toLocaleString("en-IN");
 
-export default function CommerceCheckoutModal({ open, item, meta, onClose, onDone }) {
+export default function CommerceCheckoutModal({ open, item, meta, initialCode, onClose, onDone }) {
   const [form, setForm] = useState({ name: "", email: "", phone: "" });
   const [captcha, setCaptcha] = useState("");
   const [busy, setBusy] = useState(false);
   const [code, setCode] = useState("");
   const [applying, setApplying] = useState(false);
   const [promo, setPromo] = useState(null); // {code, label, final_price, discount}
+
+  const validateCode = useCallback(async (raw, silent = false) => {
+    const c = (raw || "").trim();
+    if (!c || !item) return;
+    setApplying(true);
+    try {
+      const { data } = await api.post("/promo/validate", { code: c, kind: item.kind, ref_id: item.ref_id });
+      if (data.valid) { setPromo(data); if (!silent) toast.success(`${data.label} applied.`); }
+      else { setPromo(null); if (!silent) toast.error(data.message || "That code isn't valid."); }
+    } catch (err) {
+      setPromo(null);
+      if (!silent) toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Couldn't check that code.");
+    } finally { setApplying(false); }
+  }, [item]);
+
+  // Auto-apply a code passed via a shareable campaign link (?code=...).
+  useEffect(() => {
+    if (open && item && initialCode) {
+      setCode(initialCode.toUpperCase());
+      validateCode(initialCode, true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, item?.ref_id, initialCode]);
+
   if (!open || !item) return null;
 
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const price = promo ? promo.final_price : item.price;
-
-  const applyPromo = async () => {
-    if (!code.trim()) return;
-    setApplying(true);
-    try {
-      const { data } = await api.post("/promo/validate", { code: code.trim(), kind: item.kind, ref_id: item.ref_id });
-      if (data.valid) { setPromo(data); toast.success(`${data.label} applied.`); }
-      else { setPromo(null); toast.error(data.message || "That code isn't valid."); }
-    } catch (err) {
-      setPromo(null);
-      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Couldn't check that code.");
-    } finally { setApplying(false); }
-  };
-
   const clearPromo = () => { setPromo(null); setCode(""); };
 
   const pay = async (e) => {
@@ -85,7 +95,7 @@ export default function CommerceCheckoutModal({ open, item, meta, onClose, onDon
                 <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="Promo code" data-testid="promo-input"
                   className="w-full rounded-xl border border-border bg-background pl-9 pr-3 py-3 text-sm uppercase outline-none focus:border-[hsl(var(--primary))]" />
               </div>
-              <button type="button" onClick={applyPromo} disabled={applying || !code.trim()} data-testid="promo-apply"
+              <button type="button" onClick={() => validateCode(code)} disabled={applying || !code.trim()} data-testid="promo-apply"
                 className="rounded-xl border border-border px-4 py-3 text-sm font-semibold hover:bg-secondary disabled:opacity-50">{applying ? "…" : "Apply"}</button>
             </div>
           )}

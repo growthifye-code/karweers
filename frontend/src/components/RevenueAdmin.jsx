@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, X, Package, Users, FileText, Quote, Receipt, Tag } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Package, Users, FileText, Quote, Receipt, Tag, Link2 as LinkIcon } from "lucide-react";
 import api from "@/lib/api";
 import { formatApiErrorDetail } from "@/context/AuthContext";
 
@@ -250,6 +250,72 @@ function OrdersPanel() {
   );
 }
 
+function PromoPanel() {
+  const [rows, setRows] = useState([]);
+  const [editing, setEditing] = useState(null);
+  const load = useCallback(() => { api.get("/admin/promo/analytics").then((r) => setRows(r.data)).catch(() => {}); }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const del = async (item) => {
+    if (!window.confirm("Delete this code?")) return;
+    try { await api.delete(`/admin/cms/promo-codes/${item.id}`); toast.success("Deleted."); load(); }
+    catch { toast.error("Delete failed."); }
+  };
+  const copyLink = (r) => {
+    const page = r.applies_to === "cohort" ? "cohorts" : "products";
+    const link = `${window.location.origin}/${page}?code=${encodeURIComponent(r.code)}`;
+    navigator.clipboard.writeText(link).then(() => toast.success("Campaign link copied!")).catch(() => toast.error("Copy failed."));
+  };
+  const totalRevenue = rows.reduce((s, r) => s + Number(r.revenue || 0), 0);
+  const totalUses = rows.reduce((s, r) => s + Number(r.uses || 0), 0);
+
+  return (
+    <div data-testid="cms-panel-promo-codes">
+      <div className="mb-4 grid grid-cols-3 gap-3">
+        <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs text-muted-foreground">Active codes</p><p className="font-display text-2xl font-bold">{rows.filter((r) => r.active).length}</p></div>
+        <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs text-muted-foreground">Redemptions</p><p className="font-display text-2xl font-bold">{totalUses}</p></div>
+        <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs text-muted-foreground">Revenue via codes</p><p className="font-display text-2xl font-bold text-[hsl(var(--primary))]">{inr(totalRevenue)}</p></div>
+      </div>
+      <div className="mb-4 flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">{rows.length} code(s)</p>
+        <button onClick={() => setEditing({})} data-testid="cms-new-promo-codes" className="inline-flex items-center gap-1.5 rounded-full bg-[hsl(var(--primary))] px-4 py-2 text-sm font-semibold text-[hsl(var(--primary-foreground))]"><Plus className="h-4 w-4" /> New code</button>
+      </div>
+      <div className="overflow-x-auto rounded-2xl border border-border">
+        <table className="w-full text-sm">
+          <thead className="bg-secondary/50 text-left text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="px-4 py-2.5 font-semibold">Code</th><th className="px-4 py-2.5 font-semibold">Discount</th>
+              <th className="px-4 py-2.5 font-semibold">Started</th><th className="px-4 py-2.5 font-semibold">Uses</th>
+              <th className="px-4 py-2.5 font-semibold">Conv.</th><th className="px-4 py-2.5 font-semibold">Revenue</th>
+              <th className="px-4 py-2.5 font-semibold">Active</th><th className="px-4 py-2.5" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id} className="border-t border-border" data-testid={`cms-row-${r.code}`}>
+                <td className="px-4 py-3 font-mono font-semibold">{r.code}</td>
+                <td className="px-4 py-3">{r.type === "flat" ? inr(r.value) : `${r.value}%`}<span className="ml-1 text-xs text-muted-foreground">· {r.applies_to}</span></td>
+                <td className="px-4 py-3">{r.started}</td>
+                <td className="px-4 py-3">{r.uses}{r.max_uses > 0 && <span className="text-muted-foreground">/{r.max_uses}</span>}</td>
+                <td className="px-4 py-3"><span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${r.conversion_rate >= 50 ? "bg-[hsl(var(--primary))]/15 text-[hsl(var(--primary))]" : "bg-secondary text-muted-foreground"}`}>{r.conversion_rate}%</span></td>
+                <td className="px-4 py-3 font-semibold">{inr(r.revenue)}</td>
+                <td className="px-4 py-3">{r.active ? "Yes" : "No"}</td>
+                <td className="px-4 py-3 text-right whitespace-nowrap">
+                  <button onClick={() => copyLink(r)} data-testid={`promo-copy-${r.code}`} title="Copy campaign link" className="mr-2 inline-grid h-8 w-8 place-items-center rounded-full border border-border hover:bg-secondary"><LinkIcon className="h-3.5 w-3.5" /></button>
+                  <button onClick={() => setEditing(r)} data-testid={`cms-edit-${r.code}`} className="mr-2 inline-grid h-8 w-8 place-items-center rounded-full border border-border hover:bg-secondary"><Pencil className="h-3.5 w-3.5" /></button>
+                  <button onClick={() => del(r)} data-testid={`cms-delete-${r.code}`} className="inline-grid h-8 w-8 place-items-center rounded-full border border-border text-destructive hover:bg-destructive/10"><Trash2 className="h-3.5 w-3.5" /></button>
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 && <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">No promo codes yet. Create one to run a launch offer.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {editing && <EditModal collection="promo-codes" item={editing.id ? editing : null} onClose={() => setEditing(null)} onSaved={load} />}
+    </div>
+  );
+}
+
 export default function RevenueAdmin() {
   const [sub, setSub] = useState("products");
   const tabs = [...Object.keys(COLLECTIONS), "orders"];
@@ -266,7 +332,7 @@ export default function RevenueAdmin() {
           );
         })}
       </div>
-      {sub === "orders" ? <OrdersPanel /> : <CollectionPanel collection={sub} />}
+      {sub === "orders" ? <OrdersPanel /> : sub === "promo-codes" ? <PromoPanel /> : <CollectionPanel collection={sub} />}
     </div>
   );
 }

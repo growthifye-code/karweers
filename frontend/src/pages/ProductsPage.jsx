@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Download, ArrowUpRight, Check, Sparkles } from "lucide-react";
+import { Download, ArrowUpRight, Check, Sparkles, Star } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import Seo from "@/components/Seo";
@@ -14,12 +14,14 @@ export default function ProductsPage() {
   const [items, setItems] = useState([]);
   const [checkout, setCheckout] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [best, setBest] = useState({});
   const [params] = useSearchParams();
   const promoCode = params.get("code") || "";
   const autoProduct = params.get("product") || "";
 
   useEffect(() => {
     api.get("/products").then((r) => setItems(r.data)).catch(() => {}).finally(() => setLoading(false));
+    api.get("/commerce/best-sellers").then((r) => setBest(r.data)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -52,7 +54,10 @@ export default function ProductsPage() {
             {items.map((p) => {
               const isBlueprint = p.type === "blueprint";
               return (
-                <div key={p.slug} data-testid={`product-${p.slug}`} className="group flex flex-col rounded-3xl border border-border bg-card p-7 transition-all hover:-translate-y-1 hover:border-[hsl(var(--primary))]">
+                <div key={p.slug} data-testid={`product-${p.slug}`} className="group relative flex flex-col rounded-3xl border border-border bg-card p-7 transition-all hover:-translate-y-1 hover:border-[hsl(var(--primary))]">
+                  {best.product === p.slug && (
+                    <span data-testid={`best-seller-${p.slug}`} className="absolute -top-3 right-6 inline-flex items-center gap-1 rounded-full bg-[hsl(var(--primary))] px-3 py-1 text-xs font-bold text-[hsl(var(--primary-foreground))] shadow-lg"><Star className="h-3.5 w-3.5" /> Most popular</span>
+                  )}
                   {isBlueprint && (
                     <span className="mb-3 inline-flex w-fit items-center gap-1.5 rounded-full bg-[hsl(var(--primary))]/15 px-3 py-1 text-xs font-semibold text-[hsl(var(--primary))]"><Sparkles className="h-3.5 w-3.5" /> Personalised</span>
                   )}

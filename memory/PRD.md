@@ -22,6 +22,12 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - Client auth + admin panel
 
 ## Implemented (2026-06)
+### Abandoned Checkout Nudge + Best-Seller Badges (2026-06, latest)
+- **Abandoned Checkout Nudge**: `_nudge_abandoned_orders()` runs in the existing hourly `_process_pending_payments` sweep — finds `orders` that are pending_payment/unpaid, idle 1-24h, not yet nudged, and emails a one-tap "Finish my order" link (`send_commerce_abandoned_email`) that deep-links back to the item with the buyer's promo code pre-applied (`/products?product=slug&code=X` or `/cohorts?...`). Marks `nudged_at` so each order is nudged once. Manual trigger for admins: `POST /api/admin/commerce/nudge-abandoned` (button in Revenue → Orders → "Nudge abandoned"). Verified: aged abandoned order → sent 1 → nudged_at set.
+- **Best-Seller Badges**: `GET /api/commerce/best-sellers` aggregates paid orders and returns the top-converting product + cohort slug. Products & Cohorts pages fetch it and show a "Most popular" badge (data-testid best-seller-<slug>) on the matching card. Badge only appears once real paid sales exist (based on order data, so honest until first sales).
+- Verified via curl: best-sellers returns null/null with no paid orders; nudge sweep sends + marks; both admin endpoints 401 without auth. Frontend compiles clean.
+
+
 ### Coupon Analytics + Auto-Apply Links (2026-06, latest)
 - **Coupon Analytics**: `GET /api/admin/promo/analytics` returns per-code `started` (orders begun), `uses` (paid), `conversion_rate` (paid/started %), `revenue` and `discount_given`. Revenue tab → Promo Codes sub-tab now renders a `PromoPanel` with summary cards (active codes, redemptions, revenue-via-codes) and a per-code table (Code, Discount, Started, Uses, Conv%, Revenue, Active) + New/Edit/Delete.
 - **Auto-Apply campaign links**: checkout modal accepts `initialCode` and auto-validates it. Public pages read `?code=` (pre-applies on any checkout) and optional `?product=slug` / `?cohort=slug` (auto-opens that item's checkout with the code applied). Admin PromoPanel has a per-code "Copy campaign link" button (data-testid promo-copy-<code>) that copies `{origin}/products?code=X` or `/cohorts?code=X` based on applies_to.

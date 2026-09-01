@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Users, CalendarClock, ArrowUpRight, Clock } from "lucide-react";
+import { Users, CalendarClock, ArrowUpRight, Clock, Star } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import Seo from "@/components/Seo";
@@ -45,12 +45,13 @@ export default function CohortsPage() {
   const [loading, setLoading] = useState(true);
   const [checkout, setCheckout] = useState(null);
   const [waitlist, setWaitlist] = useState(null);
+  const [best, setBest] = useState({});
   const [params] = useSearchParams();
   const promoCode = params.get("code") || "";
   const autoCohort = params.get("cohort") || "";
 
   const load = () => api.get("/cohorts").then((r) => setItems(r.data)).catch(() => {}).finally(() => setLoading(false));
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); api.get("/commerce/best-sellers").then((r) => setBest(r.data)).catch(() => {}); }, []);
 
   useEffect(() => {
     if (autoCohort && items.length) {
@@ -83,7 +84,10 @@ export default function CohortsPage() {
               const full = c.seats_left <= 0;
               const scarce = c.seats_left > 0 && c.seats_left <= 5;
               return (
-                <div key={c.slug} data-testid={`cohort-${c.slug}`} className="flex flex-col rounded-3xl border border-border bg-card p-7">
+                <div key={c.slug} data-testid={`cohort-${c.slug}`} className="relative flex flex-col rounded-3xl border border-border bg-card p-7">
+                  {best.cohort === c.slug && (
+                    <span data-testid={`best-seller-${c.slug}`} className="absolute -top-3 right-6 inline-flex items-center gap-1 rounded-full bg-[hsl(var(--primary))] px-3 py-1 text-xs font-bold text-[hsl(var(--primary-foreground))] shadow-lg"><Star className="h-3.5 w-3.5" /> Most popular</span>
+                  )}
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <h3 className="font-display text-2xl font-bold leading-tight">{c.title}</h3>

@@ -218,14 +218,27 @@ function CollectionPanel({ collection }) {
 
 function OrdersPanel() {
   const [orders, setOrders] = useState([]);
+  const [nudging, setNudging] = useState(false);
   useEffect(() => { api.get("/admin/commerce/orders").then((r) => setOrders(r.data)).catch(() => {}); }, []);
   const revenue = orders.filter((o) => o.paid).reduce((s, o) => s + Number(o.amount || 0), 0);
+  const nudge = async () => {
+    setNudging(true);
+    try { const { data } = await api.post("/admin/commerce/nudge-abandoned"); toast.success(data.message); }
+    catch { toast.error("Couldn't run the nudge sweep."); }
+    finally { setNudging(false); }
+  };
   return (
     <div data-testid="cms-panel-orders">
-      <div className="mb-4 grid grid-cols-3 gap-3">
-        <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs text-muted-foreground">Orders</p><p className="font-display text-2xl font-bold">{orders.length}</p></div>
-        <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs text-muted-foreground">Paid</p><p className="font-display text-2xl font-bold">{orders.filter((o) => o.paid).length}</p></div>
-        <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs text-muted-foreground">Revenue</p><p className="font-display text-2xl font-bold text-[hsl(var(--primary))]">{inr(revenue)}</p></div>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="grid flex-1 grid-cols-3 gap-3">
+          <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs text-muted-foreground">Orders</p><p className="font-display text-2xl font-bold">{orders.length}</p></div>
+          <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs text-muted-foreground">Paid</p><p className="font-display text-2xl font-bold">{orders.filter((o) => o.paid).length}</p></div>
+          <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs text-muted-foreground">Revenue</p><p className="font-display text-2xl font-bold text-[hsl(var(--primary))]">{inr(revenue)}</p></div>
+        </div>
+      </div>
+      <div className="mb-4 flex items-center justify-between rounded-2xl border border-border bg-secondary/30 px-4 py-3">
+        <p className="text-sm text-muted-foreground">Email everyone who started but didn't pay (idle 1-24h) a one-tap finish link with their code.</p>
+        <button onClick={nudge} disabled={nudging} data-testid="nudge-abandoned" className="shrink-0 rounded-full bg-[hsl(var(--primary))] px-4 py-2 text-sm font-semibold text-[hsl(var(--primary-foreground))] disabled:opacity-60">{nudging ? "Sending…" : "Nudge abandoned"}</button>
       </div>
       <div className="overflow-hidden rounded-2xl border border-border">
         <table className="w-full text-sm">

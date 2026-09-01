@@ -818,3 +818,34 @@ def send_purchase_email(to_email: str, name: str, kind: str, title: str, downloa
     msg.set_content(f"Hi {name}, your purchase of {title} is confirmed. {download_url}")
     msg.add_alternative(_shell("Purchase confirmed", inner), subtype="html")
     return _smtp_send(msg)
+
+
+def send_commerce_abandoned_email(to_email: str, name: str, item_title: str, resume_url: str, code: str = "", label: str = "") -> str:
+    """One-tap 'finish your order' nudge for an abandoned product/cohort checkout, carrying any promo code."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email:
+        return "skipped"
+    promo_line = ""
+    if code:
+        promo_line = (f'<div style="margin-top:12px;border:1px dashed #C6F135;border-radius:12px;padding:12px 14px;background:#f7ffe0;">'
+                      f'<span style="font-size:13px;color:#374151;">Your code </span>'
+                      f'<span style="font-family:monospace;font-weight:700;color:#0A0A0A;">{code}</span>'
+                      f'<span style="font-size:13px;color:#374151;">{(" · " + label) if label else ""} is still saved for you.</span></div>')
+    inner = (
+        f'<p style="font-size:15px;color:#111;">Hi {name or "there"},</p>'
+        f'<p style="font-size:14px;color:#374151;line-height:1.6;">You were a tap away from <strong>{item_title}</strong>. '
+        f'It\'s still waiting for you — pick up right where you left off.</p>'
+        f'{promo_line}'
+        f'<a href="{resume_url}" style="display:inline-block;margin-top:16px;background:#C6F135;color:#0A0A0A;padding:11px 22px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Finish my order</a>'
+        f'<p style="font-size:13px;color:#374151;margin-top:18px;">— Team Sudarshan Karweer</p>'
+    )
+    msg = EmailMessage()
+    msg["Subject"] = f"Still interested in {item_title}?"
+    msg["From"] = user
+    msg["To"] = to_email
+    msg.set_content(f"Hi {name or 'there'}, finish your order for {item_title}: {resume_url}"
+                    + (f" (code {code} saved)" if code else ""))
+    msg.add_alternative(_shell("Complete your order", inner), subtype="html")
+    return _smtp_send(msg)
+

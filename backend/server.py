@@ -40,6 +40,7 @@ from emailer import send_sector_digest_email
 from emailer import send_payment_receipt_email, send_refund_email
 from emailer import send_gst_invoice_email, send_abandoned_nudge_email
 from emailer import send_admin_notify, send_nurture_welcome_email, send_purchase_email
+from emailer import send_commerce_abandoned_email
 import xml.etree.ElementTree as ET
 import contextvars
 from urllib.parse import quote_plus
@@ -4242,6 +4243,39 @@ async def _process_pending_payments():
             except Exception:
                 pass
             await db.consultations.update_one({"id": b["id"]}, {"$set": {"nudged_at": now_iso()}})
+    await _nudge_abandoned_orders(now)
+
+
+async def _nudge_abandoned_orders(now=None):
+    """One-tap 'finish your order' nudge for abandoned product/cohort checkouts (idle 1h-24h, once). Returns count sent."""
+    if not os.environ.get("GMAIL_APP_PASSWORD"):
+        return 0
+    now = now or datetime.now(timezone.utc)
+    nudge_before = (now - timedelta(hours=1)).isoformat()
+    keep_after = (now - timedelta(hours=24)).isoformat()
+    pend = await db.orders.find(
+        {"status": "pending_payment", "paid": {"$ne": True}, "nudged_at": {"$exists": False},
+         "created_at": {"$lt": nudge_before, "$gte": keep_after}}).to_list(200)
+    sent = 0
+    for o in pend:
+        page = "cohorts" if o.get("kind") == "cohort" else "products"
+        ref_key = "cohort" if o.get("kind") == "cohort" else "product"
+        code = o.get("promo_code") or ""
+        resume_url = f"{PUBLIC_SITE}/{page}?{ref_key}={o.get('ref_id', '')}"
+        label = ""
+        if code:
+            resume_url += f"&code={code}"
+            p = await db.promo_codes.find_one({"code": code}, {"_id": 0, "type": 1, "value": 1})
+            if p:
+                label = f"{int(p['value'])}% off" if (p.get("type") or "percent") == "percent" else f"\u20b9{int(p['value'])} off"
+        try:
+            await asyncio.to_thread(send_commerce_abandoned_email, o.get("email", ""), o.get("name", ""),
+                                    o.get("ref_title", "your order"), resume_url, code, label)
+            sent += 1
+        except Exception:
+            logger.warning("commerce nudge failed", exc_info=True)
+        await db.orders.update_one({"id": o["id"]}, {"$set": {"nudged_at": now_iso()}})
+    return sent
 
 
 async def _refund_booking(b: dict, reason: str = "") -> bool:
@@ -5460,6 +5494,29 @@ async def cms_delete(collection: str, item_id: str, admin: dict = Depends(requir
 @api_router.get("/admin/commerce/orders")
 async def admin_commerce_orders(admin: dict = Depends(require_admin)):
     return [_pub(d) for d in await db.orders.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)]
+
+
+@api_router.post("/admin/commerce/nudge-abandoned")
+async def admin_nudge_abandoned(admin: dict = Depends(require_admin)):
+    sent = await _nudge_abandoned_orders()
+    return {"success": True, "sent": sent,
+            "message": (f"Sent {sent} nudge email(s)." if sent else
+                        "No abandoned orders to nudge right now (must be idle 1-24h, unpaid, and email configured).")}
+
+
+@api_router.get("/commerce/best-sellers")
+async def commerce_best_sellers():
+    """Top-converting product + cohort by paid-order count (for 'Most popular' badges)."""
+    out = {"product": None, "cohort": None}
+    for kind, key in (("product", "product"), ("cohort", "cohort")):
+        agg = await db.orders.aggregate([
+            {"$match": {"kind": kind, "paid": True}},
+            {"$group": {"_id": "$ref_id", "n": {"$sum": 1}}},
+            {"$sort": {"n": -1}}, {"$limit": 1},
+        ]).to_list(1)
+        if agg:
+            out[key] = agg[0]["_id"]
+    return out
 
 
 @api_router.get("/admin/promo/analytics")

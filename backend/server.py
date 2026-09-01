@@ -3,6 +3,7 @@ from fastapi.responses import StreamingResponse, JSONResponse, RedirectResponse,
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo.errors import DuplicateKeyError
 import os
 import json
 import asyncio
@@ -5425,7 +5426,7 @@ SHARE_PLATFORMS = {"linkedin", "twitter", "whatsapp", "email", "quote", "copy", 
 
 
 @api_router.post("/insights/track")
-async def track_insight(body: InsightTrackIn):
+async def track_insight(body: InsightTrackIn, request: Request):
     if body.event not in ("view", "share"):
         raise HTTPException(status_code=400, detail="Invalid event")
     blog = await db.service_blogs.find_one({"slug": body.slug}, {"_id": 0, "slug": 1, "title": 1, "service_slug": 1, "category": 1})
@@ -5443,6 +5444,14 @@ async def track_insight(body: InsightTrackIn):
             inc[f"share_by.{body.platform}"] = 1
         await db.insight_stats.update_one({"slug": body.slug}, {"$inc": inc, "$set": {**base, "share_week": wk, "shares_week": shares_week}}, upsert=True)
         return {"ok": True}
+    # view: dedupe per IP + slug per day so reads/reads_week can't be inflated to game trending
+    day_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    dedup_key = f"{_client_ip(request)}:{body.slug}:{day_key}"
+    try:
+        await db.insight_view_dedup.insert_one(
+            {"_id": dedup_key, "at": datetime.now(timezone.utc)})
+    except DuplicateKeyError:
+        return {"ok": True}  # already counted this IP for this slug today
     # view: maintain cumulative reads + a weekly rolling counter
     wk = _iso_week()
     existing = await db.insight_stats.find_one({"slug": body.slug}, {"_id": 0, "week": 1, "reads_week": 1})
@@ -6765,6 +6774,7 @@ async def startup():
         _audit_retention_days = int(_meta["days"])
     await _ensure_index(db.articles, "slug", unique=True)
     await _ensure_index(db.consultations, "slot_date")
+    await _ensure_index(db.insight_view_dedup, "at", expireAfterSeconds=172800)
     # Warm the in-memory ban cache with any still-active bans.
     now = datetime.now(timezone.utc)
     async for b in db.blocked_ips.find({}, {"_id": 0, "ip": 1, "banned_until": 1, "scope": 1}):

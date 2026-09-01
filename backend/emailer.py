@@ -1,6 +1,7 @@
 """Email + .ics calendar invite via Gmail SMTP. Graceful no-op if not configured."""
 import os
 import ssl
+import html as _html
 import smtplib
 import logging
 from datetime import datetime, timezone
@@ -100,7 +101,7 @@ def send_digest_email(client_email: str, client_name: str, videos: list) -> str:
         f'<span style="color:#fff;font-size:22px;font-weight:700;">S<span style="color:#C6F135;">K.</span></span>'
         f'<span style="color:#9ca3af;font-size:12px;margin-left:10px;">Your weekly Learning Hub</span></div>'
         f'<div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;padding:24px;">'
-        f'<p style="font-size:15px;color:#111;">Hi {client_name},</p>'
+        f'<p style="font-size:15px;color:#111;">Hi {_html.escape(client_name or "there")},</p>'
         f'<p style="font-size:14px;color:#374151;">Your 5 hand-picked videos for the week, tuned to your interests:</p>'
         f'<table style="width:100%;border-collapse:collapse;">{rows}</table>'
         f'<a href="https://www.sudarshankarweer.com/learning" style="display:inline-block;margin-top:18px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Open Learning Hub</a>'
@@ -298,7 +299,7 @@ def send_waitlist_opening_email(to_email: str, name: str, package: str, date_str
     cta = (f'<a href="{book_url}" style="display:inline-block;margin-top:14px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Book your slot</a>'
            if book_url else "")
     inner = (
-        f'<p style="font-size:15px;color:#111;">Hi {name},</p>'
+        f'<p style="font-size:15px;color:#111;">Hi {_html.escape(name or "there")},</p>'
         f'<p style="font-size:14px;color:#374151;">Good news — a slot has just opened up on <strong>{date_str}</strong>'
         f'{(" for " + package) if package else ""}. These fill quickly, so book soon to secure it.</p>'
         f'{cta}'
@@ -352,7 +353,7 @@ def send_session_reminder_email(to_email: str, client_name: str, package: str, s
     join = (f'<a href="{meeting_link}" style="display:inline-block;margin-top:14px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Join the session</a>'
             if meeting_link else '<p style="font-size:13px;color:#6b7280;margin-top:12px;">A video link will follow shortly. If you need to reschedule, just reply to this email.</p>')
     inner = (
-        f'<p style="font-size:15px;color:#111;">Hi {client_name},</p>'
+        f'<p style="font-size:15px;color:#111;">Hi {_html.escape(client_name or "there")},</p>'
         f'<p style="font-size:14px;color:#374151;">A reminder that your session with Sudarshan Karweer is {when}.</p>'
         f'<p style="font-size:15px;color:#111;margin-top:10px;font-weight:600;">{package}</p>'
         f'<p style="font-size:14px;color:#059669;font-weight:600;">{slot_date} at {slot_time} IST</p>'
@@ -381,7 +382,7 @@ def send_consent_receipt_email(to_email: str, name: str, action: str, version: s
                     "google": "signing in with Google"}.get(action, "signing in")
     site = "https://www.sudarshankarweer.com"
     inner = (
-        f'<p style="font-size:15px;color:#111;">Hi {name or "there"},</p>'
+        f'<p style="font-size:15px;color:#111;">Hi {_html.escape(name or "there")},</p>'
         f'<p style="font-size:14px;color:#374151;">Thanks for {action_label}. This is your record that you read and agreed to '
         f'our Terms &amp; Conditions and Privacy Policy.</p>'
         f'<table style="width:100%;border-collapse:collapse;margin-top:14px;font-size:13px;color:#374151;">'
@@ -422,7 +423,7 @@ def render_signals_digest_html(name: str, items: list, site: str = "https://www.
              f'<a href="{unsubscribe_url}" style="color:#9ca3af;text-decoration:underline;">Unsubscribe</a> anytime.</p>'
              if unsubscribe_url else "")
     inner = (
-        f'<p style="font-size:15px;color:#111;">Hi {name or "there"},</p>'
+        f'<p style="font-size:15px;color:#111;">Hi {_html.escape(name or "there")},</p>'
         f'<p style="font-size:14px;color:#374151;">Here are this week\'s sharpest Market Signals on the energy transition, capital and strategy.</p>'
         f'<div style="margin-top:14px;">{cards}</div>'
         f'<a href="{site}/signals" style="display:inline-block;margin-top:8px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Browse the full archive</a>'
@@ -470,7 +471,7 @@ def render_insights_newsletter_html(name: str, items: list, site: str = "https:/
              f'<a href="{unsubscribe_url}" style="color:#9ca3af;text-decoration:underline;">Unsubscribe</a> anytime.</p>'
              if unsubscribe_url else "")
     inner = (
-        f'<p style="font-size:15px;color:#111;">Hi {name or "there"},</p>'
+        f'<p style="font-size:15px;color:#111;">Hi {_html.escape(name or "there")},</p>'
         f'<p style="font-size:14px;color:#374151;">This week\'s freshest SK Insights — world-class thinking on strategy, M&amp;A, capital, energy and leadership, drawn from real deals and decades of advisory work.</p>'
         f'<div style="margin-top:14px;">{cards}</div>'
         f'<a href="{site}/insights-hub" style="display:inline-block;margin-top:8px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Explore all insights</a>'
@@ -569,7 +570,7 @@ def render_library_digest_html(name: str, books: list, site: str = "https://www.
              f'<a href="{unsubscribe_url}" style="color:#9ca3af;text-decoration:underline;">Unsubscribe</a> anytime.</p>'
              if unsubscribe_url else "")
     inner = (
-        f'<p style="font-size:15px;color:#111;">Hi {name or "there"},</p>'
+        f'<p style="font-size:15px;color:#111;">Hi {_html.escape(name or "there")},</p>'
         f'<p style="font-size:14px;color:#374151;">Here is this week\'s fresh shelf from the Leadership Library — read the classics, listen free, and turn each one into a daily ritual.</p>'
         f'<div style="margin-top:14px;">{cards}</div>'
         f'<a href="{site}/library" style="display:inline-block;margin-top:8px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Open the Library</a>'
@@ -611,7 +612,7 @@ def send_score_beaten_email(to_email: str, name: str, game_title: str, rival: st
     msg["From"] = user
     msg["To"] = to_email
     inner = (
-        f'<p style="font-size:15px;color:#111;">Hi {name or "there"},</p>'
+        f'<p style="font-size:15px;color:#111;">Hi {_html.escape(name or "there")},</p>'
         f'<p style="font-size:14px;color:#374151;">Your #1 spot on the <strong>{game_title}</strong> strategy simulation just got taken. '
         f'{rival or "A rival"} scored <strong>{new_score}/{max_score}</strong> — edging past your <strong>{your_score}/{max_score}</strong>.</p>'
         f'<p style="font-size:14px;color:#374151;">Think you can reclaim the top of the War Room? One better run is all it takes.</p>'
@@ -649,7 +650,7 @@ def render_sector_digest_html(name: str, groups: list, site: str = "https://www.
              f'<a href="{unsubscribe_url}" style="color:#9ca3af;text-decoration:underline;">Unsubscribe</a> anytime.</p>'
              if (unsubscribe_url or prefs_url) else "")
     inner = (
-        f'<p style="font-size:15px;color:#111;">Hi {name or "there"},</p>'
+        f'<p style="font-size:15px;color:#111;">Hi {_html.escape(name or "there")},</p>'
         f'<p style="font-size:14px;color:#374151;">Your Monday brief — the week\'s biggest moves across the sectors and capital you follow.</p>'
         f'<div style="margin-top:14px;">{blocks}</div>'
         f'<a href="{site}/explore" style="display:inline-block;margin-top:4px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Explore Sectors &amp; Capital</a>'
@@ -867,7 +868,7 @@ def send_nurture_welcome_email(to_email: str, name: str, site: str = "https://ww
     unsub = (f'<p style="font-size:12px;color:#9ca3af;margin-top:18px;">Not for you? '
              f'<a href="{unsubscribe_url}" style="color:#9ca3af;">Unsubscribe</a>.</p>') if unsubscribe_url else ""
     inner = (
-        f'<p style="font-size:15px;color:#111;">Hi {name},</p>'
+        f'<p style="font-size:15px;color:#111;">Hi {_html.escape(name or "there")},</p>'
         f'<p style="font-size:14px;color:#374151;line-height:1.6;">Welcome — you\'re now on the inside track. '
         f'Expect sharp, no-noise signals on strategy, leadership and the sectors Sudarshan works across, '
         f'straight to your inbox.</p>'
@@ -900,7 +901,7 @@ def send_purchase_email(to_email: str, name: str, kind: str, title: str, downloa
         cta = (f'<a href="{site}" style="display:inline-block;margin-top:14px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">View details</a>')
         line = f'Your seat in <strong>{title}</strong> is booked. Joining details and the schedule will follow shortly.'
     inner = (
-        f'<p style="font-size:15px;color:#111;">Hi {name},</p>'
+        f'<p style="font-size:15px;color:#111;">Hi {_html.escape(name or "there")},</p>'
         f'<p style="font-size:14px;color:#374151;line-height:1.6;">{line}</p>'
         f'{cta}'
         f'<p style="font-size:13px;color:#374151;margin-top:18px;">— Team Sudarshan Karweer</p>'
@@ -927,7 +928,7 @@ def send_commerce_abandoned_email(to_email: str, name: str, item_title: str, res
                       f'<span style="font-family:monospace;font-weight:700;color:#0A0A0A;">{code}</span>'
                       f'<span style="font-size:13px;color:#374151;">{(" · " + label) if label else ""} is still saved for you.</span></div>')
     inner = (
-        f'<p style="font-size:15px;color:#111;">Hi {name or "there"},</p>'
+        f'<p style="font-size:15px;color:#111;">Hi {_html.escape(name or "there")},</p>'
         f'<p style="font-size:14px;color:#374151;line-height:1.6;">You were a tap away from <strong>{item_title}</strong>. '
         f'It\'s still waiting for you — pick up right where you left off.</p>'
         f'{promo_line}'

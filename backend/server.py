@@ -5717,6 +5717,14 @@ async def admin_commerce_orders(admin: dict = Depends(require_admin)):
 async def admin_commerce_orders_export(admin: dict = Depends(require_admin)):
     """Streams all orders as CSV for bookkeeping / GST filing."""
     import csv as _csv
+
+    def _safe(v):
+        # Neutralise CSV formula injection (Excel/Sheets) on user-controlled text.
+        s = "" if v is None else str(v)
+        if s and s[0] in ("=", "+", "-", "@", "\t", "\r"):
+            return "'" + s
+        return s
+
     orders = await db.orders.find({}, {"_id": 0}).sort("created_at", -1).to_list(5000)
     buf = io.StringIO()
     w = _csv.writer(buf)
@@ -5725,7 +5733,7 @@ async def admin_commerce_orders_export(admin: dict = Depends(require_admin)):
                 "Status", "Paid At", "Razorpay Payment ID", "Gift Recipient", "Gift Recipient Email"])
     for o in orders:
         gift = o.get("gift") or {}
-        w.writerow([
+        w.writerow([_safe(x) for x in [
             (o.get("created_at") or "")[:19].replace("T", " "),
             o.get("id", ""),
             o.get("name", ""),
@@ -5741,7 +5749,7 @@ async def admin_commerce_orders_export(admin: dict = Depends(require_admin)):
             o.get("razorpay_payment_id", ""),
             gift.get("recipient_name", ""),
             gift.get("recipient_email", ""),
-        ])
+        ]])
     fname = f"sk-orders-{datetime.now(timezone.utc).date().isoformat()}.csv"
     return Response(content=buf.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": f"attachment; filename={fname}"})

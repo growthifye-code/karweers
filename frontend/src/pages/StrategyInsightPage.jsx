@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowUpRight } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import Seo from "@/components/Seo";
+import ShareBar from "@/components/ShareBar";
 import api from "@/lib/api";
 
 export default function StrategyInsightPage() {
@@ -31,6 +32,7 @@ export default function StrategyInsightPage() {
         <p className="mt-8 text-sm font-semibold uppercase tracking-[0.2em] text-[hsl(var(--accent))]">{a.category} · {a.read_time}</p>
         <h1 className="mt-4 font-display text-4xl font-black leading-[1.1] tracking-tight sm:text-5xl">{a.title}</h1>
         <p className="mt-5 text-lg font-medium text-muted-foreground">{a.dek}</p>
+        <div className="mt-6 border-y border-border py-4"><ShareBar title={a.title} text={a.dek} /></div>
         <div className="mt-10 space-y-10">
           {a.sections.map((s, i) => (
             <section key={i} data-testid={`insight-section-${i}`}>

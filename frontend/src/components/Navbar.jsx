@@ -26,9 +26,10 @@ const NAV = [
   { label: "About", to: "/about" },
   { label: "Sectors & Capital", to: "/explore" },
   { label: "Leadership Lab", to: "/leadership-lab" },
-  { label: "Insights", to: "/insights" },
+  { label: "Insights", to: "/insights-hub" },
   { label: "Case Studies", to: "/case-studies" },
   { label: "Learning", to: "/learning" },
+  { label: "Archive", to: "/archive" },
   { label: "Market", to: "/market" },
   { label: "Deals", to: "/deals" },
 ];

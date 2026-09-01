@@ -13,11 +13,13 @@ export default function ServicePage() {
   const { slug, phase } = useParams();
   const [svc, setSvc] = useState(null);
   const [notFound, setNotFound] = useState(false);
+  const [insights, setInsights] = useState([]);
 
   useEffect(() => {
     window.scrollTo(0, 0);
-    setSvc(null); setNotFound(false);
+    setSvc(null); setNotFound(false); setInsights([]);
     api.get(`/services/${slug}`).then((r) => setSvc(r.data)).catch(() => setNotFound(true));
+    api.get(`/service-insights?service=${slug}&limit=12`).then((r) => setInsights(r.data)).catch(() => {});
     import("@/lib/api").then((m) => m.track("service", slug));
   }, [slug]);
 
@@ -131,6 +133,35 @@ export default function ServicePage() {
       </section>
 
       {svc.slug === "business-strategy" && <StrategyToolkit />}
+
+      {insights.length > 0 && (
+        <section className="border-t border-border py-24" data-testid="service-insights">
+          <div className="mx-auto max-w-7xl px-6 lg:px-10">
+            <div className="flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[hsl(var(--primary))]">SK Insights</p>
+                <h2 className="mt-3 font-display text-3xl font-bold tracking-tight sm:text-4xl">Insights on {svc.title}</h2>
+                <p className="mt-3 max-w-2xl text-muted-foreground">World-class analysis — case studies, deal learnings and practical playbooks, refreshed continuously.</p>
+              </div>
+              <Link to="/insights-hub" className="inline-flex items-center gap-1.5 rounded-full border border-border px-5 py-2.5 text-sm font-semibold hover:border-[hsl(var(--primary))]" data-testid="view-all-insights">View all insights <ArrowUpRight className="h-4 w-4" /></Link>
+            </div>
+            <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {insights.map((b, i) => (
+                <motion.div key={b.slug} initial={{ opacity: 0, y: 18 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.4, delay: (i % 6) * 0.05 }}>
+                  <Link to={`/insight/${b.slug}`} data-testid={`service-insight-${b.slug}`} className="group flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-card transition-transform hover:-translate-y-1 hover:border-[hsl(var(--primary))]/50">
+                    <div className="aspect-[16/10] overflow-hidden"><img src={b.hero_image} alt="" loading="lazy" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" /></div>
+                    <div className="flex flex-1 flex-col p-5">
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-[hsl(var(--primary))]">{b.category} · {b.read_time}</p>
+                      <h3 className="mt-2.5 font-display text-lg font-bold leading-snug group-hover:text-[hsl(var(--primary))]">{b.title}</h3>
+                      <p className="mt-2 line-clamp-2 flex-1 text-sm text-muted-foreground">{b.dek}</p>
+                    </div>
+                  </Link>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="border-t border-border py-20 text-center">
         <div className="mx-auto max-w-2xl px-6">

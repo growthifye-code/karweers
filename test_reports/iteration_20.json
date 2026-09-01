@@ -1,0 +1,25 @@
+{
+  "summary": "Iteration 20 — Per-service SK Insights engine tested. Backend: 21/21 pytest cases passing. Verified 80 blogs (10 per service across 8 services), category filtering, service counts endpoint (all 8×10), single blog reader with 5-6 sections, 3+ takeaways, sk_insight.take + corporate_relevance, 3 related, earlier_editions, archive list + 404 handling, unified /archive with type & theme filters (blog>=80, videos filter to video-only, Technology filter to Technology-only, themes+theme_counts present), and admin auth gating (401 without token, 200 with admin JWT; regenerate was NOT triggered per instructions). Frontend: /insights-hub shows 80 cards, hub-svc-* and hub-cat-* filters narrow the grid correctly (business-strategy→10, category filter reduces further), search box present. Reader /insight/<slug> shows hero, dek, sections, key-takeaways, sk-insight callout, share-bar with all 5 share testids, and 3-card related grid. /archive shows dropdowns (archive-type-select, archive-theme-select), search, and archive-count updates live (142→40 videos→27 Technology). /services/ma-advisory shows service-insights section with exactly 10 cards and 'View all insights' link; no standalone 'AI' branding found. Share-bar present on article reader and strategy-insight reader.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration20_service_insights.py",
+    "/app/test_reports/pytest/iteration20.xml"
+  ],
+  "action_items": [
+    "Review request references the slug 'energy-strategy-hub' for /insight/, /insights/ and /strategy-insights/ readers — no such slug exists in service_blogs, articles, or strategy_insights (the domain is named energy-strategy-hub but no content uses that slug). Testing was performed against real slugs (india-s-bess-inflection-... for service insight, agri-value-chain-scaling for article, growth-that-compounds for strategy). If E1 intended a real slug, ignore — otherwise create/alias that slug."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 6342 lines — should be split into routers by domain (auth, insights, services, admin, archive) for maintainability.",
+    "FastAPI @app.on_event('startup'/'shutdown') is deprecated; migrate to lifespan handlers.",
+    "In /archive, videos are fetched via curator.library() synchronously inside async endpoint — consider running_in_executor to avoid blocking event loop if RSS call is slow."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration20_service_insights.py"],
+  "success_rate": {"backend": "100% (21/21)", "frontend": "100% (all critical flows)"},
+  "test_credentials": "Admin: sudarshan@karweers.com / Sudarshan@2026 (login requires consent:true + captcha_token). Auth verified working.",
+  "seed_data_creation": "None. 80 blogs (10 per service) already seeded.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend tests live at /app/backend/tests/test_iteration20_service_insights.py — run with `cd /app/backend && PYTHONPATH=/app/backend pytest tests/test_iteration20_service_insights.py -n 0`. All service-insights endpoints, /archive, and admin gating verified. Frontend hub uses testids hub-svc-<slug>, hub-cat-<category>, hub-search, hub-grid; reader uses key-takeaways, sk-insight, share-bar with share-linkedin/twitter/whatsapp/email/copy; archive uses archive-type-select, archive-theme-select, archive-count; service page uses service-insights + service-insights-view-all. No 'AI' standalone branding present; 'SK Insights' branding consistent.",
+  "rca of the issue": "N/A — no bugs found."
+}

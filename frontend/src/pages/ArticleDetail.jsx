@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import ArticleCard from "@/components/ArticleCard";
+import ShareBar from "@/components/ShareBar";
 import api from "@/lib/api";
 
 export default function ArticleDetail() {
@@ -54,6 +55,7 @@ export default function ArticleDetail() {
         </div>
         <h1 className="mt-4 font-display text-3xl font-black leading-tight tracking-tight sm:text-4xl lg:text-5xl">{article.title}</h1>
         <p className="mt-4 text-sm text-muted-foreground">By {article.author}</p>
+        <div className="mt-5 border-y border-border py-4"><ShareBar title={article.title} text={article.summary || ""} /></div>
         <img src={article.image} alt={article.title} className="mt-8 w-full rounded-2xl border border-border object-cover" />
         <div className="mt-8 space-y-6 text-base leading-relaxed text-muted-foreground">
           {article.content.split("\n\n").map((p, i) => <p key={i}>{p}</p>)}

@@ -2140,6 +2140,17 @@ async def _digest_scheduler():
             await _refresh_all_news_if_due()  # 4-hourly news scrape for sectors/agencies/OEMs
             await _process_pending_payments()  # nudge abandoned checkouts, release stale holds
             await _refresh_home_content()   # daily AI homepage copy (self-guards on 24h staleness)
+            # Dynamic Insights: blogs refresh on a 7-day cadence; prior editions go to the archive.
+            imeta = await db.app_meta.find_one({"_id": "insights_refresh"}) or {}
+            _today = datetime.now(timezone.utc).date().isoformat()
+            if EMERGENT_LLM_KEY and imeta.get("last_run", "")[:10] != _today:
+                have = await db.service_blogs.count_documents({})
+                if have:
+                    # ~12/day so all ~80 blogs cycle through a fresh edition about weekly.
+                    n = await _refresh_stale_insights(max_items=12, older_than_hours=168)
+                    if n:
+                        await db.app_meta.update_one({"_id": "insights_refresh"},
+                                                     {"$set": {"last_run": now_iso(), "last_count": n}}, upsert=True)
             now = datetime.now(timezone.utc)
             # Every Saturday, publish (roll forward) availability to the coming week.
             if now.weekday() == 5:  # Saturday
@@ -4741,6 +4752,360 @@ async def get_strategy_insight(slug: str):
     if not a:
         raise HTTPException(status_code=404, detail="Insight not found")
     return a
+
+
+# ---------------- Service Insights engine (SK Insights, per service) ----------------
+def _slugify(s: str) -> str:
+    import re
+    s = re.sub(r"[^a-z0-9]+", "-", (s or "").lower()).strip("-")
+    return s[:80]
+
+
+async def _generate_service_blog(service_slug: str, service_title: str, title: str, category: str) -> dict:
+    prompt = (
+        "You are a senior strategy partner writing for Sudarshan Karweer's advisory platform. "
+        "Sudarshan is an ex-EY Big-4 advisory leader (23+ years, 60+ projects, $2B+ debt syndication, "
+        "M&A incl. airline loyalty-programme carve-outs, over $3bn raised, RE/BESS/hydrogen/climate-finance, "
+        "public-asset monetisation like MSRTC bus depots). Write a McKinsey/BCG/Bain-caliber long-form insight article.\n\n"
+        f"SERVICE CONTEXT: {service_title}\n"
+        f"CATEGORY: {category}\n"
+        f"ARTICLE TITLE: {title}\n\n"
+        "Rules:\n"
+        "- Write grounded, evidence-led analysis using PUBLIC-DOMAIN facts about the named companies/deals. "
+        "Do NOT invent precise figures, dates, quotes or private data; when you reference numbers keep them "
+        "widely-reported and round, and frame as analysis, not reporting.\n"
+        "- Voice: crisp, senior, structured, 'so-what' oriented. No fluff, no hype, no emojis, no marketing tone.\n"
+        "- Cover, where relevant, current practice, what worked/failed and WHY, and practical learnings.\n"
+        "- If the category involves technology, address the AI/technology angle concretely.\n\n"
+        "Return STRICT JSON only (no markdown, no code fences) with keys:\n"
+        "  dek: string, 25-40 word standfirst that sharpens the argument.\n"
+        "  read_time: string like '7 min read'.\n"
+        "  sections: array of 5-6 objects {h: 6-10 word section heading, p: 70-120 word paragraph}. "
+        "Make the analysis specific to the named case, not generic.\n"
+        "  key_takeaways: array of exactly 3 strings, each a punchy 12-20 word lesson.\n"
+        "  sk_insight: object {take: 45-70 word first-person view as Sudarshan with a distinctive, contrarian-but-grounded angle; "
+        "corporate_relevance: 35-55 words on exactly what a corporate leader should DO about this now}.\n"
+        "  tags: array of 3 short tag strings.\n"
+        "Output JSON only."
+    )
+    chat = new_chat("insight-" + str(uuid.uuid4())).with_model("anthropic", "claude-sonnet-4-6")
+    text = ""
+    async for ev in chat.stream_message(UserMessage(text=prompt)):
+        if isinstance(ev, TextDelta):
+            text += ev.content
+        elif isinstance(ev, StreamDone):
+            break
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.startswith("json"):
+            text = text[4:]
+    data = json.loads(text)
+    sections = []
+    for s in (data.get("sections") or []):
+        if isinstance(s, dict) and s.get("h") and s.get("p"):
+            sections.append({"h": str(s["h"]).strip(), "p": str(s["p"]).strip()})
+    ski = data.get("sk_insight") or {}
+    return {
+        "dek": str(data.get("dek") or "").strip(),
+        "read_time": str(data.get("read_time") or "7 min read").strip(),
+        "sections": sections[:6],
+        "key_takeaways": [str(x).strip() for x in (data.get("key_takeaways") or []) if str(x).strip()][:3],
+        "sk_insight": {"take": str(ski.get("take") or "").strip(),
+                       "corporate_relevance": str(ski.get("corporate_relevance") or "").strip()},
+        "tags": [str(x).strip() for x in (data.get("tags") or []) if str(x).strip()][:3],
+    }
+
+
+_insights_gen_lock = asyncio.Lock()
+
+
+async def _store_blog(doc: dict, archive_previous: bool = False):
+    """Upsert a blog; optionally snapshot the prior version into the archive first."""
+    prev = await db.service_blogs.find_one({"slug": doc["slug"]}, {"_id": 0})
+    version = 1
+    if prev:
+        version = int(prev.get("version", 1))
+        if archive_previous:
+            snap = {k: v for k, v in prev.items() if k != "related"}
+            snap["archive_id"] = str(uuid.uuid4())
+            snap["archived_at"] = now_iso()
+            await db.service_blogs_archive.insert_one(snap)
+            version += 1
+    doc["version"] = version
+    doc["updated_at"] = now_iso()
+    if prev and not archive_previous:
+        doc["published_at"] = prev.get("published_at") or doc.get("published_at")
+    await db.service_blogs.replace_one({"slug": doc["slug"]}, doc, upsert=True)
+
+
+async def _build_blog_doc(service_slug, service_title, title, category, idx):
+    from insights_data import hero_for
+    body = await _generate_service_blog(service_slug, service_title, title, category)
+    return {
+        "slug": _slugify(title), "service_slug": service_slug, "service_title": service_title,
+        "title": title, "category": category,
+        "hero_image": hero_for(service_slug, category, idx),
+        "sort": idx, "published_at": now_iso(), **body,
+    }
+
+
+async def _generate_all_service_insights(force: bool = False, concurrency: int = 5) -> dict:
+    """Generate & store 10 blogs per service. Skips services already populated unless force."""
+    from insights_data import TOPIC_PLAN
+    from services_data import SERVICES
+    title_by_slug = {s["slug"]: s["title"] for s in SERVICES}
+    sem = asyncio.Semaphore(concurrency)
+    generated, failed = 0, 0
+
+    async def one(service_slug, idx, title, category):
+        nonlocal generated, failed
+        existing = await db.service_blogs.find_one({"slug": _slugify(title)})
+        if existing and not force:
+            return
+        async with sem:
+            try:
+                doc = await _build_blog_doc(service_slug, title_by_slug.get(service_slug, service_slug), title, category, idx)
+            except Exception:
+                logger.exception("service insight generation failed: %s", title)
+                failed += 1
+                return
+        await _store_blog(doc, archive_previous=force)
+        generated += 1
+
+    tasks = []
+    for service_slug, topics in TOPIC_PLAN.items():
+        for idx, (title, category) in enumerate(topics):
+            tasks.append(one(service_slug, idx, title, category))
+    await asyncio.gather(*tasks)
+    return {"generated": generated, "failed": failed}
+
+
+async def _refresh_stale_insights(max_items: int = 4, older_than_hours: int = 20) -> int:
+    """Rolling dynamic refresh: regenerate the few oldest blogs, archiving prior versions.
+    Cycles the whole set fresh over time. Guarded so it runs a small batch per call."""
+    if _insights_gen_lock.locked():
+        return 0
+    from insights_data import TOPIC_PLAN
+    from services_data import SERVICES
+    title_by_slug = {s["slug"]: s["title"] for s in SERVICES}
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=older_than_hours)).isoformat()
+    stale = await db.service_blogs.find(
+        {"$or": [{"updated_at": {"$lt": cutoff}}, {"updated_at": {"$exists": False}}]},
+        {"_id": 0, "slug": 1, "service_slug": 1, "title": 1, "category": 1, "sort": 1}
+    ).sort("updated_at", 1).to_list(max_items)
+    if not stale:
+        return 0
+    done = 0
+    async with _insights_gen_lock:
+        for b in stale:
+            try:
+                doc = await _build_blog_doc(b["service_slug"], title_by_slug.get(b["service_slug"], b["service_slug"]),
+                                            b["title"], b.get("category", ""), b.get("sort", 0))
+                await _store_blog(doc, archive_previous=True)
+                done += 1
+            except Exception:
+                logger.exception("stale insight refresh failed: %s", b.get("title"))
+    return done
+
+
+def _blog_card(d: dict) -> dict:
+    return {"slug": d.get("slug"), "service_slug": d.get("service_slug"),
+            "service_title": d.get("service_title"), "title": d.get("title"),
+            "dek": d.get("dek"), "category": d.get("category"),
+            "hero_image": d.get("hero_image"), "read_time": d.get("read_time"),
+            "tags": d.get("tags", []), "published_at": d.get("published_at")}
+
+
+@api_router.get("/service-insights")
+async def list_service_insights(service: Optional[str] = None, category: Optional[str] = None, limit: int = 200):
+    q = {}
+    if service:
+        q["service_slug"] = service
+    if category:
+        q["category"] = category
+    docs = await db.service_blogs.find(q, {"_id": 0}).sort("sort", 1).to_list(limit)
+    return [_blog_card(d) for d in docs]
+
+
+@api_router.get("/service-insights/services")
+async def service_insights_services():
+    """Per-service counts for the hub filter."""
+    from services_data import SERVICES
+    counts = {}
+    async for d in db.service_blogs.aggregate([{"$group": {"_id": "$service_slug", "n": {"$sum": 1}}}]):
+        counts[d["_id"]] = d["n"]
+    return [{"slug": s["slug"], "title": s["title"], "count": counts.get(s["slug"], 0)}
+            for s in SERVICES if counts.get(s["slug"], 0) > 0]
+
+
+@api_router.get("/service-insights/archive")
+async def service_insights_archive(limit: int = 60, service: Optional[str] = None):
+    """Past editions of blogs that have since been refreshed (newest snapshot first)."""
+    q = {}
+    if service:
+        q["service_slug"] = service
+    docs = await db.service_blogs_archive.find(q, {"_id": 0}).sort("archived_at", -1).to_list(min(limit, 200))
+    return [{"archive_id": d.get("archive_id"), "slug": d.get("slug"), "title": d.get("title"),
+             "service_title": d.get("service_title"), "service_slug": d.get("service_slug"),
+             "category": d.get("category"), "version": d.get("version"),
+             "hero_image": d.get("hero_image"), "dek": d.get("dek"),
+             "read_time": d.get("read_time"), "archived_at": d.get("archived_at")} for d in docs]
+
+
+@api_router.get("/service-insights/archive/{archive_id}")
+async def service_insights_archive_item(archive_id: str):
+    d = await db.service_blogs_archive.find_one({"archive_id": archive_id}, {"_id": 0})
+    if not d:
+        raise HTTPException(status_code=404, detail="Archived edition not found")
+    return d
+
+
+@api_router.get("/archive")
+async def unified_archive(type: str = "all", theme: str = "all", limit: int = 300):
+    """Unified content archive across blogs, articles, videos, audio and market signals.
+    Every item carries a normalised `theme` tag for cross-content filtering."""
+    items = []
+    want = (type or "all").lower()
+
+    SERVICE_THEME = {
+        "business-strategy": "Strategy", "ma-advisory": "M&A",
+        "fund-raising": "Capital & Finance", "premium-consultation": "Leadership",
+        "re-storage-hydrogen": "Energy & Climate", "green-climate-financing": "Energy & Climate",
+        "asset-monetisation": "Economy", "business-coaching": "Leadership",
+    }
+    THEME_RULES = [
+        ("Technology", ["artificial intelligence", "machine intelligence", "technology", "digital", "software", "data", "automation"]),
+        ("M&A", ["m&a", "merger", "acquisition", "carve-out", "carve out", "takeover", "consolidation"]),
+        ("Capital & Finance", ["capital", "fundrais", "fund raise", "ipo", "bond", "invest", "finance", "valuation", "debt", "equity", "bankable"]),
+        ("Energy & Climate", ["energy", "renewable", "solar", "storage", "bess", "hydrogen", "climate", "green", "carbon", "sustainab", "esg", "wind"]),
+        ("Leadership", ["leader", "coach", "ceo", "founder", "culture", "talent", "succession", "mindset", "executive"]),
+        ("Economy", ["econom", "macro", "policy", "inflation", "gdp", "monetis", "infrastructure", "government", "public asset"]),
+        ("Markets", ["market", "signal", "sector", "competit", "consumer"]),
+        ("Strategy", ["strategy", "strategic", "portfolio", "market entry", "feasibility", "moat", "disruption", "growth"]),
+    ]
+
+    def classify(text: str) -> str:
+        t = (text or "").lower()
+        for th, kws in THEME_RULES:
+            if any(k in t for k in kws):
+                return th
+        return "Strategy"
+
+    async def add_blogs():
+        docs = await db.service_blogs.find({}, {"_id": 0}).sort("updated_at", -1).to_list(200)
+        for d in docs:
+            th = "Technology" if d.get("category") == "AI & Technology" else SERVICE_THEME.get(d.get("service_slug"), "Strategy")
+            items.append({"type": "blog", "title": d.get("title"), "subtitle": d.get("service_title"),
+                          "image": d.get("hero_image"), "url": f"/insight/{d.get('slug')}",
+                          "date": (d.get("updated_at") or d.get("published_at") or "")[:10],
+                          "tag": d.get("category"), "theme": th, "external": False})
+        arch = await db.service_blogs_archive.find({}, {"_id": 0}).sort("archived_at", -1).to_list(120)
+        for d in arch:
+            th = "Technology" if d.get("category") == "AI & Technology" else SERVICE_THEME.get(d.get("service_slug"), "Strategy")
+            items.append({"type": "blog", "title": d.get("title"), "subtitle": f"{d.get('service_title')} · earlier edition",
+                          "image": d.get("hero_image"), "url": f"/archive/edition/{d.get('archive_id')}",
+                          "date": (d.get("archived_at") or "")[:10], "tag": "Earlier edition", "theme": th, "external": False})
+
+    async def add_articles():
+        docs = await db.articles.find({}, {"_id": 0}).sort("created_at", -1).to_list(120)
+        for d in docs:
+            items.append({"type": "article", "title": d.get("title"), "subtitle": d.get("category"),
+                          "image": d.get("image"), "url": f"/insights/{d.get('slug')}",
+                          "date": (d.get("created_at") or "")[:10], "tag": d.get("sector") or d.get("category"),
+                          "theme": classify(f"{d.get('category','')} {d.get('sector','')} {d.get('title','')} {' '.join(d.get('tags',[]) or [])}"),
+                          "external": False})
+
+    async def add_signals():
+        docs = await db.signals_archive.find({}, {"_id": 0}).sort("date", -1).to_list(90)
+        for d in docs:
+            items.append({"type": "signal", "title": d.get("hero_headline", "Market Signals"),
+                          "subtitle": "Market Signals", "image": None, "url": f"/signals/{d.get('date')}",
+                          "date": d.get("date"), "tag": "Market Signals", "theme": "Markets", "external": False})
+
+    async def add_videos():
+        try:
+            vids = await asyncio.to_thread(curator.library, None, 40)
+        except Exception:
+            vids = []
+        for v in vids:
+            items.append({"type": "video", "title": v.get("title"), "subtitle": v.get("source"),
+                          "image": v.get("thumbnail"),
+                          "url": v.get("source_url") or (f"https://www.youtube.com/watch?v={v.get('video_id')}" if v.get("video_id") else ""),
+                          "date": (v.get("published") or "")[:10],
+                          "tag": (v.get("topics") or ["Learning"])[0] if v.get("topics") else "Learning",
+                          "theme": classify(f"{v.get('title','')} {' '.join(v.get('topics',[]) or [])}"),
+                          "external": True})
+
+    def add_audio():
+        for b in BOOKS:
+            if b.get("audio"):
+                items.append({"type": "audio", "title": b.get("title"), "subtitle": f"{b.get('author')} · Audiobook",
+                              "image": None, "url": f"/library/{b.get('slug')}",
+                              "date": "", "tag": "Audiobook",
+                              "theme": classify(f"{b.get('theme','')} {b.get('title','')} {b.get('blurb','')}"),
+                              "external": False})
+
+    if want in ("all", "blog"):
+        await add_blogs()
+    if want in ("all", "article"):
+        await add_articles()
+    if want in ("all", "signal"):
+        await add_signals()
+    if want in ("all", "video"):
+        await add_videos()
+    if want in ("all", "audio"):
+        add_audio()
+
+    if theme and theme.lower() != "all":
+        items = [it for it in items if it.get("theme") == theme]
+
+    items.sort(key=lambda x: (x.get("date") or ""), reverse=True)
+    type_counts, theme_counts = {}, {}
+    for it in items:
+        type_counts[it["type"]] = type_counts.get(it["type"], 0) + 1
+        theme_counts[it["theme"]] = theme_counts.get(it["theme"], 0) + 1
+    themes = ["Strategy", "M&A", "Capital & Finance", "Markets", "Economy", "Technology", "Energy & Climate", "Leadership"]
+    return {"items": items[:limit], "counts": type_counts, "theme_counts": theme_counts,
+            "themes": [t for t in themes if theme_counts.get(t)], "total": len(items)}
+
+
+@api_router.get("/service-insights/{slug}")
+async def get_service_insight(slug: str):
+    d = await db.service_blogs.find_one({"slug": slug}, {"_id": 0})
+    if not d:
+        raise HTTPException(status_code=404, detail="Insight not found")
+    related = await db.service_blogs.find(
+        {"service_slug": d["service_slug"], "slug": {"$ne": slug}}, {"_id": 0}).sort("sort", 1).to_list(3)
+    d["related"] = [_blog_card(r) for r in related]
+    d["earlier_editions"] = await db.service_blogs_archive.count_documents({"slug": slug})
+    return d
+
+
+@api_router.get("/admin/service-insights/status")
+async def admin_service_insights_status(admin: dict = Depends(require_admin)):
+    from insights_data import TOPIC_PLAN
+    total = sum(len(v) for v in TOPIC_PLAN.values())
+    have = await db.service_blogs.count_documents({})
+    return {"expected": total, "generated": have, "running": _insights_gen_lock.locked()}
+
+
+@api_router.post("/admin/service-insights/regenerate")
+async def admin_service_insights_regenerate(force: bool = False, admin: dict = Depends(require_admin)):
+    if _insights_gen_lock.locked():
+        return {"success": False, "message": "Generation already running."}
+
+    async def _run():
+        async with _insights_gen_lock:
+            try:
+                await _generate_all_service_insights(force=force)
+            except Exception:
+                logger.exception("insights batch failed")
+
+    asyncio.create_task(_run())
+    return {"success": True, "message": "Insight generation started in the background."}
+
+
 
 
 # ---------------- Deals ticker (Google News RSS) ----------------

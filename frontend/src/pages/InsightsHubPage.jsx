@@ -1,0 +1,100 @@
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { motion } from "framer-motion";
+import { ArrowUpRight, History, Search } from "lucide-react";
+import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
+import Seo from "@/components/Seo";
+import api from "@/lib/api";
+
+const CAT_DOT = {
+  "Current Practice": "bg-[hsl(var(--primary))]",
+  "Case Study": "bg-sky-400",
+  "Deal Learning": "bg-amber-400",
+  "AI & Technology": "bg-[hsl(var(--primary))]",
+  "Strategy Success": "bg-emerald-400",
+  "Strategy Failure": "bg-rose-400",
+};
+
+function BlogCard({ b, i }) {
+  return (
+    <motion.div initial={{ opacity: 0, y: 18 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.4, delay: (i % 6) * 0.05 }}>
+      <Link to={`/insight/${b.slug}`} data-testid={`hub-blog-${b.slug}`} className="group flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-card transition-transform hover:-translate-y-1 hover:border-[hsl(var(--primary))]/50">
+        <div className="aspect-[16/10] overflow-hidden"><img src={b.hero_image} alt="" loading="lazy" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" /></div>
+        <div className="flex flex-1 flex-col p-5">
+          <p className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"><span className={`h-2 w-2 rounded-full ${CAT_DOT[b.category] || "bg-[hsl(var(--primary))]"}`} />{b.category} · {b.read_time}</p>
+          <h3 className="mt-2.5 font-display text-lg font-bold leading-snug group-hover:text-[hsl(var(--primary))]">{b.title}</h3>
+          <p className="mt-2 line-clamp-2 flex-1 text-sm text-muted-foreground">{b.dek}</p>
+          <span className="mt-4 text-xs font-semibold uppercase tracking-wider text-[hsl(var(--primary))]">{b.service_title}</span>
+        </div>
+      </Link>
+    </motion.div>
+  );
+}
+
+export default function InsightsHubPage() {
+  const [blogs, setBlogs] = useState([]);
+  const [services, setServices] = useState([]);
+  const [svc, setSvc] = useState("all");
+  const [cat, setCat] = useState("all");
+  const [q, setQ] = useState("");
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+    api.get("/service-insights?limit=200").then((r) => setBlogs(r.data)).catch(() => {});
+    api.get("/service-insights/services").then((r) => setServices(r.data)).catch(() => {});
+  }, []);
+
+  const cats = useMemo(() => Array.from(new Set(blogs.map((b) => b.category))), [blogs]);
+  const shown = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    return blogs.filter((b) =>
+      (svc === "all" || b.service_slug === svc) &&
+      (cat === "all" || b.category === cat) &&
+      (!term || [b.title, b.dek, b.service_title].some((v) => String(v || "").toLowerCase().includes(term))));
+  }, [blogs, svc, cat, q]);
+
+  return (
+    <div className="min-h-screen bg-background text-left text-foreground">
+      <Seo title="Insights — SK Insights by Sudarshan Karweer" description="World-class strategy, M&A, capital and leadership insights — case studies, deal learnings and practical playbooks, refreshed continuously." />
+      <Navbar />
+      <section className="grain relative overflow-hidden pt-36 lg:pt-44">
+        <div className="pointer-events-none absolute -right-40 top-24 h-[26rem] w-[26rem] rounded-full bg-[hsl(var(--primary))] opacity-20 blur-[140px]" />
+        <div className="relative mx-auto max-w-7xl px-6 pb-10 lg:px-10">
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[hsl(var(--primary))]">SK Insights</p>
+          <h1 className="mt-4 max-w-3xl font-display text-4xl font-black leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl">Consulting-grade insights, refreshed continuously</h1>
+          <p className="mt-5 max-w-2xl text-lg text-muted-foreground">Case studies, deal learnings and practical playbooks across strategy, M&A, capital, energy and leadership — the thinking that separates decisions that compound from ones that quietly leak value.</p>
+          <Link to="/archive" className="mt-6 inline-flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-sm font-semibold hover:border-[hsl(var(--primary))]" data-testid="hub-archive-link"><History className="h-4 w-4" /> Browse the full archive</Link>
+        </div>
+      </section>
+
+      <section className="border-t border-border py-10">
+        <div className="mx-auto max-w-7xl px-6 lg:px-10">
+          <div className="relative mb-5 max-w-md">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search insights…" data-testid="hub-search"
+              className="w-full rounded-full border border-border bg-card pl-10 pr-4 py-2.5 text-sm outline-none focus:border-[hsl(var(--primary))]" />
+          </div>
+          <div className="flex flex-wrap gap-2" data-testid="hub-service-filters">
+            <button onClick={() => setSvc("all")} className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${svc === "all" ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]" : "border border-border hover:bg-secondary"}`}>All services</button>
+            {services.map((s) => (
+              <button key={s.slug} onClick={() => setSvc(s.slug)} data-testid={`hub-svc-${s.slug}`} className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${svc === s.slug ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]" : "border border-border hover:bg-secondary"}`}>{s.title} <span className="opacity-60">{s.count}</span></button>
+            ))}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2" data-testid="hub-cat-filters">
+            <button onClick={() => setCat("all")} className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${cat === "all" ? "bg-foreground text-background" : "border border-border hover:bg-secondary"}`}>All types</button>
+            {cats.map((c) => (
+              <button key={c} onClick={() => setCat(c)} data-testid={`hub-cat-${c}`} className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${cat === c ? "bg-foreground text-background" : "border border-border hover:bg-secondary"}`}>{c}</button>
+            ))}
+          </div>
+
+          <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3" data-testid="hub-grid">
+            {shown.map((b, i) => <BlogCard key={b.slug} b={b} i={i} />)}
+          </div>
+          {shown.length === 0 && <p className="py-16 text-center text-muted-foreground">No insights match your filters yet.</p>}
+        </div>
+      </section>
+      <Footer />
+    </div>
+  );
+}

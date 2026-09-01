@@ -11,6 +11,9 @@ import CaseStudiesPage from "@/pages/CaseStudiesPage";
 import ProductsPage from "@/pages/ProductsPage";
 import StrategyToolkitPage from "@/pages/StrategyToolkitPage";
 import StrategyInsightPage from "@/pages/StrategyInsightPage";
+import ServiceInsightPage from "@/pages/ServiceInsightPage";
+import InsightsHubPage from "@/pages/InsightsHubPage";
+import ArchivePage from "@/pages/ArchivePage";
 import CohortsPage from "@/pages/CohortsPage";
 import CorporatePage from "@/pages/CorporatePage";
 import MarketPage from "@/pages/MarketPage";
@@ -61,6 +64,11 @@ function AppRoutes() {
       <Route path="/products" element={<ProductsPage />} />
       <Route path="/strategy-tools" element={<StrategyToolkitPage />} />
       <Route path="/strategy-insights/:slug" element={<StrategyInsightPage />} />
+      <Route path="/insights-hub" element={<InsightsHubPage />} />
+      <Route path="/insights-hub/archive" element={<ArchivePage />} />
+      <Route path="/archive" element={<ArchivePage />} />
+      <Route path="/archive/edition/:id" element={<ServiceInsightPage archived />} />
+      <Route path="/insight/:slug" element={<ServiceInsightPage />} />
       <Route path="/cohorts" element={<CohortsPage />} />
       <Route path="/corporate" element={<CorporatePage />} />
       <Route path="/market" element={<MarketPage />} />

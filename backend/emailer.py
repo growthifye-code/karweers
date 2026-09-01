@@ -745,3 +745,76 @@ def send_gst_invoice_email(to_email: str, booking: dict, gst: dict) -> str:
     msg.add_alternative(render_gst_invoice_html(booking, gst), subtype="html")
     return _smtp_send(msg)
 
+
+def send_admin_notify(to_email: str, subject: str, body_txt: str) -> str:
+    """Plain internal alert to the advisor/team (lead-magnet, corporate inquiry, new purchase)."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email:
+        return "skipped"
+    safe = (body_txt or "").replace("\n", "<br>")
+    inner = (f'<p style="font-size:15px;color:#111;font-weight:600;">{subject}</p>'
+             f'<p style="font-size:14px;color:#374151;line-height:1.6;">{safe}</p>')
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = user
+    msg["To"] = to_email
+    msg.set_content(body_txt or subject)
+    msg.add_alternative(_shell("Internal alert", inner), subtype="html")
+    return _smtp_send(msg)
+
+
+def send_nurture_welcome_email(to_email: str, name: str, site: str = "https://www.sudarshankarweer.com", unsubscribe_url: str = "") -> str:
+    """Welcome + first insight for a new lead-magnet / newsletter subscriber."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email:
+        return "skipped"
+    unsub = (f'<p style="font-size:12px;color:#9ca3af;margin-top:18px;">Not for you? '
+             f'<a href="{unsubscribe_url}" style="color:#9ca3af;">Unsubscribe</a>.</p>') if unsubscribe_url else ""
+    inner = (
+        f'<p style="font-size:15px;color:#111;">Hi {name},</p>'
+        f'<p style="font-size:14px;color:#374151;line-height:1.6;">Welcome — you\'re now on the inside track. '
+        f'Expect sharp, no-noise signals on strategy, leadership and the sectors Sudarshan works across, '
+        f'straight to your inbox.</p>'
+        f'<p style="font-size:14px;color:#374151;line-height:1.6;">Your first read is waiting on the site — '
+        f'start with the Leadership Assessment to see where you stand today.</p>'
+        f'<a href="{site}/assessment" style="display:inline-block;margin-top:14px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Start the assessment</a>'
+        f'<p style="font-size:13px;color:#374151;margin-top:18px;">— Team Sudarshan Karweer</p>'
+        f'{unsub}'
+    )
+    msg = EmailMessage()
+    msg["Subject"] = "You're in — your first insight from Sudarshan"
+    msg["From"] = user
+    msg["To"] = to_email
+    msg.set_content(f"Hi {name}, welcome. Start with the Leadership Assessment at {site}/assessment")
+    msg.add_alternative(_shell("Welcome", inner), subtype="html")
+    return _smtp_send(msg)
+
+
+def send_purchase_email(to_email: str, name: str, kind: str, title: str, download_url: str = "", site: str = "https://www.sudarshankarweer.com") -> str:
+    """Purchase confirmation + access for a digital product or cohort seat."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email:
+        return "skipped"
+    if kind == "product":
+        cta = (f'<a href="{download_url}" style="display:inline-block;margin-top:14px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Download now</a>'
+               if download_url else "")
+        line = f'Your purchase of <strong>{title}</strong> is confirmed. Your download is ready below.'
+    else:
+        cta = (f'<a href="{site}" style="display:inline-block;margin-top:14px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">View details</a>')
+        line = f'Your seat in <strong>{title}</strong> is booked. Joining details and the schedule will follow shortly.'
+    inner = (
+        f'<p style="font-size:15px;color:#111;">Hi {name},</p>'
+        f'<p style="font-size:14px;color:#374151;line-height:1.6;">{line}</p>'
+        f'{cta}'
+        f'<p style="font-size:13px;color:#374151;margin-top:18px;">— Team Sudarshan Karweer</p>'
+    )
+    msg = EmailMessage()
+    msg["Subject"] = f"Confirmed: {title}"
+    msg["From"] = user
+    msg["To"] = to_email
+    msg.set_content(f"Hi {name}, your purchase of {title} is confirmed. {download_url}")
+    msg.add_alternative(_shell("Purchase confirmed", inner), subtype="html")
+    return _smtp_send(msg)

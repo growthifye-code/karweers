@@ -1,0 +1,30 @@
+{
+  "summary": "Iteration 17 frontend E2E on preview URL. Verified all Tier-1 revenue UI flows: Navbar 'Work with SK' dropdown with 3 links (products/cohorts/corporate); Products page (products-grid, lead-magnet, non-blueprint CTA opens checkout-modal, Blueprint CTA correctly links to /assessment); Cohorts page (cohorts-grid, seats badge, Reserve-my-seat CTA opens checkout-modal); Case Studies page (3 case cards + testimonials-section, no 'AI' wording); Corporate inquiry form submits end-to-end and shows corporate-done; Lead-magnet submits and shows lead-magnet-done; Assessment 20 Big-Five questions -> submit -> LLM-generated result view -> blueprint-pro-upsell + blueprint-pro-buy opens checkout-modal; Admin login (consent+captcha) succeeds; Admin Revenue tab renders admin-revenue with all 5 sub-tabs; Products CMS create+edit+delete cycle works when 'Active' is ticked; Orders sub-tab renders summary cards + orders table. No 'AI' wording found on any tested public page. Razorpay checkout modal opens/closes cleanly and NO payment was completed. Overall 34/34 tested assertions pass. One notable UX bug in CMS admin listing (see frontend_issues).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "RevenueAdmin.CollectionPanel", "issue": "CMS list is populated by fetching PUBLIC endpoints (/products, /cohorts, /case-studies, /testimonials) which filter by active/enabled=true. Newly created items with active=false are saved successfully (backend 200 + 'Saved.' toast) but never appear in the admin table, so admins cannot see, edit or delete their own draft/inactive items via the UI. Repro: Revenue -> Products -> New -> fill title/price, DO NOT tick 'Active', Save. Toast says 'Saved.' but no row is added. Fix: fetch from an admin listing endpoint (e.g. GET /api/admin/cms/{collection}) that returns ALL items regardless of active flag.", "selector": "[data-testid=cms-panel-products]", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Change RevenueAdmin CollectionPanel.load() to hit an admin listing endpoint that includes inactive items, otherwise CMS-created inactive rows become 'ghost' items in the DB with no UI to manage them.",
+    "Consider defaulting the 'Active' checkbox to true in the New-item modal (or auto-set active=true on POST /admin/cms/{collection} when field is omitted) so admins do not accidentally create invisible items."
+  ],
+  "critical_code_review_comments": [
+    "RevenueAdmin.jsx CollectionPanel.load() reuses PUBLIC endpoints for the admin table — leaks visibility rules into the admin surface and hides admin-created drafts. Recommend a dedicated admin listing endpoint per collection.",
+    "EditModal.save() does not send active:true by default; combined with the point above, this creates the 'silent create' UX bug reported.",
+    "AssessmentPage: LLM generation for the blueprint result can take 10-30s and the UI only shows 'Reading your profile...' with no progress indicator, timeout, or retry. Consider a hard timeout + fallback view.",
+    "Consent gate flow requires opening BOTH docs to enable the login checkbox — automation friendly (worked here) but painful on real UX; consider persisting the 'both opened' state in sessionStorage to avoid re-consent per tab reload."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (frontend-only request)", "frontend": "34/34 assertions passed (100%) after ticking Active for CMS create; 1 UX bug reported"},
+  "test_credentials": "Admin: sudarshan@karweers.com / Sudarshan@2026 (login requires opening consent-open-terms + consent-open-privacy, ticking consent-checkbox, and solving hCaptcha via clicking #checkbox inside the hCaptcha iframe — always-pass TEST sitekey auto-verifies).",
+  "seed_data_creation": "During UI test cycles the following were created and then removed via the same UI: 1 corporate inquiry consultation, 1 nurture/subscribe entry (lead-magnet), 2 Razorpay pending orders (product + cohort — opened checkout modal without paying; the modal open triggers /commerce/order which persists a pending_payment row — see iter16 report), 1 assessment run, and 1 CMS product (test-prod-<epoch>) which was created, edited and deleted in the Products sub-tab. Existing seed products/cohorts/case-studies/testimonials were NOT modified.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "hCaptcha auto-solve requires clicking #checkbox INSIDE the hCaptcha iframe (find frame with url containing 'hcaptcha.com'). page.fill on the captcha iframe alone or waiting will NOT trigger onVerify — the 'I am human' checkbox must be clicked. Assessment result view is LLM-driven and takes up to 30s — wait up to 45s for [data-testid=assessment-result]. Q ids are e1..e4, a1..a4, c1..c4, n1..n4, o1..o4 with options q-<qid>-opt-1..5; click via JS querySelectorAll for reliability (Playwright's scroll-and-click missed 5 clicks in one run). CMS create bug: always tick cms-field-active before Save if you want to see the row in the list.",
+  "rca of the issue": "CMS 'ghost create' RCA: RevenueAdmin.CollectionPanel.load() (RevenueAdmin.jsx line 158-161) fetches from public catalogue endpoints (`/products`, `/cohorts`, `/case-studies`, `/testimonials`) which the backend filters by `active: true`. EditModal.save() (line 99-116) posts the form as-is; the 'active' bool defaults to falsy (undefined -> false after `!!payload[fl.key]` on line 104). Result: POST /api/admin/cms/products succeeds (returns 200, iter16 confirmed), the DB row is created with active=false, but the subsequent GET /api/products (public) filters it out. UI shows 'Saved.' toast but no row. Mitigation: (a) default active=true in EditModal initial state when item is new, OR (b) create GET /api/admin/cms/{collection} that ignores the active filter and switch load() to that endpoint (preferred — future-proof for drafts)."
+}

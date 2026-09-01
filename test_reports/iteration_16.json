@@ -1,0 +1,27 @@
+{
+  "summary": "Iteration 16: verified all Tier-1 revenue backend endpoints (products, cohorts, case-studies, testimonials, nurture/subscribe, corporate/inquiry, commerce/order + verify, cohort waitlist, admin CMS CRUD across 4 collections, admin orders, blueprint starter PDF + 404 for unknown order). 26/26 pytest cases pass against preview URL. Live Razorpay order creation returns real order_id, key_id, amount_paise — no charges attempted. No 'AI' wording in any response. Blueprint starter.pdf serves a valid PDF (~200KB body, %PDF magic present). CMS create/update/delete cycle idempotent for products/cohorts/case-studies/testimonials; unknown collection returns 404. Admin auth enforced: /api/admin/commerce/orders returns 401 without token.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration16_commerce.py",
+    "/app/test_reports/pytest/iter16.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py now 5505 lines — carry-over: Tier-1 features added ~410 lines directly at bottom of monolith; strongly recommend splitting into routers/commerce.py, routers/cms.py, routers/catalogue.py before adding more revenue features.",
+    "commerce_order has a subtle bug when kind=='product' and item is None (unknown ref_id): title = item and item['title'] evaluates to None (falsy but not raising), then falls through to 'if not item: raise 404' — works, but the same pattern for kind=='cohort' reads item.get('seats_taken') BEFORE the None check. If a cohort slug is unknown, item is None and the `if item and int(...)` short-circuits correctly, so it's safe today; but the ordering is fragile — recommend explicit None check first.",
+    "cms_upsert accepts arbitrary body dict without Pydantic validation — an admin typo (e.g. price as string) will silently corrupt catalogue docs. Suggest a per-collection Pydantic model or JSON-schema validator.",
+    "verify_captcha still short-circuits on empty token before the preview-host check (carry-over from iter15) — commerce forms all pass 'test' so preview works, but any client that omits captcha_token will 400 even on preview. Not blocking iter16, still worth fixing.",
+    "commerce/verify returns 404 for missing our_order_id OR mismatched razorpay_order_id (good), and 400 for signature failure. Bogus-signature path is exercised and confirmed non-mutating.",
+    "_seed_commerce is guarded by count_documents==0 so admin-deleted seed items will NOT be re-seeded — acceptable, but note test cleanup did not touch seeded items."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration16_commerce.py (new)"
+  ],
+  "success_rate": {"backend": "100% (26/26)", "frontend": "not tested (backend-only request)"},
+  "test_credentials": "Admin sudarshan@karweers.com / Sudarshan@2026 (login body needs consent:true, captcha_token:'test'). hCaptcha auto-passes on preview host with token 'test'.",
+  "seed_data_creation": "Test-only writes (all safe / cleaned by DELETE where applicable): (a) 2 subscribers docs with emails test.nurture.<rand>@test.com; (b) 1 consultations doc from corporate/inquiry (source=corporate-inquiry, name='Test Corp Contact'); (c) 2 orders docs in orders collection (kind=product cxo-strategy-playbook, kind=cohort cxo-leadership-cohort) — status=pending_payment, paid=false, will never be captured; (d) 1 waitlist email pushed into cxo-leadership-cohort.waitlist array; (e) CMS test cycle created+updated+DELETED products/cohorts/case-studies/testimonials with slugs test-prod-*, test-cohort-*, test-case-* — all deleted at end of each parametrized test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run: cd /app/backend && set -a && . <(grep -E '^(MONGO_URL|DB_NAME)=' .env) && export REACT_APP_BACKEND_URL=\"$(grep REACT_APP_BACKEND_URL /app/frontend/.env | cut -d= -f2)\" && set +a && PYTHONPATH=/app/backend pytest tests/test_iteration16_commerce.py -v. The autouse _rebind_motor_client fixture in tests/conftest.py imports server.py so MONGO_URL/DB_NAME MUST be exported (with .env quoting stripped) before pytest, else 26 ERRORs. Note: request mentioned slug 'energy-strategy-hub' for a product/cohort — that slug does NOT exist (it's the preview hostname); tests use 'cxo-strategy-playbook' + 'cxo-leadership-cohort' for happy path and 'energy-strategy-hub' for 404 assertion."
+}

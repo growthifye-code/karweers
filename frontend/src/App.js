@@ -8,6 +8,9 @@ import ServicesIndex from "@/pages/ServicesIndex";
 import ServicePage from "@/pages/ServicePage";
 import LegalPage from "@/pages/LegalPage";
 import CaseStudiesPage from "@/pages/CaseStudiesPage";
+import ProductsPage from "@/pages/ProductsPage";
+import CohortsPage from "@/pages/CohortsPage";
+import CorporatePage from "@/pages/CorporatePage";
 import MarketPage from "@/pages/MarketPage";
 import DealsPage from "@/pages/DealsPage";
 import InsightsPage from "@/pages/InsightsPage";
@@ -53,6 +56,9 @@ function AppRoutes() {
       <Route path="/refund" element={<LegalPage doc="refund" />} />
       <Route path="/insights" element={<InsightsPage />} />
       <Route path="/case-studies" element={<CaseStudiesPage />} />
+      <Route path="/products" element={<ProductsPage />} />
+      <Route path="/cohorts" element={<CohortsPage />} />
+      <Route path="/corporate" element={<CorporatePage />} />
       <Route path="/market" element={<MarketPage />} />
       <Route path="/deals" element={<DealsPage />} />
       <Route path="/learning" element={<LearningPage />} />

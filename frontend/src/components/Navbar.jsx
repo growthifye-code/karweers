@@ -13,13 +13,19 @@ export const SERVICE_LINKS = [
   { slug: "business-coaching", label: "Business Coaching" },
 ];
 
+export const PROGRAM_LINKS = [
+  { to: "/products", label: "Digital Downloads" },
+  { to: "/cohorts", label: "Cohorts & Masterclasses" },
+  { to: "/corporate", label: "Corporate & Enterprise" },
+];
+
 const NAV = [
   { label: "About", to: "/about" },
   { label: "Sectors & Capital", to: "/explore" },
   { label: "Leadership Lab", to: "/leadership-lab" },
   { label: "Insights", to: "/insights" },
-  { label: "Learning", to: "/learning" },
   { label: "Case Studies", to: "/case-studies" },
+  { label: "Learning", to: "/learning" },
   { label: "Market", to: "/market" },
   { label: "Deals", to: "/deals" },
 ];
@@ -42,6 +48,7 @@ export function Logo({ light = false }) {
 export default function Navbar() {
   const [open, setOpen] = useState(false);
   const [svcOpen, setSvcOpen] = useState(false);
+  const [progOpen, setProgOpen] = useState(false);
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
@@ -81,6 +88,22 @@ export default function Navbar() {
             {NAV.map((l) => (
               <Link key={l.label} to={l.to} data-testid={`nav-${l.label.toLowerCase().replace(" ", "-")}`} className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">{l.label}</Link>
             ))}
+            <div className="relative" onMouseEnter={() => setProgOpen(true)} onMouseLeave={() => setProgOpen(false)}>
+              <Link to="/products" data-testid="nav-programs" className="inline-flex items-center gap-1 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">
+                Work with SK <ChevronDown className="h-3.5 w-3.5" />
+              </Link>
+              {progOpen && (
+                <div className="absolute left-1/2 top-full w-64 -translate-x-1/2 pt-3" data-testid="programs-dropdown">
+                  <div className="overflow-hidden rounded-2xl border border-border bg-card p-2 shadow-2xl">
+                    {PROGRAM_LINKS.map((s) => (
+                      <Link key={s.to} to={s.to} className="block rounded-xl px-4 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
+                        {s.label}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
           <div className="hidden items-center gap-3 lg:flex">
             <ThemeToggle />
@@ -112,6 +135,10 @@ export default function Navbar() {
                 <Link key={s.slug} to={`/services/${s.slug}`} onClick={() => setOpen(false)} className="pl-3 text-sm text-muted-foreground">{s.label}</Link>
               ))}
               {NAV.map((l) => (<Link key={l.label} to={l.to} onClick={() => setOpen(false)} className="text-sm font-medium text-muted-foreground">{l.label}</Link>))}
+              <p className="pt-1 text-xs font-semibold uppercase tracking-wide text-[hsl(var(--primary))]">Work with SK</p>
+              {PROGRAM_LINKS.map((s) => (
+                <Link key={s.to} to={s.to} onClick={() => setOpen(false)} className="pl-3 text-sm text-muted-foreground">{s.label}</Link>
+              ))}
               <div className="flex items-center gap-3 pt-2">
                 <ThemeToggle />
                 {user ? (

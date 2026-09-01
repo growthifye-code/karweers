@@ -22,6 +22,20 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - Client auth + admin panel
 
 ## Implemented (2026-06)
+### Tier 1 Direct Revenue + CMS (2026-06, latest)
+- **Digital Products / paid downloads** (`/products`): catalogue with LIVE Razorpay checkout. Seeded: SK Leadership Blueprint (Pro) ₹1,499, CXO Strategy Playbook ₹999, Fundraising & Bankability Toolkit ₹1,299. Backend: `/api/products`, `/api/commerce/order`, `/api/commerce/verify`.
+- **Leadership Blueprint PDF** (`blueprint_pdf.py`, reportlab): (a) FREE evergreen "Starter" PDF via lead-magnet email capture → `/api/blueprint/starter.pdf`; (b) PAID personalised Pro PDF generated from the buyer's Big-Five assessment after payment → `/api/blueprint/download/{order_id}`. Upsell lives on `/assessment` result view.
+- **Cohorts & Masterclasses** (`/cohorts`): seat counters (`seats_left`), Razorpay seat purchase, waitlist when full (`/api/cohorts/{slug}/waitlist`). Seeded: CXO Leadership Cohort ₹24,999 / 20 seats.
+- **Corporate / Enterprise inquiry** (`/corporate`): dedicated lead form → stored in `consultations` (source=corporate-inquiry) + admin email alert.
+- **Lead-magnet → nurture funnel**: `/api/nurture/subscribe` (upserts `subscribers`) + welcome email (`send_nurture_welcome_email`).
+- **Case Studies + Testimonials** (`/case-studies` rebuilt): pulls `/api/case-studies` + `/api/testimonials` (seeded), metrics + quotes + testimonials section.
+- **Admin CMS** (AdminDashboard → "Revenue" tab, `RevenueAdmin.jsx`): full CRUD for products/cohorts/case-studies/testimonials via `/api/admin/cms/{collection}` (GET all incl. inactive, POST upsert, DELETE) + Orders view (`/api/admin/commerce/orders`) with revenue summary.
+- **Nav**: new "Work with SK" dropdown → Digital Downloads / Cohorts / Corporate.
+- Emailer additions: `send_admin_notify`, `send_nurture_welcome_email`, `send_purchase_email`.
+- Bug fixed during build: `app.include_router` was called before the new routes were defined (routes 404'd) — moved after all routes. CMS admin table now reads an admin listing endpoint (not public/active-only) and new items default to active=true.
+- Tested: backend 26/26 (iteration_16), frontend 34/34 (iteration_17). Razorpay orders create fine; real payment never completed in tests.
+
+
 ### Iteration 6 additions
 - Hero now uses an AI-generated image of Sudarshan coaching a leadership team (boardroom, lime-accented); auto-animates (Ken-Burns), play button removed
 - Sector case studies added: Aviation, Metals & Mining, Telecom, Agriculture (appear in Case Studies + Insights)

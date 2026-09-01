@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { Compass, Sparkles, AlertTriangle, Flag, ChevronLeft, Info, ArrowUpRight } from "lucide-react";
+import { Compass, Sparkles, AlertTriangle, Flag, ChevronLeft, Info, ArrowUpRight, FileDown } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import Seo from "@/components/Seo";
 import api from "@/lib/api";
+import CommerceCheckoutModal from "@/components/CommerceCheckoutModal";
 
 export default function AssessmentPage() {
   const [items, setItems] = useState([]);
@@ -12,10 +13,13 @@ export default function AssessmentPage() {
   const [answers, setAnswers] = useState({});
   const [result, setResult] = useState(null);
   const [status, setStatus] = useState("intro"); // intro | quiz | loading | done | error
+  const [proProduct, setProProduct] = useState(null);
+  const [proOpen, setProOpen] = useState(false);
 
   useEffect(() => { window.scrollTo(0, 0); }, [status]);
   useEffect(() => {
     api.get("/assessment/questions").then((r) => { setItems(r.data.items); setScale(r.data.scale); setCredit(r.data.credit); }).catch(() => {});
+    api.get("/products/leadership-blueprint-pro").then((r) => setProProduct(r.data)).catch(() => {});
   }, []);
 
   const answered = Object.keys(answers).length;
@@ -168,6 +172,22 @@ export default function AssessmentPage() {
                 </div>
               )}
 
+              {proProduct && (
+                <div className="relative overflow-hidden rounded-2xl border border-[hsl(var(--primary))]/40 bg-[hsl(var(--primary))]/8 p-6" data-testid="blueprint-pro-upsell">
+                  <div className="flex flex-wrap items-center gap-4">
+                    <div className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[hsl(var(--primary))]/20"><FileDown className="h-6 w-6 text-[hsl(var(--primary))]" /></div>
+                    <div className="flex-1">
+                      <p className="font-display text-lg font-bold">{proProduct.title}</p>
+                      <p className="mt-1 text-sm text-muted-foreground">{proProduct.subtitle || "Download your profile as a premium, personalised Leadership Blueprint PDF — narrative, strengths, blind spots and a 12-month roadmap."}</p>
+                    </div>
+                    <button onClick={() => setProOpen(true)} data-testid="blueprint-pro-buy"
+                      className="inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-6 py-3 text-sm font-semibold text-[hsl(var(--primary-foreground))] transition-transform hover:-translate-y-0.5">
+                      Unlock PDF · {"\u20b9" + Number(proProduct.price || 0).toLocaleString("en-IN")}
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-border bg-secondary/40 p-6">
                 <p className="flex-1 text-sm text-muted-foreground">Want to go deeper on your roadmap? Work through it with Sudarshan directly.</p>
                 <a href="/#consult" className="rounded-full bg-[hsl(var(--primary))] px-5 py-2.5 text-sm font-semibold text-[hsl(var(--primary-foreground))]">Book a coaching session</a>
@@ -177,6 +197,9 @@ export default function AssessmentPage() {
           )}
         </div>
       </section>
+      <CommerceCheckoutModal open={proOpen} item={proProduct ? { kind: "product", ref_id: "leadership-blueprint-pro", title: proProduct.title, price: proProduct.price } : null}
+        meta={result ? { scores: result.scores, quadrant: result.quadrant, blueprint: result.blueprint } : null}
+        onClose={() => setProOpen(false)} onDone={(r) => { if (r.download_url) window.open(r.download_url, "_blank"); }} />
       <Footer />
     </div>
   );

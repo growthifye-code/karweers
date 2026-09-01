@@ -39,6 +39,7 @@ from emailer import send_library_digest_email, send_score_beaten_email
 from emailer import send_sector_digest_email
 from emailer import send_payment_receipt_email, send_refund_email
 from emailer import send_gst_invoice_email, send_abandoned_nudge_email
+from emailer import send_admin_notify, send_nurture_welcome_email, send_purchase_email
 import xml.etree.ElementTree as ET
 import contextvars
 from urllib.parse import quote_plus
@@ -4953,7 +4954,6 @@ async def calendar_disconnect(request: Request, admin: dict = Depends(require_ad
 
 
 # ---------------- Booking scheduling + email ----------------
-app.include_router(api_router)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
@@ -5074,6 +5074,352 @@ async def _ensure_index(coll, keys, **opts):
         logger.warning("Index create error on %s.%s %s: %s (continuing)", db.name, coll.name, keys, e)
 
 
+# ==================== Revenue & Credibility: Products · Cohorts · Corporate · Case Studies · Testimonials ====================
+CATALOG_ACCENTS = ["from-[#1f1a2e] to-[#0b0a18]", "from-[#12222b] to-[#08131a]", "from-[#2a1810] to-[#0f0a06]",
+                   "from-[#102a1f] to-[#08170f]", "from-[#1a1327] to-[#0a0814]", "from-[#101f2b] to-[#080f18]"]
+
+
+NOTIFY_EMAIL = os.environ.get("BOOKING_ADMIN_EMAIL") or os.environ.get("ADMIN_EMAIL", "")
+
+
+def _smtp_notify(subject: str, body_txt: str):
+    """Fire an internal alert email to the advisor/team (best-effort)."""
+    if not NOTIFY_EMAIL:
+        return
+    send_admin_notify(NOTIFY_EMAIL, subject, body_txt)
+
+
+def _pub(d: dict) -> dict:
+    d.pop("_id", None)
+    return d
+
+
+async def _seed_commerce():
+    if await db.products.count_documents({}) == 0:
+        await db.products.insert_many([
+            {"id": str(uuid.uuid4()), "slug": "leadership-blueprint-pro", "title": "SK Leadership Blueprint (Pro)",
+             "subtitle": "Your Big-Five profile, turned into a 20-page executive playbook",
+             "description": "A premium, personalised deep-dive built on your free assessment — strengths, blind spots, a 90-day operating plan and the rituals to run your leadership like a system.",
+             "price": 1499, "type": "blueprint", "download_url": "", "active": True, "sort": 1, "created_at": now_iso()},
+            {"id": str(uuid.uuid4()), "slug": "cxo-strategy-playbook", "title": "The CXO Strategy Playbook",
+             "subtitle": "The frameworks SK uses in every war-room", "description": "A practical playbook of strategy, capital and scaling frameworks with worked examples and one-page templates you can use on Monday.",
+             "price": 999, "type": "playbook", "download_url": "", "active": True, "sort": 2, "created_at": now_iso()},
+            {"id": str(uuid.uuid4()), "slug": "fundraising-toolkit", "title": "Fundraising & Bankability Toolkit",
+             "subtitle": "Model, de-risk, and court capital", "description": "Templates and checklists to make your business bankable before you approach investors — financial model skeleton, data-room checklist and an investor-narrative canvas.",
+             "price": 1299, "type": "template", "download_url": "", "active": True, "sort": 3, "created_at": now_iso()},
+        ])
+    if await db.cohorts.count_documents({}) == 0:
+        await db.cohorts.insert_one({
+            "id": str(uuid.uuid4()), "slug": "cxo-leadership-cohort", "title": "CXO Leadership Cohort",
+            "subtitle": "A 6-week live intensive for founders & senior leaders",
+            "description": "Six live war-room sessions with Sudarshan — strategy, capital, scaling and leadership — with peer accountability and a personal 90-day plan. Seats are deliberately limited.",
+            "price": 24999, "seats_total": 20, "seats_taken": 0, "start_date": "", "end_date": "",
+            "schedule": "Live · 6 weekly sessions · 90 mins each", "waitlist": [], "active": True, "sort": 1, "created_at": now_iso()})
+    if await db.case_studies.count_documents({}) == 0:
+        await db.case_studies.insert_many([
+            {"id": str(uuid.uuid4()), "slug": "renewable-scaleup", "client": "Confidential · Renewables IPP", "sector": "Renewable Energy",
+             "headline": "From stalled pipeline to a bankable 500 MW roadmap", "challenge": "A fast-growing IPP had ambition but an un-fundable model and a scattered project pipeline.",
+             "approach": "Rebuilt the strategy around a focused, de-risked portfolio and a bankable financial model with clear offtake and capital structure.",
+             "result": "Secured growth capital and a clear 3-year roadmap.", "metrics": [{"label": "Pipeline made bankable", "value": "500 MW"}, {"label": "Capital unlocked", "value": "₹1,200 Cr"}],
+             "quote": "He turned our ambition into something investors could actually back.", "active": True, "sort": 1, "created_at": now_iso()},
+            {"id": str(uuid.uuid4()), "slug": "cost-transformation", "client": "Confidential · Manufacturing CXO", "sector": "Manufacturing",
+             "headline": "A cost transformation that protected the growth engine", "challenge": "Margins were eroding and blunt cost-cuts were threatening the very teams driving growth.",
+             "approach": "Surgical cost transformation — protecting revenue drivers while removing low-ROI spend and fixing the operating rhythm.",
+             "result": "Double-digit margin recovery within two quarters.", "metrics": [{"label": "Cost reduced", "value": "18%"}, {"label": "Margin recovery", "value": "2 quarters"}],
+             "quote": "Scalpel, not axe. We came out leaner and stronger.", "active": True, "sort": 2, "created_at": now_iso()},
+        ])
+    if await db.testimonials.count_documents({}) == 0:
+        await db.testimonials.insert_many([
+            {"id": str(uuid.uuid4()), "name": "Founder & CEO", "role": "Renewable Energy", "company": "", "quote": "The clearest strategic thinking I've had in the room in years. Practical, and it moved the needle fast.", "featured": True, "sort": 1, "created_at": now_iso()},
+            {"id": str(uuid.uuid4()), "name": "Group CFO", "role": "Infrastructure", "company": "", "quote": "He made our business bankable. Investors finally saw what we saw.", "featured": True, "sort": 2, "created_at": now_iso()},
+            {"id": str(uuid.uuid4()), "name": "Managing Director", "role": "Manufacturing", "company": "", "quote": "Rare mix of big-picture strategy and hands-on execution. Worth every minute.", "featured": True, "sort": 3, "created_at": now_iso()},
+        ])
+
+
+# ---- Public catalogue ----
+@api_router.get("/products")
+async def list_products():
+    return [_pub(d) for d in await db.products.find({"active": True}, {"_id": 0}).sort("sort", 1).to_list(100)]
+
+
+@api_router.get("/products/{slug}")
+async def get_product(slug: str):
+    d = await db.products.find_one({"slug": slug, "active": True}, {"_id": 0})
+    if not d:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return d
+
+
+@api_router.get("/cohorts")
+async def list_cohorts():
+    out = []
+    for c in await db.cohorts.find({"active": True}, {"_id": 0, "waitlist": 0}).sort("sort", 1).to_list(100):
+        c["seats_left"] = max(0, int(c.get("seats_total", 0)) - int(c.get("seats_taken", 0)))
+        out.append(c)
+    return out
+
+
+@api_router.get("/cohorts/{slug}")
+async def get_cohort(slug: str):
+    c = await db.cohorts.find_one({"slug": slug, "active": True}, {"_id": 0, "waitlist": 0})
+    if not c:
+        raise HTTPException(status_code=404, detail="Cohort not found")
+    c["seats_left"] = max(0, int(c.get("seats_total", 0)) - int(c.get("seats_taken", 0)))
+    return c
+
+
+@api_router.get("/case-studies")
+async def list_case_studies():
+    return [_pub(d) for d in await db.case_studies.find({"active": True}, {"_id": 0}).sort("sort", 1).to_list(100)]
+
+
+@api_router.get("/testimonials")
+async def list_testimonials():
+    return [_pub(d) for d in await db.testimonials.find({}, {"_id": 0}).sort("sort", 1).to_list(100)]
+
+
+# ---- Corporate / enterprise inquiry ----
+class CorporateIn(BaseModel):
+    name: str
+    email: str
+    company: str
+    phone: Optional[str] = ""
+    budget: Optional[str] = ""
+    engagement: Optional[str] = ""
+    message: Optional[str] = ""
+    captcha_token: Optional[str] = None
+
+
+@api_router.post("/corporate/inquiry")
+async def corporate_inquiry(body: CorporateIn, request: Request):
+    verify_captcha(body.captcha_token, _client_ip(request), request)
+    doc = {"id": str(uuid.uuid4()), "name": body.name, "email": body.email.lower(), "company": body.company,
+           "phone": body.phone or "", "area": "Corporate / Enterprise", "package": "Corporate Inquiry",
+           "budget": body.budget or "", "engagement": body.engagement or "",
+           "message": body.message or "", "status": "new", "source": "corporate-inquiry", "created_at": now_iso()}
+    await db.consultations.insert_one(doc)
+    try:
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(None, lambda: send_test_email and None)  # noop guard
+        if os.environ.get("GMAIL_APP_PASSWORD") and NOTIFY_EMAIL:
+            body_txt = (f"New corporate inquiry\n\n{body.name} · {body.company}\n{body.email} · {body.phone}\n"
+                        f"Budget: {body.budget}\nEngagement: {body.engagement}\n\n{body.message}")
+            loop.run_in_executor(None, lambda: _smtp_notify("New corporate / enterprise inquiry", body_txt))
+    except Exception:
+        logger.warning("corporate inquiry notify failed", exc_info=True)
+    return {"success": True, "message": "Thank you — your enquiry is with Sudarshan's team. We'll be in touch shortly."}
+
+
+# ---- Lead magnet capture (nurture funnel entry) ----
+class LeadMagnetIn(BaseModel):
+    email: str
+    name: Optional[str] = ""
+    source: Optional[str] = "lead-magnet"
+    captcha_token: Optional[str] = None
+
+
+@api_router.post("/nurture/subscribe")
+async def nurture_subscribe(body: LeadMagnetIn, request: Request):
+    verify_captcha(body.captcha_token, _client_ip(request), request)
+    email = body.email.lower().strip()
+    await db.subscribers.update_one({"email": email}, {"$setOnInsert": {
+        "email": email, "name": body.name or "there", "source": body.source or "lead-magnet",
+        "created_at": now_iso()}}, upsert=True)
+    if os.environ.get("GMAIL_APP_PASSWORD"):
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(None, lambda: send_nurture_welcome_email(email, body.name or "there", PUBLIC_SITE, _unsub_url(email)))
+    return {"success": True, "message": "You're in. Check your inbox — your first insight from Sudarshan is on its way."}
+
+
+# ---- Commerce: paid products & cohort seats (Razorpay) ----
+class CommerceOrderIn(BaseModel):
+    kind: str  # "product" | "cohort"
+    ref_id: str
+    name: str
+    email: str
+    phone: Optional[str] = ""
+    meta: Optional[dict] = None  # e.g. assessment result for a personalised Blueprint
+    captcha_token: Optional[str] = None
+
+
+@api_router.post("/commerce/order")
+async def commerce_order(body: CommerceOrderIn, request: Request):
+    verify_captcha(body.captcha_token, _client_ip(request), request)
+    client = _razorpay_client()
+    if not client:
+        raise HTTPException(status_code=503, detail="Payments are not configured yet. Please try again shortly.")
+    if body.kind == "product":
+        item = await db.products.find_one({"slug": body.ref_id, "active": True}, {"_id": 0})
+        title = item and item["title"]
+    elif body.kind == "cohort":
+        item = await db.cohorts.find_one({"slug": body.ref_id, "active": True}, {"_id": 0})
+        title = item and item["title"]
+        if item and int(item.get("seats_taken", 0)) >= int(item.get("seats_total", 0)):
+            return {"success": False, "waitlist": True, "message": "This cohort is full. Join the waitlist and we'll offer you the next seat."}
+    else:
+        raise HTTPException(status_code=400, detail="Invalid kind")
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    amount_paise = int(round(float(item["price"]) * 100))
+    oid = str(uuid.uuid4())
+    try:
+        order = await asyncio.to_thread(client.order.create, {
+            "amount": amount_paise, "currency": "INR", "payment_capture": 1, "receipt": oid[:40],
+            "notes": {"kind": body.kind, "item": title, "email": body.email.lower()}})
+    except Exception:
+        logger.exception("razorpay commerce order failed")
+        raise HTTPException(status_code=502, detail="Could not start the payment. Please try again.")
+    await db.orders.insert_one({
+        "id": oid, "kind": body.kind, "ref_id": body.ref_id, "ref_title": title,
+        "name": body.name, "email": body.email.lower(), "phone": body.phone or "",
+        "amount": item["price"], "currency": "INR", "amount_paise": amount_paise,
+        "meta": body.meta or {},
+        "status": "pending_payment", "paid": False, "delivered": False,
+        "razorpay_order_id": order["id"], "source": f"{body.kind}-checkout", "created_at": now_iso()})
+    return {"success": True, "our_order_id": oid, "order_id": order["id"], "amount": amount_paise,
+            "currency": "INR", "key_id": os.environ.get("RAZORPAY_KEY_ID", ""), "item": title,
+            "prefill": {"name": body.name, "email": body.email.lower(), "contact": body.phone or ""}}
+
+
+class CommerceVerifyIn(BaseModel):
+    our_order_id: str
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+
+
+@api_router.post("/commerce/verify")
+async def commerce_verify(body: CommerceVerifyIn):
+    client = _razorpay_client()
+    if not client:
+        raise HTTPException(status_code=503, detail="Payments are not configured.")
+    o = await db.orders.find_one({"id": body.our_order_id})
+    if not o or o.get("razorpay_order_id") != body.razorpay_order_id:
+        raise HTTPException(status_code=404, detail="Order not found for this payment.")
+    if o.get("paid"):
+        return {"success": True, "kind": o["kind"], "download_url": o.get("download_url", ""), "message": "Already confirmed."}
+    try:
+        client.utility.verify_payment_signature({
+            "razorpay_order_id": body.razorpay_order_id, "razorpay_payment_id": body.razorpay_payment_id,
+            "razorpay_signature": body.razorpay_signature})
+    except Exception:
+        raise HTTPException(status_code=400, detail="Payment could not be verified.")
+    download_url = ""
+    if o["kind"] == "product":
+        prod = await db.products.find_one({"slug": o["ref_id"]}, {"_id": 0})
+        if (prod or {}).get("type") == "blueprint" and (o.get("meta") or {}).get("scores"):
+            download_url = f"/api/blueprint/download/{o['id']}"
+        elif (prod or {}).get("download_url"):
+            download_url = prod["download_url"]
+        else:
+            download_url = "/api/blueprint/starter.pdf"
+    elif o["kind"] == "cohort":
+        res = await db.cohorts.update_one(
+            {"slug": o["ref_id"], "$expr": {"$lt": ["$seats_taken", "$seats_total"]}},
+            {"$inc": {"seats_taken": 1}})
+        if res.modified_count == 0:
+            await db.cohorts.update_one({"slug": o["ref_id"], "waitlist": {"$ne": o["email"]}},
+                                        {"$push": {"waitlist": o["email"]}})
+    await db.orders.update_one({"id": o["id"]}, {"$set": {
+        "paid": True, "status": "paid", "delivered": True, "download_url": download_url,
+        "razorpay_payment_id": body.razorpay_payment_id, "paid_at": now_iso()}})
+    if os.environ.get("GMAIL_APP_PASSWORD"):
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(None, lambda: send_purchase_email(
+            o["email"], o["name"], o["kind"], o["ref_title"], download_url, PUBLIC_SITE))
+        if NOTIFY_EMAIL:
+            loop.run_in_executor(None, lambda: _smtp_notify(
+                f"New {o['kind']} purchase: {o['ref_title']}",
+                f"{o['name']} ({o['email']}) paid ₹{o['amount']} for {o['ref_title']}."))
+    return {"success": True, "kind": o["kind"], "download_url": download_url,
+            "message": "Payment received! Check your email for access." if o["kind"] == "product"
+            else "Payment received! Your seat is booked — details are on the way to your inbox."}
+
+
+@api_router.post("/cohorts/{slug}/waitlist")
+async def cohort_waitlist(slug: str, body: LeadMagnetIn, request: Request):
+    verify_captcha(body.captcha_token, _client_ip(request), request)
+    email = body.email.lower().strip()
+    r = await db.cohorts.update_one({"slug": slug, "waitlist": {"$ne": email}}, {"$push": {"waitlist": email}})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Cohort not found")
+    return {"success": True, "message": "You're on the waitlist — we'll offer you the next available seat."}
+
+
+# ---- Admin CMS (upsert / delete) ----
+_CMS = {"products": db.products, "cohorts": db.cohorts, "case-studies": db.case_studies, "testimonials": db.testimonials}
+
+
+@api_router.get("/admin/cms/{collection}")
+async def cms_list(collection: str, admin: dict = Depends(require_admin)):
+    coll = _CMS.get(collection)
+    if coll is None:
+        raise HTTPException(status_code=404, detail="Unknown collection")
+    return [_pub(d) for d in await coll.find({}, {"_id": 0}).sort("sort", 1).to_list(500)]
+
+
+@api_router.post("/admin/cms/{collection}")
+async def cms_upsert(collection: str, body: dict, admin: dict = Depends(require_admin)):
+    coll = _CMS.get(collection)
+    if coll is None:
+        raise HTTPException(status_code=404, detail="Unknown collection")
+    body.pop("_id", None)
+    if body.get("id"):
+        body["updated_at"] = now_iso()
+        await coll.update_one({"id": body["id"]}, {"$set": body})
+        return {"success": True, "id": body["id"]}
+    body["id"] = str(uuid.uuid4())
+    body.setdefault("created_at", now_iso())
+    body.setdefault("active", True)
+    body.setdefault("sort", 99)
+    if collection == "cohorts":
+        body.setdefault("seats_taken", 0)
+        body.setdefault("waitlist", [])
+    await coll.insert_one(body)
+    return {"success": True, "id": body["id"]}
+
+
+@api_router.delete("/admin/cms/{collection}/{item_id}")
+async def cms_delete(collection: str, item_id: str, admin: dict = Depends(require_admin)):
+    coll = _CMS.get(collection)
+    if coll is None:
+        raise HTTPException(status_code=404, detail="Unknown collection")
+    await coll.delete_one({"id": item_id})
+    return {"success": True}
+
+
+@api_router.get("/admin/commerce/orders")
+async def admin_commerce_orders(admin: dict = Depends(require_admin)):
+    return [_pub(d) for d in await db.orders.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)]
+
+
+@api_router.get("/blueprint/starter.pdf")
+async def blueprint_starter():
+    from blueprint_pdf import build_starter_pdf
+    pdf = await asyncio.to_thread(build_starter_pdf)
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": 'attachment; filename="SK-Leadership-Blueprint-Starter.pdf"'})
+
+
+@api_router.get("/blueprint/download/{order_id}")
+async def blueprint_download(order_id: str):
+    o = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not o or not o.get("paid"):
+        raise HTTPException(status_code=404, detail="Blueprint not found or payment not confirmed.")
+    meta = o.get("meta") or {}
+    from blueprint_pdf import build_personalized_pdf, build_starter_pdf
+    if meta.get("scores"):
+        pdf = await asyncio.to_thread(build_personalized_pdf, o.get("name", ""),
+                                      meta.get("scores"), meta.get("quadrant"), meta.get("blueprint") or {})
+    else:
+        pdf = await asyncio.to_thread(build_starter_pdf)
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": 'attachment; filename="SK-Leadership-Blueprint.pdf"'})
+
+
+app.include_router(api_router)
+
+
 @app.on_event("startup")
 async def startup():
     await _ensure_index(db.users, "email", unique=True)
@@ -5141,6 +5487,7 @@ async def startup():
             d.update({"id": str(uuid.uuid4()), "author": "Sudarshan Karweer", "created_at": now_iso()})
             await db.articles.insert_one(d)
     logger.info("Articles ensured")
+    await _seed_commerce()
     # Load any admin-set Terms/Privacy policy version override.
     global CONSENT_POLICY_VERSION
     _pol = await db.app_meta.find_one({"_id": "policy"})

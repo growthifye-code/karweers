@@ -42,6 +42,7 @@ from emailer import send_gst_invoice_email, send_abandoned_nudge_email
 from emailer import send_admin_notify, send_nurture_welcome_email, send_purchase_email
 from emailer import send_commerce_abandoned_email
 from emailer import send_gift_email
+from emailer import send_gift_receipt_email
 import xml.etree.ElementTree as ET
 import contextvars
 from urllib.parse import quote_plus
@@ -5443,14 +5444,17 @@ async def commerce_verify(body: CommerceVerifyIn):
     recipient = (gift.get("recipient_email") or "").strip().lower()
     if os.environ.get("GMAIL_APP_PASSWORD"):
         loop = asyncio.get_event_loop()
-        # Always confirm the purchase to the buyer.
-        loop.run_in_executor(None, lambda: send_purchase_email(
-            o["email"], o["name"], o["kind"], o["ref_title"], "" if recipient else download_url, PUBLIC_SITE))
-        # If it's a gift, deliver access to the recipient.
         if recipient:
+            # Buyer gets a forwardable gift receipt; recipient gets the actual access.
+            loop.run_in_executor(None, lambda: send_gift_receipt_email(
+                o["email"], o["name"], o["ref_title"], gift.get("recipient_name", ""),
+                recipient, o.get("amount", 0), gift.get("message", ""), PUBLIC_SITE))
             loop.run_in_executor(None, lambda: send_gift_email(
                 recipient, gift.get("recipient_name", ""), o["name"], o["ref_title"], o["kind"],
                 download_url, gift.get("message", ""), PUBLIC_SITE))
+        else:
+            loop.run_in_executor(None, lambda: send_purchase_email(
+                o["email"], o["name"], o["kind"], o["ref_title"], download_url, PUBLIC_SITE))
         if NOTIFY_EMAIL:
             loop.run_in_executor(None, lambda: _smtp_notify(
                 f"New {o['kind']} purchase: {o['ref_title']}",

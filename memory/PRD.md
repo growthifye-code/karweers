@@ -22,6 +22,12 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - Client auth + admin panel
 
 ## Implemented (2026-06)
+### Gift Receipts + Full QA Pass (2026-06, latest)
+- **Gift Receipts**: when a purchase is a gift, the buyer now receives a clean, forwardable receipt (`send_gift_receipt_email`) showing the gift, recipient, optional message and amount paid — while the recipient separately gets their access email. Wired into `commerce_verify` (buyer gets a receipt instead of a download email on gifts).
+- **Full QA Pass** (iteration_18): full-stack test of the entire Tier-1 revenue suite — bundles, promo codes + analytics + auto-apply links, gift-a-seat + receipt, revenue dashboard, best-sellers, abandoned nudge, countdown timers, blueprint PDFs, admin CMS (all 6 collections incl. inactive). Result: **backend 40/40, frontend 100%**, zero critical/minor issues. All test data cleaned up. Test file: `/app/backend/tests/test_iteration18_revenue.py`.
+- Non-blocking tech-debt noted by review (not bugs): server.py monolith could be split into routers; add per-collection Pydantic validation on cms_upsert; migrate on_event→lifespan; add GiftIn/EmailStr validation; parse promo expiry as tz-aware datetime.
+
+
 ### Gift a Seat + Countdown Urgency (2026-06, latest)
 - **Gift a Seat**: checkout modal has a "This is a gift" toggle that reveals recipient name/email/optional message. `commerce_order` stores `gift` on the order; `commerce_verify` emails access straight to the recipient (`send_gift_email`) — product/bundle download link or cohort seat joining note — while still confirming the purchase to the buyer, and skips auto-opening the download for the buyer (returns `gifted:true`). Works for products, cohorts and bundles.
 - **Countdown Urgency**: cohorts and bundles support an `offer_ends_at` ISO datetime. A live `<Countdown>` badge ("Launch offer ends in Xd HH:MM:SS") shows on the Cohorts cards and Products bundle cards while the offer is in the future; renders nothing once passed. Editable in the Revenue CMS (cohorts + bundles have an "offer_ends_at" field). Seeded a 7-day launch offer on the sample cohort + bundle so it's visible immediately.

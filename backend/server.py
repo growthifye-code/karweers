@@ -4193,7 +4193,9 @@ async def _process_pending_payments():
     stale = await db.consultations.find(
         {"status": "pending_payment", "paid": {"$ne": True}, "created_at": {"$lt": release_before}}).to_list(200)
     for b in stale:
-        await db.consultations.delete_one({"id": b["id"], "status": "pending_payment", "paid": {"$ne": True}})
+        await db.consultations.update_one(
+            {"id": b["id"], "status": "pending_payment", "paid": {"$ne": True}},
+            {"$set": {"status": "expired", "expired_at": now.isoformat()}})
         if b.get("slot_date"):
             await _notify_waitlist(b["slot_date"])
     # Nudge (once) checkouts idle > 1h.
@@ -5013,29 +5015,57 @@ async def security_guard(request: Request, call_next):
     return await call_next(request)
 
 
+async def _ensure_index(coll, keys, **opts):
+    """Create an index idempotently. If an index with the same key already exists
+    with different options (e.g. a non-unique 'email_1' in the production DB), drop
+    and recreate it. Never let index reconciliation crash startup."""
+    from pymongo.errors import OperationFailure
+    want = [(keys, 1)] if isinstance(keys, str) else list(keys)
+    try:
+        await coll.create_index(keys, **opts)
+    except OperationFailure as e:
+        if e.code in (85, 86):  # IndexOptionsConflict / IndexKeySpecsConflict
+            try:
+                info = await coll.index_information()
+                for name, meta in info.items():
+                    if name == "_id_":
+                        continue
+                    if [(k, v) for k, v in meta.get("key", [])] == want:
+                        await coll.drop_index(name)
+                        break
+                await coll.create_index(keys, **opts)
+                logger.warning("Reconciled index on %s.%s %s", db.name, coll.name, keys)
+            except Exception as e2:
+                logger.warning("Could not reconcile index on %s.%s %s: %s (continuing)", db.name, coll.name, keys, e2)
+        else:
+            logger.warning("Index create failed on %s.%s %s: %s (continuing)", db.name, coll.name, keys, e)
+    except Exception as e:
+        logger.warning("Index create error on %s.%s %s: %s (continuing)", db.name, coll.name, keys, e)
+
+
 @app.on_event("startup")
 async def startup():
-    await db.users.create_index("email", unique=True)
-    await db.users.create_index("id")
-    await db.user_sessions.create_index("session_token")
-    await db.activity_events.create_index("user_id")
-    await db.support_tickets.create_index("user_id")
-    await db.support_tickets.create_index("status")
-    await db.login_attempts.create_index("identifier", unique=True)
-    await db.login_attempts.create_index("ip")
-    await db.blocked_ips.create_index("ip", unique=True)
-    await db.security_alerts.create_index("created_at")
-    await db.consent_logs.create_index("created_at")
-    await db.consent_logs.create_index("email")
-    await db.signals_archive.create_index("date", unique=True)
-    await db.audit_log.create_index("at")
-    await db.audit_log.create_index("expire_at", expireAfterSeconds=0)
+    await _ensure_index(db.users, "email", unique=True)
+    await _ensure_index(db.users, "id")
+    await _ensure_index(db.user_sessions, "session_token")
+    await _ensure_index(db.activity_events, "user_id")
+    await _ensure_index(db.support_tickets, "user_id")
+    await _ensure_index(db.support_tickets, "status")
+    await _ensure_index(db.login_attempts, "identifier", unique=True)
+    await _ensure_index(db.login_attempts, "ip")
+    await _ensure_index(db.blocked_ips, "ip", unique=True)
+    await _ensure_index(db.security_alerts, "created_at")
+    await _ensure_index(db.consent_logs, "created_at")
+    await _ensure_index(db.consent_logs, "email")
+    await _ensure_index(db.signals_archive, "date", unique=True)
+    await _ensure_index(db.audit_log, "at")
+    await _ensure_index(db.audit_log, "expire_at", expireAfterSeconds=0)
     _meta = await db.app_meta.find_one({"_id": "audit_retention"})
     if _meta and _meta.get("days"):
         global _audit_retention_days
         _audit_retention_days = int(_meta["days"])
-    await db.articles.create_index("slug", unique=True)
-    await db.consultations.create_index("slot_date")
+    await _ensure_index(db.articles, "slug", unique=True)
+    await _ensure_index(db.consultations, "slot_date")
     # Warm the in-memory ban cache with any still-active bans.
     now = datetime.now(timezone.utc)
     async for b in db.blocked_ips.find({}, {"_id": 0, "ip": 1, "banned_until": 1, "scope": 1}):

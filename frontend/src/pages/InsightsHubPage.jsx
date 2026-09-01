@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowUpRight, History, Search } from "lucide-react";
+import { ArrowUpRight, History, Search, Sparkles } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import Seo from "@/components/Seo";
@@ -35,6 +35,7 @@ function BlogCard({ b, i }) {
 export default function InsightsHubPage() {
   const [blogs, setBlogs] = useState([]);
   const [services, setServices] = useState([]);
+  const [featured, setFeatured] = useState(null);
   const [svc, setSvc] = useState("all");
   const [cat, setCat] = useState("all");
   const [q, setQ] = useState("");
@@ -43,6 +44,7 @@ export default function InsightsHubPage() {
     window.scrollTo(0, 0);
     api.get("/service-insights?limit=200").then((r) => setBlogs(r.data)).catch(() => {});
     api.get("/service-insights/services").then((r) => setServices(r.data)).catch(() => {});
+    api.get("/service-insights-featured").then((r) => setFeatured(r.data && r.data.slug ? r.data : null)).catch(() => {});
   }, []);
 
   const cats = useMemo(() => Array.from(new Set(blogs.map((b) => b.category))), [blogs]);
@@ -70,6 +72,19 @@ export default function InsightsHubPage() {
 
       <section className="border-t border-border py-10">
         <div className="mx-auto max-w-7xl px-6 lg:px-10">
+          {featured && (
+            <Link to={`/insight/${featured.slug}`} data-testid="featured-insight"
+              className="group mb-10 grid overflow-hidden rounded-3xl border border-[hsl(var(--primary))]/30 bg-card lg:grid-cols-2">
+              <div className="aspect-[16/10] overflow-hidden lg:aspect-auto"><img src={featured.hero_image} alt="" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" /></div>
+              <div className="flex flex-col justify-center p-8 lg:p-12">
+                <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-[hsl(var(--primary))]/15 px-3 py-1 text-xs font-bold uppercase tracking-[0.15em] text-[hsl(var(--primary))]"><Sparkles className="h-3.5 w-3.5" /> Featured this week</span>
+                <p className="mt-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{featured.category} · {featured.service_title}</p>
+                <h2 className="mt-2 font-display text-2xl font-black leading-tight tracking-tight group-hover:text-[hsl(var(--primary))] sm:text-3xl lg:text-4xl">{featured.title}</h2>
+                <p className="mt-4 line-clamp-3 text-muted-foreground">{featured.dek}</p>
+                <span className="mt-6 inline-flex items-center gap-1.5 text-sm font-semibold text-[hsl(var(--primary))]">Read the insight <ArrowUpRight className="h-4 w-4" /></span>
+              </div>
+            </Link>
+          )}
           <div className="relative mb-5 max-w-md">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search insights…" data-testid="hub-search"

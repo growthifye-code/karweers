@@ -3,12 +3,13 @@ import { Linkedin, Twitter, MessageCircle, Mail, Link2, Share2, Check } from "lu
 import { toast } from "sonner";
 
 // Reusable social-share row. Works on any page; falls back to the native share sheet on mobile.
-export default function ShareBar({ title = "", text = "", url = "", compact = false }) {
+export default function ShareBar({ title = "", text = "", url = "", compact = false, onShare }) {
   const [copied, setCopied] = useState(false);
   const shareUrl = url || (typeof window !== "undefined" ? window.location.href : "");
   const t = encodeURIComponent(title);
   const u = encodeURIComponent(shareUrl);
   const body = encodeURIComponent(`${title}\n\n${text}\n\n${shareUrl}`);
+  const track = (p) => { try { onShare && onShare(p); } catch { /* noop */ } };
 
   const links = [
     { key: "linkedin", label: "LinkedIn", icon: Linkedin, href: `https://www.linkedin.com/sharing/share-offsite/?url=${u}` },
@@ -20,14 +21,14 @@ export default function ShareBar({ title = "", text = "", url = "", compact = fa
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(shareUrl);
-      setCopied(true); toast.success("Link copied");
+      setCopied(true); toast.success("Link copied"); track("copy");
       setTimeout(() => setCopied(false), 1800);
     } catch { toast.error("Couldn't copy the link"); }
   };
 
   const nativeShare = async () => {
     if (navigator.share) {
-      try { await navigator.share({ title, text, url: shareUrl }); } catch { /* dismissed */ }
+      try { await navigator.share({ title, text, url: shareUrl }); track("native"); } catch { /* dismissed */ }
     } else { copy(); }
   };
 
@@ -35,7 +36,7 @@ export default function ShareBar({ title = "", text = "", url = "", compact = fa
     <div className="flex flex-wrap items-center gap-2" data-testid="share-bar">
       {!compact && <span className="mr-1 inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground"><Share2 className="h-4 w-4" /> Share</span>}
       {links.map((l) => (
-        <a key={l.key} href={l.href} target="_blank" rel="noopener noreferrer" title={l.label}
+        <a key={l.key} href={l.href} target="_blank" rel="noopener noreferrer" title={l.label} onClick={() => track(l.key)}
           data-testid={`share-${l.key}`}
           className="grid h-9 w-9 place-items-center rounded-full border border-border bg-card text-muted-foreground transition-all hover:-translate-y-0.5 hover:border-[hsl(var(--primary))] hover:text-[hsl(var(--primary))]">
           <l.icon className="h-4 w-4" />

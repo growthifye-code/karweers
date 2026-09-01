@@ -9,6 +9,7 @@ import Services from "@/components/sections/Services";
 import MarketPulse from "@/components/sections/MarketPulse";
 import InsightsPreview from "@/components/sections/InsightsPreview";
 import AIInsights from "@/components/sections/AIInsights";
+import FeaturedInsight from "@/components/sections/FeaturedInsight";
 import CaseStudies from "@/components/sections/CaseStudies";
 import Consultation from "@/components/sections/Consultation";
 import LearningStrip from "@/components/sections/LearningStrip";
@@ -51,6 +52,7 @@ export default function Home() {
       <MarketPulse pulse={meta.market_pulse} />
       <DealsTicker />
       <AIInsights content={homeContent} />
+      <FeaturedInsight />
       <InsightsPreview articles={articles} />
       <CaseStudies cases={cases} />
       <LearningStrip />

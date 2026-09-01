@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 21 — SK Insights admin/analytics/newsletter tested end-to-end. Backend: 18/18 pytest cases passing (includes real Claude single-slug refresh which took ~39s and archived a prior edition; newsletter run only tested for 401 auth gating, no authorized send performed to avoid emailing subscribers). Verified GET /service-insights-featured returns card with sk_take (with fallback), POST /admin/service-insights/{slug}/feature pins slug (401 without token), POST /insights/track for view+share both {ok:true}, unknown slug silently accepted, invalid event 400. GET /admin/insights/analytics reflects tracked read/share and has top_read/top_shared/by_theme (401 without token). GET /admin/service-insights returns 80 rows with all required keys. PATCH /admin/service-insights/{slug} persists dek+sort (verified via GET /service-insights/{slug}). GET /admin/service-insights/{slug}/editions grows after refresh. Frontend: home-featured-insight visible on '/', featured-insight banner on /insights-hub, view track fires on /insight/{real-slug} mount, share button click fires share track with platform='linkedin', share-bar with 5+ share testids. Admin dashboard admin-tab-insights renders insights-admin panel with analytics-top-read, analytics-top-shared, analytics-by-theme, insights-admin-table (80 rows), send-newsletter button; edit modal opens with edit-title/dek/category/sort/save fields, save calls PATCH and shows toast; editions modal opens; feature star click works. No standalone 'AI Insights' branding on reader.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Reader view tracking", "issue": "POST /insights/track (event=view) fires twice on mount in dev (React StrictMode double-invoked useEffect). In production build this collapses to one — but analytics counts are 2x during dev. Consider a useRef guard to be safe.", "affected_selectors": ["/insight/:slug"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration21_insights_admin.py",
+    "/app/test_reports/pytest/iteration21.xml"
+  ],
+  "action_items": [
+    "Non-blocking: /insight/energy-strategy-hub returns 'Insight not found' — no blog uses this slug (same finding as iteration_20). Review request repeatedly references this slug; if E1 intended a real slug, either create an alias/seed the slug or update the reference. All admin operations against this slug work only because backend endpoints iterate real slugs; the review's expectation 'GET /service-insights/energy-strategy-hub shows the new dek' currently fails with 404 since the slug does not exist. Backend tests used the first available real slug (fallback) and passed.",
+    "Non-blocking: Reader ServiceInsightPage fires /insights/track view twice in dev due to StrictMode; add useRef guard so production and dev both emit exactly one view per mount."
+  ],
+  "critical_code_review_comments": [
+    "server.py still 6529 lines — feature routers should be split (SK Insights admin ~200 LOC could be its own module).",
+    "InsightsAdmin.jsx: all API calls swallow errors silently (catch(() => {})). If /admin/service-insights returns 401 due to expired token, the admin sees an empty table with no toast. Show a toast on load failure.",
+    "InsightsAdmin edit modal: 'sort' input converts to Number(form.sort) but PATCH allows sending arbitrary text through if the user clears the field — Number('') is 0 and will silently reorder to the top. Validate on client.",
+    "ServiceInsightPage: view track fires inside useEffect without a ref guard → duplicated in React 18 StrictMode dev builds (not a prod-breaking bug, but inflates dev analytics).",
+    "_send_insights_newsletter iterates subscribers sequentially with run_in_executor — for a large list, could be slow and holds the request open. Consider background task (asyncio.create_task) so the admin endpoint returns immediately."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration21_insights_admin.py"],
+  "success_rate": {"backend": "100% (18/18)", "frontend": "100% (all critical flows)"},
+  "test_credentials": "Admin: sudarshan@karweers.com / Sudarshan@2026 (consent:true + captcha_token='test-token'). JWT injected via page.add_init_script → localStorage['sk_token'] before navigating to /admin (reliable path).",
+  "seed_data_creation": "None. Refresh test bumped version and archived one edition for one slug (real Claude call). Tracked one view + one share on 'disney-fox-paying-a-premium-for-scale-in-a-streaming-war' during backend tests.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend tests at /app/backend/tests/test_iteration21_insights_admin.py. The slow test test_refresh_single_slug_and_archives_edition triggers a real Claude call (~40s, small cost) — skip with `-k 'not slow'` on reruns. Newsletter run test only asserts 401 (no authorized send). Auth uses JWT via localStorage sk_token; direct browser login can be geo-guarded so use page.add_init_script to inject the token before goto('/admin'). Also: no blog uses slug 'energy-strategy-hub' — use a real slug from /api/service-insights when testing single-blog flows.",
+  "rca of the issue": "N/A — no bugs found. The 'energy-strategy-hub' slug callouts in the review request appear to be host-name confusion (already flagged in iteration_20)."
+}

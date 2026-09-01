@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { ArrowLeft, ArrowUpRight, Sparkles, CheckCircle2, History } from "lucide-react";
@@ -21,12 +21,21 @@ export default function ServiceInsightPage({ archived = false }) {
   const { slug, id } = useParams();
   const [a, setA] = useState(null);
   const [notFound, setNotFound] = useState(false);
+  const viewed = useRef(null);
   useEffect(() => {
     window.scrollTo(0, 0);
     setA(null); setNotFound(false);
     const path = archived ? `/service-insights/archive/${id}` : `/service-insights/${slug}`;
     api.get(path).then((r) => setA(r.data)).catch(() => setNotFound(true));
+    if (!archived && slug && viewed.current !== slug) {
+      viewed.current = slug;
+      api.post("/insights/track", { slug, event: "view" }).catch(() => {});
+    }
   }, [slug, id, archived]);
+
+  const recordShare = (platform) => {
+    if (!archived && a?.slug) api.post("/insights/track", { slug: a.slug, event: "share", platform }).catch(() => {});
+  };
 
   if (notFound) return (
     <div className="min-h-screen bg-background text-foreground"><Navbar />
@@ -61,7 +70,7 @@ export default function ServiceInsightPage({ archived = false }) {
         <p className="text-lg font-medium leading-relaxed text-muted-foreground">{a.dek}</p>
         <div className="mt-6 flex items-center justify-between gap-4 border-y border-border py-4">
           <span className="text-xs uppercase tracking-[0.15em] text-muted-foreground">By Sudarshan Karweer</span>
-          <ShareBar title={a.title} text={a.dek} compact />
+          <ShareBar title={a.title} text={a.dek} compact onShare={recordShare} />
         </div>
 
         <div className="mt-10 space-y-10">
@@ -107,7 +116,7 @@ export default function ServiceInsightPage({ archived = false }) {
         </p>
 
         <div className="mt-12 flex items-center justify-between border-t border-border pt-6">
-          <ShareBar title={a.title} text={a.dek} />
+          <ShareBar title={a.title} text={a.dek} onShare={recordShare} />
         </div>
 
         <div className="mt-14 rounded-2xl border border-border bg-secondary/40 p-7">

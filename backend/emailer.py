@@ -452,6 +452,54 @@ def send_signals_digest_email(to_email: str, name: str, items: list, site: str =
     return _smtp_send(msg)
 
 
+def render_insights_newsletter_html(name: str, items: list, site: str = "https://www.sudarshankarweer.com", unsubscribe_url: str = "") -> str:
+    cards = ""
+    for it in items:
+        img = it.get("hero_image") or ""
+        img_html = (f'<img src="{img}" alt="" width="100%" style="border-radius:10px 10px 0 0;max-height:150px;object-fit:cover;display:block;" />' if img else "")
+        cards += (
+            f'<a href="{site}/insight/{it.get("slug","")}" style="display:block;text-decoration:none;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;margin-bottom:14px;">'
+            f'{img_html}'
+            f'<div style="padding:16px;">'
+            f'<span style="display:inline-block;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#059669;">{it.get("category","")} · {it.get("service_title","")}</span>'
+            f'<p style="font-size:16px;font-weight:700;color:#111;margin:8px 0 4px;">{it.get("title","")}</p>'
+            f'<p style="font-size:13px;color:#374151;margin:0;">{it.get("dek","")}</p></div></a>'
+        )
+    unsub = (f'<p style="font-size:12px;color:#9ca3af;margin-top:20px;text-align:center;">'
+             f'You receive this because you subscribed to Sudarshan Karweer updates. '
+             f'<a href="{unsubscribe_url}" style="color:#9ca3af;text-decoration:underline;">Unsubscribe</a> anytime.</p>'
+             if unsubscribe_url else "")
+    inner = (
+        f'<p style="font-size:15px;color:#111;">Hi {name or "there"},</p>'
+        f'<p style="font-size:14px;color:#374151;">This week\'s freshest SK Insights — world-class thinking on strategy, M&amp;A, capital, energy and leadership, drawn from real deals and decades of advisory work.</p>'
+        f'<div style="margin-top:14px;">{cards}</div>'
+        f'<a href="{site}/insights-hub" style="display:inline-block;margin-top:8px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Explore all insights</a>'
+        f'<p style="font-size:13px;color:#374151;margin-top:16px;">— Team Sudarshan Karweer</p>'
+        f'{unsub}'
+    )
+    return _shell("This week in SK Insights", inner)
+
+
+def send_insights_newsletter_email(to_email: str, name: str, items: list, site: str = "https://www.sudarshankarweer.com", unsubscribe_url: str = "") -> str:
+    """Weekly round-up of the freshest SK Insights (INERT until SMTP configured)."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email or not items:
+        return "skipped"
+    msg = EmailMessage()
+    msg["Subject"] = "This week in SK Insights"
+    msg["From"] = user
+    msg["To"] = to_email
+    if unsubscribe_url:
+        msg["List-Unsubscribe"] = f"<{unsubscribe_url}>"
+        msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+    msg.set_content("This week's SK Insights: " + " | ".join(i.get("title", "") for i in items)
+                    + f"  Read more: {site}/insights-hub"
+                    + (f"  Unsubscribe: {unsubscribe_url}" if unsubscribe_url else ""))
+    msg.add_alternative(render_insights_newsletter_html(name, items, site, unsubscribe_url), subtype="html")
+    return _smtp_send(msg)
+
+
 def render_library_digest_html(name: str, books: list, site: str = "https://www.sudarshankarweer.com", unsubscribe_url: str = "") -> str:
     cards = ""
     for b in books:

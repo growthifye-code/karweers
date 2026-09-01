@@ -35,6 +35,7 @@ from emailer import send_security_alert_email
 from emailer import send_new_booking_alert_email, send_session_reminder_email, send_weekly_agenda_email, send_waitlist_opening_email
 from emailer import send_consent_receipt_email
 from emailer import send_signals_digest_email, render_signals_digest_html, send_test_email
+from emailer import send_insights_newsletter_email
 from emailer import send_library_digest_email, send_score_beaten_email
 from emailer import send_sector_digest_email
 from emailer import send_payment_receipt_email, send_refund_email
@@ -2180,6 +2181,11 @@ async def _digest_scheduler():
                     sd = await db.app_meta.find_one({"_id": "signals_digest"})
                     if (sd or {}).get("last_run", "")[:10] != ist_now.date().isoformat():
                         await _send_signals_digest()
+                # Weekly SK Insights newsletter to subscribers — Wednesday ~09:00 IST.
+                if ist_now.weekday() == 2 and ist_now.hour == 9:
+                    inl = await db.app_meta.find_one({"_id": "insights_newsletter"})
+                    if (inl or {}).get("last_run", "")[:10] != ist_now.date().isoformat():
+                        await _send_insights_newsletter()
                 # Weekly Library shelf digest to subscribers — Monday ~09:00 IST.
                 if ist_now.weekday() == 0 and ist_now.hour == 9:
                     ld = await db.app_meta.find_one({"_id": "library_digest"})
@@ -5104,6 +5110,189 @@ async def admin_service_insights_regenerate(force: bool = False, admin: dict = D
 
     asyncio.create_task(_run())
     return {"success": True, "message": "Insight generation started in the background."}
+
+# ---------------- Featured insight (pinned to hub + homepage) ----------------
+@api_router.get("/service-insights-featured")
+async def get_featured_insight():
+    meta = await db.app_meta.find_one({"_id": "featured_insight"})
+    slug = (meta or {}).get("slug")
+    d = None
+    if slug:
+        d = await db.service_blogs.find_one({"slug": slug}, {"_id": 0})
+    if not d:  # fall back to the freshest blog
+        d = await db.service_blogs.find_one({}, {"_id": 0}, sort=[("updated_at", -1)])
+    if not d:
+        return {}
+    card = _blog_card(d)
+    card["sk_take"] = (d.get("sk_insight") or {}).get("take", "")
+    return card
+
+
+@api_router.post("/admin/service-insights/{slug}/feature")
+async def admin_feature_insight(slug: str, admin: dict = Depends(require_admin)):
+    d = await db.service_blogs.find_one({"slug": slug}, {"_id": 0, "slug": 1})
+    if not d:
+        raise HTTPException(status_code=404, detail="Insight not found")
+    await db.app_meta.update_one({"_id": "featured_insight"},
+                                 {"$set": {"slug": slug, "set_at": now_iso()}}, upsert=True)
+    return {"success": True, "featured": slug}
+
+
+# ---------------- Reading & share analytics ----------------
+class InsightTrackIn(BaseModel):
+    slug: str
+    event: str  # "view" | "share"
+    platform: Optional[str] = None
+
+
+@api_router.post("/insights/track")
+async def track_insight(body: InsightTrackIn):
+    if body.event not in ("view", "share"):
+        raise HTTPException(status_code=400, detail="Invalid event")
+    blog = await db.service_blogs.find_one({"slug": body.slug}, {"_id": 0, "slug": 1, "title": 1, "service_slug": 1, "category": 1})
+    if not blog:
+        return {"ok": True}  # ignore unknown slugs silently
+    field = "reads" if body.event == "view" else "shares"
+    inc = {field: 1}
+    if body.event == "share" and body.platform:
+        inc[f"share_by.{body.platform}"] = 1
+    await db.insight_stats.update_one(
+        {"slug": body.slug},
+        {"$inc": inc, "$set": {"title": blog.get("title"), "service_slug": blog.get("service_slug"),
+                               "category": blog.get("category"), "updated_at": now_iso()}},
+        upsert=True)
+    return {"ok": True}
+
+
+@api_router.get("/admin/insights/analytics")
+async def admin_insights_analytics(admin: dict = Depends(require_admin)):
+    SERVICE_THEME = {
+        "business-strategy": "Strategy", "ma-advisory": "M&A",
+        "fund-raising": "Capital & Finance", "premium-consultation": "Leadership",
+        "re-storage-hydrogen": "Energy & Climate", "green-climate-financing": "Energy & Climate",
+        "asset-monetisation": "Economy", "business-coaching": "Leadership",
+    }
+    stats = await db.insight_stats.find({}, {"_id": 0}).to_list(500)
+    total_reads = sum(int(s.get("reads", 0) or 0) for s in stats)
+    total_shares = sum(int(s.get("shares", 0) or 0) for s in stats)
+    top_read = sorted(stats, key=lambda s: s.get("reads", 0) or 0, reverse=True)[:8]
+    top_shared = sorted(stats, key=lambda s: s.get("shares", 0) or 0, reverse=True)[:8]
+    theme = {}
+    for s in stats:
+        th = "Technology" if s.get("category") == "AI & Technology" else SERVICE_THEME.get(s.get("service_slug"), "Strategy")
+        t = theme.setdefault(th, {"theme": th, "reads": 0, "shares": 0})
+        t["reads"] += int(s.get("reads", 0) or 0)
+        t["shares"] += int(s.get("shares", 0) or 0)
+
+    def _row(s):
+        return {"slug": s.get("slug"), "title": s.get("title"), "reads": int(s.get("reads", 0) or 0),
+                "shares": int(s.get("shares", 0) or 0), "share_by": s.get("share_by", {})}
+    return {"total_reads": total_reads, "total_shares": total_shares,
+            "top_read": [_row(s) for s in top_read if s.get("reads")],
+            "top_shared": [_row(s) for s in top_shared if s.get("shares")],
+            "by_theme": sorted(theme.values(), key=lambda x: x["reads"], reverse=True)}
+
+
+# ---------------- Admin insights panel (edit / reorder / refresh / editions) ----------------
+@api_router.get("/admin/service-insights")
+async def admin_list_service_insights(admin: dict = Depends(require_admin)):
+    docs = await db.service_blogs.find({}, {"_id": 0}).sort([("service_slug", 1), ("sort", 1)]).to_list(300)
+    feat = (await db.app_meta.find_one({"_id": "featured_insight"}) or {}).get("slug")
+    stats = {s["slug"]: s for s in await db.insight_stats.find({}, {"_id": 0}).to_list(500)}
+    arch = {}
+    async for d in db.service_blogs_archive.aggregate([{"$group": {"_id": "$slug", "n": {"$sum": 1}}}]):
+        arch[d["_id"]] = d["n"]
+    out = []
+    for d in docs:
+        st = stats.get(d["slug"], {})
+        out.append({"slug": d["slug"], "title": d["title"], "service_slug": d["service_slug"],
+                    "service_title": d["service_title"], "category": d["category"], "sort": d.get("sort", 0),
+                    "hero_image": d.get("hero_image"), "version": d.get("version", 1),
+                    "updated_at": d.get("updated_at"), "featured": d["slug"] == feat,
+                    "reads": int(st.get("reads", 0) or 0), "shares": int(st.get("shares", 0) or 0),
+                    "editions": arch.get(d["slug"], 0)})
+    return out
+
+
+class InsightEditIn(BaseModel):
+    title: Optional[str] = None
+    dek: Optional[str] = None
+    category: Optional[str] = None
+    sort: Optional[int] = None
+    hero_image: Optional[str] = None
+    read_time: Optional[str] = None
+    sections: Optional[list] = None
+    key_takeaways: Optional[list] = None
+    sk_insight: Optional[dict] = None
+
+
+@api_router.patch("/admin/service-insights/{slug}")
+async def admin_edit_service_insight(slug: str, body: InsightEditIn, admin: dict = Depends(require_admin)):
+    d = await db.service_blogs.find_one({"slug": slug}, {"_id": 0, "slug": 1})
+    if not d:
+        raise HTTPException(status_code=404, detail="Insight not found")
+    upd = {k: v for k, v in body.model_dump(exclude_none=True).items()}
+    if upd:
+        upd["updated_at"] = now_iso()
+        await db.service_blogs.update_one({"slug": slug}, {"$set": upd})
+    return {"success": True}
+
+
+@api_router.post("/admin/service-insights/{slug}/refresh")
+async def admin_refresh_one_insight(slug: str, admin: dict = Depends(require_admin)):
+    from services_data import SERVICES
+    d = await db.service_blogs.find_one({"slug": slug}, {"_id": 0})
+    if not d:
+        raise HTTPException(status_code=404, detail="Insight not found")
+    title_by_slug = {s["slug"]: s["title"] for s in SERVICES}
+    try:
+        doc = await _build_blog_doc(d["service_slug"], title_by_slug.get(d["service_slug"], d["service_slug"]),
+                                    d["title"], d.get("category", ""), d.get("sort", 0))
+        await _store_blog(doc, archive_previous=True)
+    except Exception:
+        logger.exception("single insight refresh failed")
+        raise HTTPException(status_code=502, detail="Refresh failed. Please try again.")
+    return {"success": True, "message": "Insight refreshed; prior edition archived."}
+
+
+@api_router.get("/admin/service-insights/{slug}/editions")
+async def admin_insight_editions(slug: str, admin: dict = Depends(require_admin)):
+    docs = await db.service_blogs_archive.find({"slug": slug}, {"_id": 0}).sort("archived_at", -1).to_list(50)
+    return [{"archive_id": d.get("archive_id"), "title": d.get("title"), "version": d.get("version"),
+             "archived_at": d.get("archived_at"), "dek": d.get("dek")} for d in docs]
+
+
+# ---------------- Insights newsletter (weekly, freshest 5) ----------------
+async def _collect_fresh_insights(limit: int = 5) -> list:
+    docs = await db.service_blogs.find({}, {"_id": 0}).sort("updated_at", -1).to_list(limit)
+    return [{"slug": d.get("slug"), "title": d.get("title"), "dek": d.get("dek"),
+             "category": d.get("category"), "service_title": d.get("service_title"),
+             "hero_image": d.get("hero_image")} for d in docs]
+
+
+async def _send_insights_newsletter():
+    """Email newsletter subscribers the freshest 5 SK Insights."""
+    items = await _collect_fresh_insights(5)
+    if not items:
+        return {"sent": False, "reason": "no_insights"}
+    subs = await db.subscribers.find({}, {"_id": 0, "email": 1, "name": 1}).to_list(5000)
+    loop = asyncio.get_event_loop()
+    for c in subs:
+        await loop.run_in_executor(None, lambda cc=c: send_insights_newsletter_email(
+            cc["email"], cc.get("name", "there"), items, PUBLIC_SITE, _unsub_url(cc["email"])))
+    await db.app_meta.update_one({"_id": "insights_newsletter"}, {"$set": {"last_run": now_iso()}}, upsert=True)
+    return {"sent": True, "subscribers": len(subs), "items": len(items)}
+
+
+@api_router.post("/admin/insights-newsletter/run")
+async def admin_insights_newsletter_run(admin: dict = Depends(require_admin)):
+    if not os.environ.get("GMAIL_APP_PASSWORD"):
+        return {"sent": False, "skipped": "email_not_configured"}
+    subs = await db.subscribers.count_documents({})
+    asyncio.create_task(_send_insights_newsletter())
+    return {"sent": True, "queued": True, "subscribers": subs}
+
+
 
 
 

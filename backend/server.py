@@ -535,7 +535,11 @@ async def vpn_allowlist() -> list:
 
 
 async def detect_vpn(ip: str) -> dict:
-    """Cached VPN/proxy/Tor detection via vpnapi.io (fail-open on error)."""
+    """Cached IP intel via vpnapi.io / IPQualityScore (fail-open on error).
+
+    Returns vpn/proxy/tor plus threat signals (fraud_score, recent_abuse) and a
+    computed `threat` flag. VPNs/proxies are NOT threats on their own — only Tor,
+    high fraud score or recent abuse are. `_fresh` is True on a cache miss."""
     now = datetime.now(timezone.utc)
     hit = await db.ip_risk_cache.find_one({"_id": ip})
     if hit:
@@ -546,10 +550,12 @@ async def detect_vpn(ip: str) -> dict:
             if exp > now:
                 return {"vpn": hit.get("vpn", False), "proxy": hit.get("proxy", False),
                         "tor": hit.get("tor", False), "provider": hit.get("provider", "cache"),
-                        "flagged": hit.get("flagged", False)}
+                        "fraud_score": hit.get("fraud_score"), "recent_abuse": hit.get("recent_abuse", False),
+                        "flagged": hit.get("flagged", False), "threat": hit.get("threat", False), "_fresh": False}
         except Exception:
             pass
-    vpn = proxy = tor = False
+    vpn = proxy = tor = recent_abuse = False
+    fraud_score = None
     provider = "none"
     if VPNAPI_KEY:
         try:
@@ -571,15 +577,29 @@ async def detect_vpn(ip: str) -> dict:
             j = r.json()
             if j.get("success"):
                 vpn, proxy, tor = bool(j.get("vpn")), bool(j.get("proxy")), bool(j.get("tor"))
+                recent_abuse = bool(j.get("recent_abuse"))
+                fraud_score = j.get("fraud_score")
                 provider = "ipqualityscore"
         except Exception:
             pass
     flagged = vpn or proxy or tor
+    threat = _is_threat({"tor": tor, "recent_abuse": recent_abuse, "fraud_score": fraud_score})
     ttl = timedelta(minutes=2) if provider in ("error", "none") else timedelta(hours=24)
     await db.ip_risk_cache.update_one({"_id": ip}, {"$set": {
         "_id": ip, "vpn": vpn, "proxy": proxy, "tor": tor, "provider": provider,
-        "flagged": flagged, "expireAt": (now + ttl).isoformat()}}, upsert=True)
-    return {"vpn": vpn, "proxy": proxy, "tor": tor, "provider": provider, "flagged": flagged}
+        "fraud_score": fraud_score, "recent_abuse": recent_abuse,
+        "flagged": flagged, "threat": threat, "expireAt": (now + ttl).isoformat()}}, upsert=True)
+    return {"vpn": vpn, "proxy": proxy, "tor": tor, "provider": provider, "fraud_score": fraud_score,
+            "recent_abuse": recent_abuse, "flagged": flagged, "threat": threat, "_fresh": True}
+
+
+def _is_threat(intel: dict) -> bool:
+    """A genuine security threat — NOT a plain VPN/proxy. Tor exit nodes, IPs with
+    recent abuse history, or a very high fraud score are blocked."""
+    if intel.get("tor") or intel.get("recent_abuse"):
+        return True
+    fs = intel.get("fraud_score")
+    return isinstance(fs, (int, float)) and fs >= 88
 
 
 def _issue_vpn_totp_cookie() -> str:
@@ -611,6 +631,9 @@ async def _totp_matches(code: str) -> bool:
 
 
 async def vpn_should_block(request: Request) -> bool:
+    """VPNs/proxies are ALLOWED (only flagged for visibility). Only genuine threats
+    — Tor, recent abuse, or a very high fraud score — are blocked. Allowlisted IPs
+    and TOTP-verified sessions are always let through."""
     if not await vpn_guard_enabled():
         return False
     ip = _client_ip(request)
@@ -618,7 +641,15 @@ async def vpn_should_block(request: Request) -> bool:
         return False
     if _verify_vpn_totp_cookie(request.cookies.get("vpn_totp")):
         return False
-    return (await detect_vpn(ip))["flagged"]
+    intel = await detect_vpn(ip)
+    # Flag any VPN/proxy/Tor detection for admin visibility, once per fresh lookup.
+    if intel.get("flagged") and intel.get("_fresh"):
+        labels = ",".join(k for k in ("vpn", "proxy", "tor") if intel.get(k)) or "flagged"
+        await raise_security_alert(
+            "high" if intel.get("threat") else "low",
+            "ip_threat" if intel.get("threat") else "ip_flagged", ip, labels,
+            f"provider={intel.get('provider')} fraud={intel.get('fraud_score')} recent_abuse={intel.get('recent_abuse')}")
+    return bool(intel.get("threat"))
 
 
 async def blocked_countries() -> set:
@@ -5007,8 +5038,8 @@ async def security_guard(request: Request, call_next):
                     "country_block": True, "country": country})
             if await vpn_should_block(request):
                 return _cors_json(403, {
-                    "detail": "You appear to be connecting over a VPN or proxy. Disable it or verify with your access code to continue.",
-                    "vpn_block": True})
+                    "detail": "Your connection was flagged as a security threat (Tor / known-abusive network) and blocked. If you're a trusted user, verify with your access code to continue.",
+                    "vpn_block": True, "threat_block": True})
         except Exception:
             pass
 

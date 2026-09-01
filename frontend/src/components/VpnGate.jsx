@@ -55,10 +55,10 @@ export default function VpnGate() {
           </>
         ) : (
           <>
-            <h1 className="mt-6 font-display text-2xl font-black">VPN / proxy detected</h1>
+            <h1 className="mt-6 font-display text-2xl font-black">Access restricted</h1>
             <p className="mt-3 text-sm text-muted-foreground">
-              For security, access from VPNs, proxies and anonymisers is restricted. Please turn off your VPN and reload —
-              or, if you're a trusted user, enter your 6-digit access code below.
+              Your connection was flagged as a security threat (e.g. Tor or a known-abusive network) and access was blocked.
+              VPNs and normal proxies are fine — if you're a trusted user, enter your 6-digit access code below.
             </p>
             <form onSubmit={verify} className="mt-6 space-y-3">
               <input

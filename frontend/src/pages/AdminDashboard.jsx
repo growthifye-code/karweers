@@ -934,8 +934,8 @@ export default function AdminDashboard() {
                 <div className="mt-6 rounded-2xl border border-border bg-card p-6" data-testid="vpn-guard-card">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <h3 className="flex items-center gap-2 font-display text-lg font-bold"><ShieldAlert className="h-4 w-4 text-[hsl(var(--primary))]" /> VPN / Proxy Guard</h3>
-                      <p className="text-sm text-muted-foreground">Block browsing &amp; login from VPNs/proxies unless allowlisted or verified by access code{!vpnGuard.provider_configured && " · detection key not set"}</p>
+                      <h3 className="flex items-center gap-2 font-display text-lg font-bold"><ShieldAlert className="h-4 w-4 text-[hsl(var(--primary))]" /> Threat Guard</h3>
+                      <p className="text-sm text-muted-foreground">VPNs &amp; proxies are allowed (only flagged). Blocks genuine threats — Tor, recent-abuse IPs &amp; high fraud scores — unless allowlisted or verified by access code{!vpnGuard.provider_configured && " · detection key not set"}</p>
                     </div>
                     <button onClick={toggleVpnGuard} data-testid="vpn-guard-toggle"
                       className={`relative h-7 w-12 rounded-full transition-colors ${vpnGuard.enabled ? "bg-[hsl(var(--primary))]" : "bg-secondary"}`}>
@@ -943,7 +943,7 @@ export default function AdminDashboard() {
                     </button>
                   </div>
                   <span className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${vpnGuard.enabled ? "bg-[hsl(var(--primary))]/15 text-[hsl(var(--primary))]" : "bg-secondary text-muted-foreground"}`} data-testid="vpn-guard-state">
-                    {vpnGuard.enabled ? "Active — VPN visitors are blocked" : "Off — no VPN blocking"}
+                    {vpnGuard.enabled ? "Active — threats blocked, VPNs allowed" : "Off — no threat blocking"}
                   </span>
 
                   <div className="mt-5 grid gap-6 lg:grid-cols-2">

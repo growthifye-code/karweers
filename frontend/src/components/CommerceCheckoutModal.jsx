@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { X, Lock, ShieldCheck, Tag, Check, Gift } from "lucide-react";
+import { X, Lock, ShieldCheck, Tag, Check, Gift, Eye } from "lucide-react";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { formatApiErrorDetail } from "@/context/AuthContext";
@@ -17,6 +17,20 @@ export default function CommerceCheckoutModal({ open, item, meta, initialCode, o
   const [promo, setPromo] = useState(null); // {code, label, final_price, discount}
   const [isGift, setIsGift] = useState(false);
   const [gift, setGift] = useState({ recipient_name: "", recipient_email: "", message: "", deliver_at: "" });
+  const [previewHtml, setPreviewHtml] = useState("");
+  const [previewing, setPreviewing] = useState(false);
+
+  const showPreview = async () => {
+    setPreviewing(true);
+    try {
+      const { data } = await api.post("/commerce/gift-preview", {
+        recipient_name: gift.recipient_name, buyer_name: form.name, item_title: item.title,
+        kind: item.kind, message: gift.message, deliver_at: gift.deliver_at,
+      });
+      setPreviewHtml(data.html);
+    } catch { toast.error("Couldn't load the preview."); }
+    finally { setPreviewing(false); }
+  };
 
   const validateCode = useCallback(async (raw, silent = false) => {
     const c = (raw || "").trim();
@@ -104,6 +118,19 @@ export default function CommerceCheckoutModal({ open, item, meta, initialCode, o
                   className="mt-1 w-full rounded-xl border border-border bg-background px-4 py-2.5 text-sm text-foreground outline-none focus:border-[hsl(var(--primary))]" />
               </label>
               <p className="text-xs text-muted-foreground">{gift.deliver_at ? `We'll email their access on ${gift.deliver_at}.` : "We'll email access straight to them."}</p>
+              <button type="button" onClick={showPreview} disabled={previewing} data-testid="gift-preview-btn"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold hover:bg-secondary disabled:opacity-50">
+                <Eye className="h-3.5 w-3.5" /> {previewing ? "Loading…" : "Preview the gift email"}
+              </button>
+              {previewHtml && (
+                <div className="overflow-hidden rounded-xl border border-border" data-testid="gift-preview">
+                  <div className="flex items-center justify-between bg-secondary px-3 py-1.5 text-[11px] text-muted-foreground">
+                    <span>What {gift.recipient_name || "they"} will receive</span>
+                    <button type="button" onClick={() => setPreviewHtml("")} className="hover:text-foreground">Close</button>
+                  </div>
+                  <iframe title="gift-email-preview" srcDoc={previewHtml} className="h-64 w-full bg-white" data-testid="gift-preview-frame" />
+                </div>
+              )}
             </div>
           )}
 

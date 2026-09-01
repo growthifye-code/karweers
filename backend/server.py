@@ -5506,6 +5506,23 @@ class PromoValidateIn(BaseModel):
     ref_id: str
 
 
+class GiftPreviewIn(BaseModel):
+    recipient_name: Optional[str] = ""
+    buyer_name: Optional[str] = ""
+    item_title: str
+    kind: str = "product"
+    message: Optional[str] = ""
+    deliver_at: Optional[str] = ""
+
+
+@api_router.post("/commerce/gift-preview")
+async def commerce_gift_preview(body: GiftPreviewIn):
+    from emailer import render_gift_email_html
+    html = render_gift_email_html(body.recipient_name, body.buyer_name, body.item_title,
+                                  body.kind, "#", body.message, PUBLIC_SITE, body.deliver_at)
+    return {"html": html}
+
+
 @api_router.post("/promo/validate")
 async def promo_validate(body: PromoValidateIn):
     coll = db.products if body.kind == "product" else db.cohorts if body.kind == "cohort" else db.bundles if body.kind == "bundle" else None

@@ -22,6 +22,11 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - Client auth + admin panel
 
 ## Implemented (2026-06)
+### Gift Preview + Order Search (2026-06, latest)
+- **Gift Preview**: buyers can preview the exact gift email before paying. Refactored the gift email into a shared `render_gift_email_html()` (used by both the real email and the preview), exposed via `POST /api/commerce/gift-preview`. The checkout modal shows a "Preview the gift email" button that renders the real HTML in an iframe (recipient name, buyer name, message and scheduled date all reflected). Verified via curl + screenshot.
+- **Order Search**: the admin Orders panel has a search box (data-testid order-search) that filters live by buyer name, email, item title, promo code, or gift recipient name/email — client-side over the loaded orders.
+
+
 ### Catalogue Safeguards + Gift Scheduling (2026-06, latest)
 - **Catalogue Safeguards**: `_validate_cms` runs before every admin CMS upsert — coerces numeric fields (price/seats/value/etc.), enforces required fields per collection, validates enums (product type, promo type/applies_to), and crucially validates that a **bundle's product_slug and cohort_slug reference existing items** (so a typo can't publish a broken bundle). Returns a clear 400 message on any issue. Verified: bad bundle slug → 400, non-numeric price → 400, missing seats_total → 400, valid string price coerced fine.
 - **Gift Scheduling**: the gift block in checkout now has an optional "Deliver on" date. If set to a future date, the recipient's gift email is held and delivered by the hourly sweep (`_deliver_scheduled_gifts`) when the date arrives; the buyer still gets an immediate receipt noting the scheduled date. Order stores `gift.deliver_at`, `gift_deliver_at`, `gift_delivered`. Verified: order stores deliver_at; due-gift sweep query matches correctly.

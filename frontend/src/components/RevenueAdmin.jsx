@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, X, Package, Users, FileText, Quote, Receipt, Tag, Link2 as LinkIcon, Package2, LayoutDashboard } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Package, Users, FileText, Quote, Receipt, Tag, Link2 as LinkIcon, Package2, LayoutDashboard, Search } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import api from "@/lib/api";
 import { formatApiErrorDetail } from "@/context/AuthContext";
@@ -237,8 +237,11 @@ function CollectionPanel({ collection }) {
 function OrdersPanel() {
   const [orders, setOrders] = useState([]);
   const [nudging, setNudging] = useState(false);
+  const [q, setQ] = useState("");
   useEffect(() => { api.get("/admin/commerce/orders").then((r) => setOrders(r.data)).catch(() => {}); }, []);
   const revenue = orders.filter((o) => o.paid).reduce((s, o) => s + Number(o.amount || 0), 0);
+  const term = q.trim().toLowerCase();
+  const shown = term ? orders.filter((o) => [o.name, o.email, o.ref_title, o.promo_code, (o.gift || {}).recipient_email, (o.gift || {}).recipient_name].some((v) => String(v || "").toLowerCase().includes(term))) : orders;
   const nudge = async () => {
     setNudging(true);
     try { const { data } = await api.post("/admin/commerce/nudge-abandoned"); toast.success(data.message); }
@@ -258,13 +261,18 @@ function OrdersPanel() {
         <p className="text-sm text-muted-foreground">Email everyone who started but didn't pay (idle 1-24h) a one-tap finish link with their code.</p>
         <button onClick={nudge} disabled={nudging} data-testid="nudge-abandoned" className="shrink-0 rounded-full bg-[hsl(var(--primary))] px-4 py-2 text-sm font-semibold text-[hsl(var(--primary-foreground))] disabled:opacity-60">{nudging ? "Sending…" : "Nudge abandoned"}</button>
       </div>
+      <div className="relative mb-4">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search orders by buyer, email, item, code or gift recipient…" data-testid="order-search"
+          className="w-full rounded-xl border border-border bg-background pl-9 pr-3 py-2.5 text-sm outline-none focus:border-[hsl(var(--primary))]" />
+      </div>
       <div className="overflow-hidden rounded-2xl border border-border">
         <table className="w-full text-sm">
           <thead className="bg-secondary/50 text-left text-xs uppercase text-muted-foreground">
             <tr><th className="px-4 py-2.5">Item</th><th className="px-4 py-2.5">Buyer</th><th className="px-4 py-2.5">Kind</th><th className="px-4 py-2.5">Amount</th><th className="px-4 py-2.5">Status</th></tr>
           </thead>
           <tbody>
-            {orders.map((o) => (
+            {shown.map((o) => (
               <tr key={o.id} className="border-t border-border" data-testid={`order-row-${o.id}`}>
                 <td className="px-4 py-3">{o.ref_title}</td>
                 <td className="px-4 py-3">{o.name}<div className="text-xs text-muted-foreground">{o.email}</div></td>
@@ -273,7 +281,7 @@ function OrdersPanel() {
                 <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${o.paid ? "bg-[hsl(var(--primary))]/15 text-[hsl(var(--primary))]" : "bg-secondary text-muted-foreground"}`}>{o.paid ? "Paid" : o.status}</span></td>
               </tr>
             ))}
-            {orders.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">No orders yet.</td></tr>}
+            {shown.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">{orders.length ? "No orders match your search." : "No orders yet."}</td></tr>}
           </tbody>
         </table>
       </div>

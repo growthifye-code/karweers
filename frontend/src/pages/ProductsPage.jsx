@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Download, ArrowUpRight, Check, Sparkles, Star } from "lucide-react";
+import { Download, ArrowUpRight, Check, Sparkles, Star, Package2 } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import Seo from "@/components/Seo";
@@ -12,6 +12,7 @@ const inr = (v) => "\u20b9" + Number(v || 0).toLocaleString("en-IN");
 
 export default function ProductsPage() {
   const [items, setItems] = useState([]);
+  const [bundles, setBundles] = useState([]);
   const [checkout, setCheckout] = useState(null);
   const [loading, setLoading] = useState(true);
   const [best, setBest] = useState({});
@@ -22,6 +23,7 @@ export default function ProductsPage() {
   useEffect(() => {
     api.get("/products").then((r) => setItems(r.data)).catch(() => {}).finally(() => setLoading(false));
     api.get("/commerce/best-sellers").then((r) => setBest(r.data)).catch(() => {});
+    api.get("/bundles").then((r) => setBundles(r.data)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -46,6 +48,48 @@ export default function ProductsPage() {
 
       <div className="mx-auto max-w-7xl px-6 pb-24 lg:px-10">
         <div className="mb-14"><BlueprintLeadMagnet /></div>
+
+        {bundles.length > 0 && (
+          <div className="mb-14" data-testid="bundles-section">
+            <div className="mb-6 flex items-center gap-2">
+              <Package2 className="h-5 w-5 text-[hsl(var(--primary))]" />
+              <h2 className="font-display text-2xl font-bold">Bundles — more value, one price</h2>
+            </div>
+            <div className="grid gap-6 lg:grid-cols-2">
+              {bundles.map((b) => {
+                const soldOut = b.cohort_seats_left <= 0;
+                return (
+                  <div key={b.slug} data-testid={`bundle-${b.slug}`} className="relative flex flex-col overflow-hidden rounded-3xl border border-[hsl(var(--primary))]/40 bg-[hsl(var(--primary))]/8 p-7">
+                    {b.savings > 0 && (
+                      <span className="absolute -top-3 right-6 rounded-full bg-[hsl(var(--primary))] px-3 py-1 text-xs font-bold text-[hsl(var(--primary-foreground))] shadow-lg">Save {inr(b.savings)}</span>
+                    )}
+                    <h3 className="font-display text-2xl font-bold leading-tight">{b.title}</h3>
+                    {b.subtitle && <p className="mt-1.5 text-sm font-medium text-[hsl(var(--primary))]">{b.subtitle}</p>}
+                    <p className="mt-3 flex-1 text-sm leading-relaxed text-muted-foreground">{b.description}</p>
+                    <div className="mt-4 space-y-1.5 rounded-2xl bg-card/60 p-4 text-sm">
+                      {b.product_title && <p className="flex items-center gap-2"><Check className="h-4 w-4 text-[hsl(var(--primary))]" /> {b.product_title}</p>}
+                      {b.cohort_title && <p className="flex items-center gap-2"><Check className="h-4 w-4 text-[hsl(var(--primary))]" /> {b.cohort_title}</p>}
+                    </div>
+                    <div className="mt-6 flex items-center justify-between">
+                      <div>
+                        <span className="font-display text-2xl font-extrabold">{inr(b.price)}</span>
+                        {b.separate_price > b.price && <span className="ml-2 text-sm text-muted-foreground line-through">{inr(b.separate_price)}</span>}
+                      </div>
+                      {soldOut ? (
+                        <span className="rounded-full bg-secondary px-4 py-2.5 text-sm font-semibold text-muted-foreground">Cohort full</span>
+                      ) : (
+                        <button onClick={() => setCheckout({ kind: "bundle", ref_id: b.slug, title: b.title, price: b.price })} data-testid={`bundle-cta-${b.slug}`}
+                          className="inline-flex items-center gap-1.5 rounded-full bg-[hsl(var(--primary))] px-5 py-2.5 text-sm font-semibold text-[hsl(var(--primary-foreground))] transition-transform hover:-translate-y-0.5">
+                          Get the bundle <ArrowUpRight className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {loading ? (
           <p className="py-16 text-center text-muted-foreground">Loading…</p>

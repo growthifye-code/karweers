@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, X, Package, Users, FileText, Quote, Receipt, Tag, Link2 as LinkIcon } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Package, Users, FileText, Quote, Receipt, Tag, Link2 as LinkIcon, Package2, LayoutDashboard } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import api from "@/lib/api";
 import { formatApiErrorDetail } from "@/context/AuthContext";
 
@@ -66,6 +67,21 @@ const COLLECTIONS = {
       { key: "company", label: "Company (optional)", type: "text" },
       { key: "sort", label: "Sort order", type: "number" },
       { key: "featured", label: "Featured", type: "bool" },
+    ],
+  },
+  bundles: {
+    label: "Bundles", icon: Package2, key: "slug",
+    columns: [["title", "Title"], ["price", "Price", inr], ["active", "Active"]],
+    fields: [
+      { key: "title", label: "Title", type: "text" },
+      { key: "slug", label: "Slug (URL id)", type: "text", auto: "title" },
+      { key: "subtitle", label: "Subtitle", type: "text" },
+      { key: "description", label: "Description", type: "textarea" },
+      { key: "product_slug", label: "Product slug (included download)", type: "text" },
+      { key: "cohort_slug", label: "Cohort slug (included seat)", type: "text" },
+      { key: "price", label: "Bundle price (INR)", type: "number" },
+      { key: "sort", label: "Sort order", type: "number" },
+      { key: "active", label: "Active", type: "bool" },
     ],
   },
   "promo-codes": {
@@ -329,23 +345,76 @@ function PromoPanel() {
   );
 }
 
+function DashboardPanel() {
+  const [data, setData] = useState(null);
+  useEffect(() => { api.get("/admin/commerce/revenue-analytics").then((r) => setData(r.data)).catch(() => {}); }, []);
+  if (!data) return <p className="py-12 text-center text-muted-foreground">Loading…</p>;
+  const hasSales = data.orders > 0;
+  return (
+    <div data-testid="cms-panel-dashboard">
+      <div className="mb-6 grid grid-cols-3 gap-3">
+        <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs text-muted-foreground">Total revenue</p><p className="font-display text-2xl font-bold text-[hsl(var(--primary))]">{inr(data.total_revenue)}</p></div>
+        <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs text-muted-foreground">Paid orders</p><p className="font-display text-2xl font-bold">{data.orders}</p></div>
+        <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs text-muted-foreground">Avg order value</p><p className="font-display text-2xl font-bold">{inr(data.aov)}</p></div>
+      </div>
+      <div className="rounded-2xl border border-border bg-card p-5">
+        <p className="mb-4 font-display text-base font-bold">Revenue · last 30 days</p>
+        {hasSales ? (
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={data.series} margin={{ top: 4, right: 8, left: -8, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+              <XAxis dataKey="date" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} interval={3} />
+              <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} />
+              <Tooltip cursor={{ fill: "hsl(var(--secondary))" }} contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12 }} formatter={(v) => [inr(v), "Revenue"]} />
+              <Bar dataKey="revenue" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        ) : (
+          <p className="py-16 text-center text-sm text-muted-foreground">No sales yet — your revenue chart and top products will appear here after your first order.</p>
+        )}
+      </div>
+      {data.top_items.length > 0 && (
+        <div className="mt-6 overflow-hidden rounded-2xl border border-border">
+          <table className="w-full text-sm">
+            <thead className="bg-secondary/50 text-left text-xs uppercase text-muted-foreground">
+              <tr><th className="px-4 py-2.5">Top sellers</th><th className="px-4 py-2.5">Type</th><th className="px-4 py-2.5">Units</th><th className="px-4 py-2.5">Revenue</th></tr>
+            </thead>
+            <tbody>
+              {data.top_items.map((t, i) => (
+                <tr key={i} className="border-t border-border">
+                  <td className="px-4 py-3 font-medium">{t.title}</td>
+                  <td className="px-4 py-3 capitalize">{t.kind}</td>
+                  <td className="px-4 py-3">{t.units}</td>
+                  <td className="px-4 py-3 font-semibold">{inr(t.revenue)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function RevenueAdmin() {
-  const [sub, setSub] = useState("products");
-  const tabs = [...Object.keys(COLLECTIONS), "orders"];
+  const [sub, setSub] = useState("dashboard");
+  const tabs = ["dashboard", ...Object.keys(COLLECTIONS), "orders"];
+  const iconFor = (t) => t === "dashboard" ? LayoutDashboard : t === "orders" ? Receipt : (COLLECTIONS[t]?.icon || Receipt);
+  const labelFor = (t) => t === "dashboard" ? "Dashboard" : t === "orders" ? "Orders" : COLLECTIONS[t]?.label;
   return (
     <div className="mt-8" data-testid="admin-revenue">
       <div className="mb-6 flex flex-wrap gap-2">
         {tabs.map((t) => {
-          const Icon = COLLECTIONS[t]?.icon || Receipt;
+          const Icon = iconFor(t);
           return (
             <button key={t} onClick={() => setSub(t)} data-testid={`revenue-subtab-${t}`}
               className={`inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium capitalize transition-colors ${sub === t ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]" : "border border-border text-muted-foreground hover:bg-secondary"}`}>
-              <Icon className="h-3.5 w-3.5" /> {COLLECTIONS[t]?.label || "Orders"}
+              <Icon className="h-3.5 w-3.5" /> {labelFor(t)}
             </button>
           );
         })}
       </div>
-      {sub === "orders" ? <OrdersPanel /> : sub === "promo-codes" ? <PromoPanel /> : <CollectionPanel collection={sub} />}
+      {sub === "dashboard" ? <DashboardPanel /> : sub === "orders" ? <OrdersPanel /> : sub === "promo-codes" ? <PromoPanel /> : <CollectionPanel collection={sub} />}
     </div>
   );
 }

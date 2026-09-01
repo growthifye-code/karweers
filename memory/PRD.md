@@ -22,6 +22,12 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - Client auth + admin panel
 
 ## Implemented (2026-06)
+### Revenue Dashboard + Bundle Offers (2026-06, latest)
+- **Revenue Dashboard**: Revenue tab now opens on a "Dashboard" sub-tab — KPI cards (total revenue, paid orders, AOV), a 30-day revenue bar chart (recharts) and a Top-Sellers table. Backed by `GET /api/admin/commerce/revenue-analytics` (daily series + top items by revenue). Shows a friendly empty state until the first paid order.
+- **Bundle Offers**: new `bundles` collection — sell a product + a cohort seat at one combined price. `commerce_order`/`commerce_verify` handle `kind="bundle"` (delivers the product download AND books the cohort seat, or waitlists if full). `GET /api/bundles` resolves included titles, separate price and savings. Public Bundles section on `/products` shows the combined price, struck-through separate price and a "Save ₹X" badge; checkout reuses the shared modal (promo codes apply to bundles via applies_to=all). Seeded: "Leadership Accelerator Bundle" (CXO Playbook + Cohort) ₹22,999 (save ₹2,999). Admin CMS: "Bundles" sub-tab (CRUD).
+- Verified via curl (bundles list/order amount ₹22,999, revenue-analytics shape) + screenshots (bundles section + checkout modal render). Test orders cleaned up. Best-seller/dashboard show real data only (honest until first sales).
+
+
 ### Abandoned Checkout Nudge + Best-Seller Badges (2026-06, latest)
 - **Abandoned Checkout Nudge**: `_nudge_abandoned_orders()` runs in the existing hourly `_process_pending_payments` sweep — finds `orders` that are pending_payment/unpaid, idle 1-24h, not yet nudged, and emails a one-tap "Finish my order" link (`send_commerce_abandoned_email`) that deep-links back to the item with the buyer's promo code pre-applied (`/products?product=slug&code=X` or `/cohorts?...`). Marks `nudged_at` so each order is nudged once. Manual trigger for admins: `POST /api/admin/commerce/nudge-abandoned` (button in Revenue → Orders → "Nudge abandoned"). Verified: aged abandoned order → sent 1 → nudged_at set.
 - **Best-Seller Badges**: `GET /api/commerce/best-sellers` aggregates paid orders and returns the top-converting product + cohort slug. Products & Cohorts pages fetch it and show a "Most popular" badge (data-testid best-seller-<slug>) on the matching card. Badge only appears once real paid sales exist (based on order data, so honest until first sales).

@@ -5196,6 +5196,13 @@ async def _seed_commerce():
             {"id": str(uuid.uuid4()), "name": "Group CFO", "role": "Infrastructure", "company": "", "quote": "He made our business bankable. Investors finally saw what we saw.", "featured": True, "sort": 2, "created_at": now_iso()},
             {"id": str(uuid.uuid4()), "name": "Managing Director", "role": "Manufacturing", "company": "", "quote": "Rare mix of big-picture strategy and hands-on execution. Worth every minute.", "featured": True, "sort": 3, "created_at": now_iso()},
         ])
+    if await db.bundles.count_documents({}) == 0:
+        await db.bundles.insert_one({
+            "id": str(uuid.uuid4()), "slug": "leadership-accelerator", "title": "Leadership Accelerator Bundle",
+            "subtitle": "The CXO Playbook + the live Cohort, one price",
+            "description": "Get the CXO Strategy Playbook to work through on your own, plus a seat in the live CXO Leadership Cohort — the fastest way to turn frameworks into results. Priced well below buying both separately.",
+            "product_slug": "cxo-strategy-playbook", "cohort_slug": "cxo-leadership-cohort",
+            "price": 22999, "active": True, "sort": 1, "created_at": now_iso()})
 
 
 # ---- Public catalogue ----
@@ -5238,6 +5245,22 @@ async def list_case_studies():
 @api_router.get("/testimonials")
 async def list_testimonials():
     return [_pub(d) for d in await db.testimonials.find({}, {"_id": 0}).sort("sort", 1).to_list(100)]
+
+
+@api_router.get("/bundles")
+async def list_bundles():
+    out = []
+    for b in await db.bundles.find({"active": True}, {"_id": 0}).sort("sort", 1).to_list(100):
+        prod = await db.products.find_one({"slug": b.get("product_slug")}, {"_id": 0, "title": 1, "price": 1})
+        coh = await db.cohorts.find_one({"slug": b.get("cohort_slug")}, {"_id": 0, "title": 1, "price": 1, "seats_taken": 1, "seats_total": 1})
+        sep = float((prod or {}).get("price", 0) or 0) + float((coh or {}).get("price", 0) or 0)
+        b["product_title"] = (prod or {}).get("title")
+        b["cohort_title"] = (coh or {}).get("title")
+        b["separate_price"] = sep
+        b["savings"] = max(0.0, round(sep - float(b.get("price", 0) or 0), 2))
+        b["cohort_seats_left"] = max(0, int((coh or {}).get("seats_total", 0)) - int((coh or {}).get("seats_taken", 0))) if coh else 0
+        out.append(b)
+    return out
 
 
 # ---- Corporate / enterprise inquiry ----
@@ -5319,6 +5342,13 @@ async def commerce_order(body: CommerceOrderIn, request: Request):
         title = item and item["title"]
         if item and int(item.get("seats_taken", 0)) >= int(item.get("seats_total", 0)):
             return {"success": False, "waitlist": True, "message": "This cohort is full. Join the waitlist and we'll offer you the next seat."}
+    elif body.kind == "bundle":
+        item = await db.bundles.find_one({"slug": body.ref_id, "active": True}, {"_id": 0})
+        title = item and item["title"]
+        if item:
+            coh = await db.cohorts.find_one({"slug": item.get("cohort_slug"), "active": True}, {"_id": 0})
+            if coh and int(coh.get("seats_taken", 0)) >= int(coh.get("seats_total", 0)):
+                return {"success": False, "waitlist": True, "message": "This bundle's cohort is full right now — join the cohort waitlist and we'll be in touch."}
     else:
         raise HTTPException(status_code=400, detail="Invalid kind")
     if not item:
@@ -5390,6 +5420,17 @@ async def commerce_verify(body: CommerceVerifyIn):
         if res.modified_count == 0:
             await db.cohorts.update_one({"slug": o["ref_id"], "waitlist": {"$ne": o["email"]}},
                                         {"$push": {"waitlist": o["email"]}})
+    elif o["kind"] == "bundle":
+        b = await db.bundles.find_one({"slug": o["ref_id"]}, {"_id": 0})
+        prod = await db.products.find_one({"slug": (b or {}).get("product_slug")}, {"_id": 0})
+        download_url = (prod or {}).get("download_url") or "/api/blueprint/starter.pdf"
+        if b and b.get("cohort_slug"):
+            res = await db.cohorts.update_one(
+                {"slug": b["cohort_slug"], "$expr": {"$lt": ["$seats_taken", "$seats_total"]}},
+                {"$inc": {"seats_taken": 1}})
+            if res.modified_count == 0:
+                await db.cohorts.update_one({"slug": b["cohort_slug"], "waitlist": {"$ne": o["email"]}},
+                                            {"$push": {"waitlist": o["email"]}})
     await db.orders.update_one({"id": o["id"]}, {"$set": {
         "paid": True, "status": "paid", "delivered": True, "download_url": download_url,
         "razorpay_payment_id": body.razorpay_payment_id, "paid_at": now_iso()}})
@@ -5416,7 +5457,7 @@ class PromoValidateIn(BaseModel):
 
 @api_router.post("/promo/validate")
 async def promo_validate(body: PromoValidateIn):
-    coll = db.products if body.kind == "product" else db.cohorts if body.kind == "cohort" else None
+    coll = db.products if body.kind == "product" else db.cohorts if body.kind == "cohort" else db.bundles if body.kind == "bundle" else None
     if coll is None:
         raise HTTPException(status_code=400, detail="Invalid kind")
     item = await coll.find_one({"slug": body.ref_id, "active": True}, {"_id": 0})
@@ -5442,7 +5483,7 @@ async def cohort_waitlist(slug: str, body: LeadMagnetIn, request: Request):
 
 # ---- Admin CMS (upsert / delete) ----
 _CMS = {"products": db.products, "cohorts": db.cohorts, "case-studies": db.case_studies,
-        "testimonials": db.testimonials, "promo-codes": db.promo_codes}
+        "testimonials": db.testimonials, "promo-codes": db.promo_codes, "bundles": db.bundles}
 
 
 @api_router.get("/admin/cms/{collection}")
@@ -5502,6 +5543,36 @@ async def admin_nudge_abandoned(admin: dict = Depends(require_admin)):
     return {"success": True, "sent": sent,
             "message": (f"Sent {sent} nudge email(s)." if sent else
                         "No abandoned orders to nudge right now (must be idle 1-24h, unpaid, and email configured).")}
+
+
+@api_router.get("/admin/commerce/revenue-analytics")
+async def admin_revenue_analytics(admin: dict = Depends(require_admin)):
+    paid = await db.orders.find({"paid": True},
+                                {"_id": 0, "amount": 1, "paid_at": 1, "created_at": 1,
+                                 "ref_title": 1, "kind": 1, "ref_id": 1}).to_list(5000)
+    from collections import defaultdict, OrderedDict
+    today = datetime.now(timezone.utc).date()
+    series = OrderedDict(((today - timedelta(days=i)).isoformat(), 0.0) for i in range(29, -1, -1))
+    items = defaultdict(lambda: {"units": 0, "revenue": 0.0, "title": "", "kind": ""})
+    total = 0.0
+    for o in paid:
+        amt = float(o.get("amount", 0) or 0)
+        total += amt
+        ts = (o.get("paid_at") or o.get("created_at") or "")[:10]
+        if ts in series:
+            series[ts] += amt
+        key = (o.get("kind"), o.get("ref_id"))
+        it = items[key]
+        it["units"] += 1
+        it["revenue"] += amt
+        it["title"] = o.get("ref_title") or o.get("ref_id")
+        it["kind"] = o.get("kind")
+    top = sorted(items.values(), key=lambda x: x["revenue"], reverse=True)[:6]
+    n = len(paid)
+    return {"series": [{"date": k[5:], "revenue": round(v, 2)} for k, v in series.items()],
+            "top_items": [{**t, "revenue": round(t["revenue"], 2)} for t in top],
+            "total_revenue": round(total, 2), "orders": n,
+            "aov": round(total / n, 2) if n else 0}
 
 
 @api_router.get("/commerce/best-sellers")

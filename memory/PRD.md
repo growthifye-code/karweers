@@ -487,3 +487,10 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - **Trending Strip**: `POST /insights/track` view now maintains a rolling weekly counter (`week` ISO key + `reads_week`). `GET /service-insights-trending` returns top-by-week cards (tops up with freshest). Hub shows a ranked "Most read this week" strip (trending-strip).
 - Hardening (post iteration_22 review): share `platform` allow-listed (SHARE_PLATFORMS) to prevent share_by map pollution; feature-toggle preserves current live slug.
 - Tested iteration_22: backend 12/12, frontend 100%, zero bugs.
+
+## Iteration 7.0 (Jun 2026) — Auto-Feature Winner, Theme Signup, Weekly Recap, Related-by-Theme
+- **Auto-Feature Winner**: `_auto_feature_winner(week)` crowns the top reads_week insight — adds it to the featured queue and makes it the live pick. Runs Monday 06:00 IST (replaces plain rotate; falls back to rotation if no reads). Admin trigger `POST /admin/insights/auto-feature-run`.
+- **Theme Signup**: homepage `NewsletterSignup.jsx` now has a "Pick your themes" chooser (8 chips). `NewsletterIn.themes` saved as `interests_themes` on subscribe (validated against INSIGHT_THEMES); idempotent for existing emails.
+- **Weekly Recap Email**: `_weekly_recap_stats(week)` computes reads/shares/top/by-theme from rolling weekly counters (added `shares_week`/`share_week` alongside `reads_week`). `_send_weekly_recap()` emails the admin (BOOKING_ADMIN_EMAIL/ADMIN_EMAIL); scheduled Monday 07:00 IST. Admin: `GET /admin/insights/recap-preview`, `POST /admin/insights/recap-run` (guarded background task), plus an "Email me the recap" button in the admin panel. Email built in `emailer.render/send_insights_recap_html`.
+- **Related By Theme**: `get_service_insight` now returns `theme` + `related_by_theme` (up to 4 cross-service insights sharing the theme). Reader shows a "More in {theme}" row.
+- Tested iteration_23: backend 10/10, frontend 100% (newsletter submit gated by hCaptcha as-designed). Post-test fix: recap background task wrapped with logger.exception.

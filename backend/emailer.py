@@ -500,6 +500,52 @@ def send_insights_newsletter_email(to_email: str, name: str, items: list, site: 
     return _smtp_send(msg)
 
 
+def render_insights_recap_html(stats: dict, site: str = "https://www.sudarshankarweer.com") -> str:
+    def rows(items, metric):
+        if not items:
+            return '<p style="font-size:13px;color:#9ca3af;margin:4px 0;">No activity yet.</p>'
+        out = ""
+        for i, it in enumerate(items):
+            out += (f'<div style="display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid #f0f0f0;">'
+                    f'<span style="font-size:13px;color:#111;">{i+1}. <a href="{site}/insight/{it.get("slug","")}" style="color:#111;text-decoration:none;">{it.get("title","")}</a></span>'
+                    f'<span style="font-size:13px;font-weight:700;color:#059669;">{it.get(metric,0)}</span></div>')
+        return out
+    themes = ""
+    for t in (stats.get("by_theme") or [])[:6]:
+        themes += (f'<div style="display:flex;justify-content:space-between;padding:6px 0;">'
+                   f'<span style="font-size:13px;color:#374151;">{t.get("theme","")}</span>'
+                   f'<span style="font-size:13px;color:#111;">{t.get("reads",0)} reads · {t.get("shares",0)} shares</span></div>')
+    themes_html = themes or '<p style="font-size:13px;color:#9ca3af;">No activity yet.</p>'
+    inner = (
+        f'<p style="font-size:15px;color:#111;">Good Monday, Sudarshan.</p>'
+        f'<p style="font-size:14px;color:#374151;">Here\'s how your SK Insights performed last week.</p>'
+        f'<div style="display:flex;gap:12px;margin:16px 0;">'
+        f'<div style="flex:1;border:1px solid #e5e7eb;border-radius:12px;padding:14px;text-align:center;"><p style="font-size:24px;font-weight:800;color:#111;margin:0;">{stats.get("total_reads",0)}</p><p style="font-size:11px;color:#6b7280;margin:2px 0 0;text-transform:uppercase;letter-spacing:.05em;">Reads</p></div>'
+        f'<div style="flex:1;border:1px solid #e5e7eb;border-radius:12px;padding:14px;text-align:center;"><p style="font-size:24px;font-weight:800;color:#111;margin:0;">{stats.get("total_shares",0)}</p><p style="font-size:11px;color:#6b7280;margin:2px 0 0;text-transform:uppercase;letter-spacing:.05em;">Shares</p></div>'
+        f'</div>'
+        f'<p style="font-size:13px;font-weight:700;color:#111;margin:16px 0 4px;">Most read</p>{rows(stats.get("top_read"), "reads")}'
+        f'<p style="font-size:13px;font-weight:700;color:#111;margin:16px 0 4px;">Most shared</p>{rows(stats.get("top_shared"), "shares")}'
+        f'<p style="font-size:13px;font-weight:700;color:#111;margin:16px 0 4px;">By theme</p>{themes_html}'
+        f'<a href="{site}/admin" style="display:inline-block;margin-top:16px;background:#C6F135;color:#0A0A0A;padding:10px 20px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">Open the dashboard</a>'
+    )
+    return _shell("Your weekly SK Insights recap", inner)
+
+
+def send_insights_recap_email(to_email: str, stats: dict, site: str = "https://www.sudarshankarweer.com") -> str:
+    """Monday performance recap to the admin (INERT until SMTP configured)."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email:
+        return "skipped"
+    msg = EmailMessage()
+    msg["Subject"] = f"Weekly SK Insights recap — {stats.get('total_reads',0)} reads, {stats.get('total_shares',0)} shares"
+    msg["From"] = user
+    msg["To"] = to_email
+    msg.set_content(f"Weekly recap: {stats.get('total_reads',0)} reads, {stats.get('total_shares',0)} shares. Open {site}/admin")
+    msg.add_alternative(render_insights_recap_html(stats, site), subtype="html")
+    return _smtp_send(msg)
+
+
 def render_library_digest_html(name: str, books: list, site: str = "https://www.sudarshankarweer.com", unsubscribe_url: str = "") -> str:
     cards = ""
     for b in books:

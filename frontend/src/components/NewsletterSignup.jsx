@@ -1,14 +1,19 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Mail, ArrowRight } from "lucide-react";
+import { Mail, ArrowRight, Check } from "lucide-react";
 import api from "@/lib/api";
 import { formatApiErrorDetail } from "@/context/AuthContext";
 import Captcha from "@/components/Captcha";
 
+const THEMES = ["Strategy", "M&A", "Capital & Finance", "Markets", "Economy", "Technology", "Energy & Climate", "Leadership"];
+
 export default function NewsletterSignup() {
   const [email, setEmail] = useState("");
   const [captcha, setCaptcha] = useState("");
+  const [themes, setThemes] = useState([]);
   const [busy, setBusy] = useState(false);
+
+  const toggle = (t) => setThemes((arr) => arr.includes(t) ? arr.filter((x) => x !== t) : [...arr, t]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -16,9 +21,9 @@ export default function NewsletterSignup() {
     if (!captcha) { toast.error("Please complete the captcha."); return; }
     setBusy(true);
     try {
-      const { data } = await api.post("/newsletter", { email, captcha_token: captcha });
+      const { data } = await api.post("/newsletter", { email, captcha_token: captcha, themes });
       toast.success(data.message);
-      setEmail("");
+      setEmail(""); setThemes([]);
     } catch (err) {
       toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Subscription failed.");
     } finally {
@@ -49,6 +54,17 @@ export default function NewsletterSignup() {
             {busy ? "Subscribing…" : <>Subscribe <ArrowRight className="h-4 w-4" /></>}
           </button>
         </form>
+        <div className="mx-auto mt-6 max-w-lg" data-testid="newsletter-themes">
+          <p className="text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">Pick your themes <span className="normal-case opacity-70">(optional)</span></p>
+          <div className="mt-3 flex flex-wrap justify-center gap-2">
+            {THEMES.map((t) => (
+              <button type="button" key={t} onClick={() => toggle(t)} data-testid={`signup-theme-${t}`}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${themes.includes(t) ? "border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10 text-[hsl(var(--primary))]" : "border-border text-muted-foreground hover:text-foreground"}`}>
+                {themes.includes(t) && <Check className="h-3 w-3" />} {t}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="mt-5 flex justify-center"><Captcha onVerify={setCaptcha} onExpire={() => setCaptcha("")} /></div>
         <p className="mt-4 text-xs text-muted-foreground">No spam. Unsubscribe anytime.</p>
       </div>

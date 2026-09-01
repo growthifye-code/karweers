@@ -157,6 +157,20 @@ export default function ServiceInsightPage({ archived = false }) {
             </div>
           </div>
         )}
+
+        {Array.isArray(a.related_by_theme) && a.related_by_theme.length > 0 && (
+          <div className="mt-16" data-testid="related-by-theme">
+            <h3 className="font-display text-2xl font-bold">More in {a.theme}</h3>
+            <div className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+              {a.related_by_theme.map((r) => (
+                <Link key={r.slug} to={`/insight/${r.slug}`} className="group overflow-hidden rounded-2xl border border-border bg-card transition-transform hover:-translate-y-1" data-testid={`theme-rel-${r.slug}`}>
+                  <div className="aspect-[16/10] overflow-hidden"><img src={r.hero_image} alt="" loading="lazy" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" /></div>
+                  <div className="p-4"><p className="text-[11px] font-semibold uppercase tracking-wider text-[hsl(var(--primary))]">{r.service_title}</p><h4 className="mt-1.5 line-clamp-2 text-sm font-semibold leading-snug">{r.title}</h4></div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
       </article>
       <Footer />
     </div>

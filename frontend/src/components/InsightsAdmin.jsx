@@ -81,6 +81,7 @@ export default function InsightsAdmin() {
   const [editions, setEditions] = useState(null);
   const [busy, setBusy] = useState("");
   const [sending, setSending] = useState(false);
+  const [recapping, setRecapping] = useState(false);
 
   const load = () => {
     api.get("/admin/service-insights").then((r) => setBlogs(r.data)).catch(() => toast.error("Couldn't load insights — please re-login."));
@@ -106,6 +107,14 @@ export default function InsightsAdmin() {
       else toast.message("Email isn't configured yet — nothing sent.");
     } catch { toast.error("Couldn't send newsletter"); } finally { setSending(false); }
   };
+  const sendRecap = async () => {
+    setRecapping(true);
+    try {
+      const { data } = await api.post("/admin/insights/recap-run?week=current");
+      if (data.sent) toast.success("Recap emailed to you.");
+      else toast.message("Email isn't configured yet — nothing sent.");
+    } catch { toast.error("Couldn't send recap"); } finally { setRecapping(false); }
+  };
 
   const term = q.trim().toLowerCase();
   const shown = useMemo(() => blogs.filter((b) => !term || [b.title, b.service_title, b.category].some((v) => String(v || "").toLowerCase().includes(term))), [blogs, term]);
@@ -118,7 +127,10 @@ export default function InsightsAdmin() {
           <h2 className="font-display text-2xl font-bold">SK Insights</h2>
           <p className="text-sm text-muted-foreground">{blogs.length} insights · edit, reorder, feature, refresh and track performance.</p>
         </div>
-        <button onClick={sendNewsletter} disabled={sending} data-testid="send-newsletter" className="inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-5 py-2.5 text-sm font-semibold text-[hsl(var(--primary-foreground))] disabled:opacity-60"><Mail className="h-4 w-4" />{sending ? "Sending…" : "Send newsletter now"}</button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={sendRecap} disabled={recapping} data-testid="send-recap" className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-sm font-semibold hover:border-[hsl(var(--primary))] disabled:opacity-60"><TrendingUp className="h-4 w-4" />{recapping ? "Sending…" : "Email me the recap"}</button>
+          <button onClick={sendNewsletter} disabled={sending} data-testid="send-newsletter" className="inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-5 py-2.5 text-sm font-semibold text-[hsl(var(--primary-foreground))] disabled:opacity-60"><Mail className="h-4 w-4" />{sending ? "Sending…" : "Send newsletter now"}</button>
+        </div>
       </div>
 
       {analytics && (

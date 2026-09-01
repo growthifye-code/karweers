@@ -36,6 +36,7 @@ from emailer import send_new_booking_alert_email, send_session_reminder_email, s
 from emailer import send_consent_receipt_email
 from emailer import send_signals_digest_email, render_signals_digest_html, send_test_email
 from emailer import send_insights_newsletter_email
+from emailer import send_insights_recap_email
 from emailer import send_library_digest_email, send_score_beaten_email
 from emailer import send_sector_digest_email
 from emailer import send_payment_receipt_email, send_refund_email
@@ -2186,11 +2187,16 @@ async def _digest_scheduler():
                     inl = await db.app_meta.find_one({"_id": "insights_newsletter"})
                     if (inl or {}).get("last_run", "")[:10] != ist_now.date().isoformat():
                         await _send_insights_newsletter()
-                # Rotate the featured insight queue — Monday ~06:00 IST.
+                # Rotate / auto-feature the winner — Monday ~06:00 IST.
                 if ist_now.weekday() == 0 and ist_now.hour == 6:
                     fm = await db.app_meta.find_one({"_id": "featured_insight"})
                     if (fm or {}).get("rotated_at", "")[:10] != ist_now.date().isoformat():
-                        await _rotate_featured()
+                        await _auto_feature_winner(_prev_iso_week())
+                # Weekly performance recap to the admin — Monday ~07:00 IST.
+                if ist_now.weekday() == 0 and ist_now.hour == 7:
+                    rc = await db.app_meta.find_one({"_id": "insights_recap"})
+                    if (rc or {}).get("last_run", "")[:10] != ist_now.date().isoformat():
+                        await _send_weekly_recap(_prev_iso_week())
                 # Weekly Library shelf digest to subscribers — Monday ~09:00 IST.
                 if ist_now.weekday() == 0 and ist_now.hour == 9:
                     ld = await db.app_meta.find_one({"_id": "library_digest"})
@@ -3711,15 +3717,21 @@ async def market_live():
 class NewsletterIn(BaseModel):
     email: EmailStr
     captcha_token: Optional[str] = None
+    themes: List[str] = []
 
 
 @api_router.post("/newsletter")
 async def subscribe(body: NewsletterIn, request: Request):
     verify_captcha(body.captcha_token, _client_ip(request), request)
     email = body.email.lower()
-    if await db.subscribers.find_one({"email": email}):
+    themes = [t for t in body.themes if t in INSIGHT_THEMES][:8]
+    existing = await db.subscribers.find_one({"email": email})
+    if existing:
+        if themes:
+            await db.subscribers.update_one({"email": email}, {"$set": {"interests_themes": themes}})
         return {"success": True, "message": "You're already subscribed — thank you!"}
-    await db.subscribers.insert_one({"id": str(uuid.uuid4()), "email": email, "created_at": now_iso()})
+    await db.subscribers.insert_one({"id": str(uuid.uuid4()), "email": email,
+                                     "interests_themes": themes, "created_at": now_iso()})
     return {"success": True, "message": "Subscribed! You'll receive Sudarshan's latest insights."}
 
 
@@ -5094,6 +5106,12 @@ async def get_service_insight(slug: str):
         {"service_slug": d["service_slug"], "slug": {"$ne": slug}}, {"_id": 0}).sort("sort", 1).to_list(3)
     d["related"] = [_blog_card(r) for r in related]
     d["earlier_editions"] = await db.service_blogs_archive.count_documents({"slug": slug})
+    # More in the same theme (across services)
+    theme = _insight_theme(d.get("service_slug"), d.get("category"))
+    pool = await db.service_blogs.find({"slug": {"$ne": slug}}, {"_id": 0}).sort("updated_at", -1).to_list(200)
+    same = [r for r in pool if _insight_theme(r.get("service_slug"), r.get("category")) == theme][:4]
+    d["theme"] = theme
+    d["related_by_theme"] = [_blog_card(r) for r in same]
     return d
 
 
@@ -5232,6 +5250,92 @@ async def trending_insights(limit: int = 6):
     return [_blog_card(d) for d in docs[:limit]]
 
 
+def _prev_iso_week() -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%G-W%V")
+
+
+async def _weekly_recap_stats(week_key: str) -> dict:
+    """Reads/shares/themes for a given ISO week from insight_stats rolling counters."""
+    stats = await db.insight_stats.find({}, {"_id": 0}).to_list(500)
+    rows = []
+    for s in stats:
+        rd = int(s.get("reads_week", 0) or 0) if s.get("week") == week_key else 0
+        sh = int(s.get("shares_week", 0) or 0) if s.get("share_week") == week_key else 0
+        if rd or sh:
+            rows.append({"slug": s.get("slug"), "title": s.get("title"),
+                         "theme": s.get("theme") or _insight_theme(s.get("service_slug"), s.get("category")),
+                         "reads": rd, "shares": sh})
+    theme = {}
+    for r in rows:
+        t = theme.setdefault(r["theme"], {"theme": r["theme"], "reads": 0, "shares": 0})
+        t["reads"] += r["reads"]
+        t["shares"] += r["shares"]
+    return {"week": week_key,
+            "total_reads": sum(r["reads"] for r in rows), "total_shares": sum(r["shares"] for r in rows),
+            "top_read": sorted([r for r in rows if r["reads"]], key=lambda x: x["reads"], reverse=True)[:5],
+            "top_shared": sorted([r for r in rows if r["shares"]], key=lambda x: x["shares"], reverse=True)[:5],
+            "by_theme": sorted(theme.values(), key=lambda x: x["reads"], reverse=True)}
+
+
+async def _auto_feature_winner(week_key: str) -> Optional[str]:
+    """Add last week's most-read insight to the featured queue and make it the live pick."""
+    recap = await _weekly_recap_stats(week_key)
+    top = recap.get("top_read") or []
+    if not top:
+        await _rotate_featured()  # nothing to crown — just advance the queue
+        return None
+    winner = top[0]["slug"]
+    meta = await db.app_meta.find_one({"_id": "featured_insight"}) or {}
+    queue = [s for s in (meta.get("queue") or []) if s]
+    if winner not in queue:
+        queue.append(winner)
+    idx = queue.index(winner)
+    await db.app_meta.update_one({"_id": "featured_insight"},
+                                 {"$set": {"queue": queue, "index": idx, "slug": winner,
+                                           "rotated_at": now_iso(), "auto_winner": winner}}, upsert=True)
+    return winner
+
+
+async def _send_weekly_recap(week_key: Optional[str] = None):
+    to = os.environ.get("BOOKING_ADMIN_EMAIL") or os.environ.get("ADMIN_EMAIL")
+    stats = await _weekly_recap_stats(week_key or _prev_iso_week())
+    if not to:
+        return {"sent": False, "skipped": "no_admin_email", "stats": stats}
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, lambda: send_insights_recap_email(to, stats, PUBLIC_SITE))
+    await db.app_meta.update_one({"_id": "insights_recap"}, {"$set": {"last_run": now_iso()}}, upsert=True)
+    return {"sent": True, "to": to, "stats": stats}
+
+
+@api_router.get("/admin/insights/recap-preview")
+async def admin_insights_recap_preview(week: str = "current", admin: dict = Depends(require_admin)):
+    wk = _prev_iso_week() if week == "prev" else _iso_week()
+    return await _weekly_recap_stats(wk)
+
+
+@api_router.post("/admin/insights/recap-run")
+async def admin_insights_recap_run(week: str = "current", admin: dict = Depends(require_admin)):
+    if not os.environ.get("GMAIL_APP_PASSWORD"):
+        return {"sent": False, "skipped": "email_not_configured"}
+    wk = _prev_iso_week() if week == "prev" else _iso_week()
+
+    async def _run():
+        try:
+            await _send_weekly_recap(wk)
+        except Exception:
+            logger.exception("weekly recap send failed")
+
+    asyncio.create_task(_run())
+    return {"sent": True, "queued": True, "week": wk}
+
+
+@api_router.post("/admin/insights/auto-feature-run")
+async def admin_auto_feature_run(week: str = "current", admin: dict = Depends(require_admin)):
+    wk = _prev_iso_week() if week == "prev" else _iso_week()
+    winner = await _auto_feature_winner(wk)
+    return {"success": True, "winner": winner}
+
+
 # ---------------- Reading & share analytics ----------------
 class InsightTrackIn(BaseModel):
     slug: str
@@ -5253,10 +5357,13 @@ async def track_insight(body: InsightTrackIn):
     base = {"title": blog.get("title"), "service_slug": blog.get("service_slug"),
             "category": blog.get("category"), "theme": theme, "updated_at": now_iso()}
     if body.event == "share":
+        wk = _iso_week()
+        existing = await db.insight_stats.find_one({"slug": body.slug}, {"_id": 0, "share_week": 1, "shares_week": 1})
+        shares_week = int((existing or {}).get("shares_week", 0) or 0) + 1 if (existing or {}).get("share_week") == wk else 1
         inc = {"shares": 1}
         if body.platform in SHARE_PLATFORMS:
             inc[f"share_by.{body.platform}"] = 1
-        await db.insight_stats.update_one({"slug": body.slug}, {"$inc": inc, "$set": base}, upsert=True)
+        await db.insight_stats.update_one({"slug": body.slug}, {"$inc": inc, "$set": {**base, "share_week": wk, "shares_week": shares_week}}, upsert=True)
         return {"ok": True}
     # view: maintain cumulative reads + a weekly rolling counter
     wk = _iso_week()

@@ -4246,6 +4246,30 @@ async def _process_pending_payments():
                 pass
             await db.consultations.update_one({"id": b["id"]}, {"$set": {"nudged_at": now_iso()}})
     await _nudge_abandoned_orders(now)
+    await _deliver_scheduled_gifts()
+
+
+async def _deliver_scheduled_gifts(now=None):
+    """Deliver gifts whose scheduled date has arrived. Returns count sent."""
+    if not os.environ.get("GMAIL_APP_PASSWORD"):
+        return 0
+    now_s = now_iso()
+    due = await db.orders.find(
+        {"paid": True, "gift_delivered": False, "gift_deliver_at": {"$ne": None, "$lte": now_s}}).to_list(200)
+    sent = 0
+    for o in due:
+        gift = o.get("gift") or {}
+        rec = (gift.get("recipient_email") or "").strip().lower()
+        if rec:
+            try:
+                await asyncio.to_thread(send_gift_email, rec, gift.get("recipient_name", ""), o["name"],
+                                        o["ref_title"], o["kind"], o.get("download_url", ""),
+                                        gift.get("message", ""), PUBLIC_SITE)
+                sent += 1
+            except Exception:
+                logger.warning("scheduled gift delivery failed", exc_info=True)
+        await db.orders.update_one({"id": o["id"]}, {"$set": {"gift_delivered": True}})
+    return sent
 
 
 async def _nudge_abandoned_orders(now=None):
@@ -5442,16 +5466,23 @@ async def commerce_verify(body: CommerceVerifyIn):
         await db.promo_codes.update_one({"code": o["promo_code"]}, {"$inc": {"used_count": 1}})
     gift = o.get("gift") or {}
     recipient = (gift.get("recipient_email") or "").strip().lower()
+    deliver_at = (gift.get("deliver_at") or "").strip()
+    scheduled = bool(recipient and deliver_at and deliver_at > now_iso())
+    if recipient:
+        await db.orders.update_one({"id": o["id"]}, {"$set": {
+            "gift_deliver_at": deliver_at or None, "gift_delivered": not scheduled}})
     if os.environ.get("GMAIL_APP_PASSWORD"):
         loop = asyncio.get_event_loop()
         if recipient:
-            # Buyer gets a forwardable gift receipt; recipient gets the actual access.
+            # Buyer gets a forwardable gift receipt; recipient gets access now or on the scheduled date.
             loop.run_in_executor(None, lambda: send_gift_receipt_email(
                 o["email"], o["name"], o["ref_title"], gift.get("recipient_name", ""),
-                recipient, o.get("amount", 0), gift.get("message", ""), PUBLIC_SITE))
-            loop.run_in_executor(None, lambda: send_gift_email(
-                recipient, gift.get("recipient_name", ""), o["name"], o["ref_title"], o["kind"],
-                download_url, gift.get("message", ""), PUBLIC_SITE))
+                recipient, o.get("amount", 0), gift.get("message", ""), PUBLIC_SITE,
+                deliver_at if scheduled else ""))
+            if not scheduled:
+                loop.run_in_executor(None, lambda: send_gift_email(
+                    recipient, gift.get("recipient_name", ""), o["name"], o["ref_title"], o["kind"],
+                    download_url, gift.get("message", ""), PUBLIC_SITE))
         else:
             loop.run_in_executor(None, lambda: send_purchase_email(
                 o["email"], o["name"], o["kind"], o["ref_title"], download_url, PUBLIC_SITE))
@@ -5459,10 +5490,11 @@ async def commerce_verify(body: CommerceVerifyIn):
             loop.run_in_executor(None, lambda: _smtp_notify(
                 f"New {o['kind']} purchase: {o['ref_title']}",
                 f"{o['name']} ({o['email']}) paid ₹{o['amount']} for {o['ref_title']}."
-                + (f" (gift to {recipient})" if recipient else "")))
+                + (f" (gift to {recipient}{', scheduled ' + deliver_at if scheduled else ''})" if recipient else "")))
     if recipient:
-        return {"success": True, "kind": o["kind"], "gifted": True, "download_url": "",
-                "message": f"Payment received! We've emailed access to {recipient}."}
+        msg = (f"Payment received! We'll deliver the gift to {recipient} on {deliver_at[:10]}."
+               if scheduled else f"Payment received! We've emailed access to {recipient}.")
+        return {"success": True, "kind": o["kind"], "gifted": True, "download_url": "", "message": msg}
     return {"success": True, "kind": o["kind"], "download_url": download_url,
             "message": "Payment received! Check your email for access." if o["kind"] in ("product", "bundle")
             else "Payment received! Your seat is booked — details are on the way to your inbox."}
@@ -5513,6 +5545,54 @@ async def cms_list(collection: str, admin: dict = Depends(require_admin)):
     return [_pub(d) for d in await coll.find({}, {"_id": 0}).sort("sort", 1).to_list(500)]
 
 
+async def _validate_cms(collection: str, body: dict):
+    """Guardrails so an admin typo can't silently break a live page. Coerces numbers, checks required fields + references."""
+    def _num(field, default=None, minimum=None, required=False, integer=False):
+        raw = body.get(field, default)
+        if raw is None or raw == "":
+            if required:
+                raise HTTPException(status_code=400, detail=f"'{field}' is required.")
+            return
+        try:
+            val = int(raw) if integer else float(raw)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail=f"'{field}' must be a number.")
+        if minimum is not None and val < minimum:
+            raise HTTPException(status_code=400, detail=f"'{field}' must be at least {minimum}.")
+        body[field] = val
+
+    def _req(field, label=None):
+        if not str(body.get(field, "") or "").strip():
+            raise HTTPException(status_code=400, detail=f"'{label or field}' is required.")
+
+    if collection == "products":
+        _req("title"); _req("slug"); _num("price", minimum=0, required=True); _num("sort")
+        if body.get("type") and body["type"] not in ("playbook", "template", "blueprint", "guide"):
+            raise HTTPException(status_code=400, detail="Invalid product type.")
+    elif collection == "cohorts":
+        _req("title"); _req("slug"); _num("price", minimum=0, required=True)
+        _num("seats_total", minimum=1, required=True, integer=True); _num("sort")
+    elif collection == "case-studies":
+        _req("headline"); _req("slug"); _num("sort")
+    elif collection == "testimonials":
+        _req("quote"); _req("name"); _num("sort")
+    elif collection == "promo-codes":
+        _req("code"); _num("value", minimum=0, required=True)
+        _num("min_amount", minimum=0); _num("max_uses", minimum=0, integer=True); _num("sort")
+        if (body.get("type") or "percent") not in ("percent", "flat"):
+            raise HTTPException(status_code=400, detail="Discount type must be 'percent' or 'flat'.")
+        if (body.get("applies_to") or "all") not in ("all", "product", "cohort"):
+            raise HTTPException(status_code=400, detail="'Applies to' must be all, product or cohort.")
+    elif collection == "bundles":
+        _req("title"); _req("slug"); _num("price", minimum=0, required=True); _num("sort")
+        ps = str(body.get("product_slug", "") or "").strip()
+        cs = str(body.get("cohort_slug", "") or "").strip()
+        if not ps or not await db.products.find_one({"slug": ps}):
+            raise HTTPException(status_code=400, detail=f"Bundle product '{ps or '(blank)'}' doesn't match any product. Check the product slug.")
+        if not cs or not await db.cohorts.find_one({"slug": cs}):
+            raise HTTPException(status_code=400, detail=f"Bundle cohort '{cs or '(blank)'}' doesn't match any cohort. Check the cohort slug.")
+
+
 @api_router.post("/admin/cms/{collection}")
 async def cms_upsert(collection: str, body: dict, admin: dict = Depends(require_admin)):
     coll = _CMS.get(collection)
@@ -5523,6 +5603,7 @@ async def cms_upsert(collection: str, body: dict, admin: dict = Depends(require_
         body["code"] = (body.get("code") or "").strip().upper()
         if not body["code"]:
             raise HTTPException(status_code=400, detail="Promo code is required.")
+    await _validate_cms(collection, body)
     if body.get("id"):
         body["updated_at"] = now_iso()
         await coll.update_one({"id": body["id"]}, {"$set": body})

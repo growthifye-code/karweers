@@ -16,7 +16,7 @@ export default function CommerceCheckoutModal({ open, item, meta, initialCode, o
   const [applying, setApplying] = useState(false);
   const [promo, setPromo] = useState(null); // {code, label, final_price, discount}
   const [isGift, setIsGift] = useState(false);
-  const [gift, setGift] = useState({ recipient_name: "", recipient_email: "", message: "" });
+  const [gift, setGift] = useState({ recipient_name: "", recipient_email: "", message: "", deliver_at: "" });
 
   const validateCode = useCallback(async (raw, silent = false) => {
     const c = (raw || "").trim();
@@ -99,7 +99,11 @@ export default function CommerceCheckoutModal({ open, item, meta, initialCode, o
                 className="w-full rounded-xl border border-border bg-background px-4 py-2.5 text-sm outline-none focus:border-[hsl(var(--primary))]" />
               <textarea value={gift.message} onChange={(e) => setGift({ ...gift, message: e.target.value })} rows={2} placeholder="Add a short message (optional)" data-testid="gift-message"
                 className="w-full rounded-xl border border-border bg-background px-4 py-2.5 text-sm outline-none focus:border-[hsl(var(--primary))]" />
-              <p className="text-xs text-muted-foreground">We'll email access straight to them.</p>
+              <label className="block text-xs text-muted-foreground">Deliver on (optional — great for birthdays)
+                <input type="date" value={gift.deliver_at || ""} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setGift({ ...gift, deliver_at: e.target.value })} data-testid="gift-deliver-at"
+                  className="mt-1 w-full rounded-xl border border-border bg-background px-4 py-2.5 text-sm text-foreground outline-none focus:border-[hsl(var(--primary))]" />
+              </label>
+              <p className="text-xs text-muted-foreground">{gift.deliver_at ? `We'll email their access on ${gift.deliver_at}.` : "We'll email access straight to them."}</p>
             </div>
           )}
 

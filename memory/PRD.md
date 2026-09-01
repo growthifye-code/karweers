@@ -22,6 +22,11 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - Client auth + admin panel
 
 ## Implemented (2026-06)
+### Catalogue Safeguards + Gift Scheduling (2026-06, latest)
+- **Catalogue Safeguards**: `_validate_cms` runs before every admin CMS upsert — coerces numeric fields (price/seats/value/etc.), enforces required fields per collection, validates enums (product type, promo type/applies_to), and crucially validates that a **bundle's product_slug and cohort_slug reference existing items** (so a typo can't publish a broken bundle). Returns a clear 400 message on any issue. Verified: bad bundle slug → 400, non-numeric price → 400, missing seats_total → 400, valid string price coerced fine.
+- **Gift Scheduling**: the gift block in checkout now has an optional "Deliver on" date. If set to a future date, the recipient's gift email is held and delivered by the hourly sweep (`_deliver_scheduled_gifts`) when the date arrives; the buyer still gets an immediate receipt noting the scheduled date. Order stores `gift.deliver_at`, `gift_deliver_at`, `gift_delivered`. Verified: order stores deliver_at; due-gift sweep query matches correctly.
+
+
 ### Gift Receipts + Full QA Pass (2026-06, latest)
 - **Gift Receipts**: when a purchase is a gift, the buyer now receives a clean, forwardable receipt (`send_gift_receipt_email`) showing the gift, recipient, optional message and amount paid — while the recipient separately gets their access email. Wired into `commerce_verify` (buyer gets a receipt instead of a download email on gifts).
 - **Full QA Pass** (iteration_18): full-stack test of the entire Tier-1 revenue suite — bundles, promo codes + analytics + auto-apply links, gift-a-seat + receipt, revenue dashboard, best-sellers, abandoned nudge, countdown timers, blueprint PDFs, admin CMS (all 6 collections incl. inactive). Result: **backend 40/40, frontend 100%**, zero critical/minor issues. All test data cleaned up. Test file: `/app/backend/tests/test_iteration18_revenue.py`.

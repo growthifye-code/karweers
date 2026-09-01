@@ -881,7 +881,7 @@ def send_gift_email(to_email: str, recipient_name: str, buyer_name: str, item_ti
 
 
 
-def send_gift_receipt_email(buyer_email: str, buyer_name: str, item_title: str, recipient_name: str, recipient_email: str, amount, message: str = "", site: str = "https://www.sudarshankarweer.com") -> str:
+def send_gift_receipt_email(buyer_email: str, buyer_name: str, item_title: str, recipient_name: str, recipient_email: str, amount, message: str = "", site: str = "https://www.sudarshankarweer.com", deliver_at: str = "") -> str:
     """Forwardable receipt to the buyer confirming what they gifted and to whom."""
     user = os.environ.get("GMAIL_USER")
     pwd = os.environ.get("GMAIL_APP_PASSWORD")
@@ -893,11 +893,16 @@ def send_gift_receipt_email(buyer_email: str, buyer_name: str, item_title: str, 
         amt = f"\u20b9{amount}"
     note = (f'<tr><td style="padding:6px 0;color:#6b7280;font-size:13px;">Your message</td>'
             f'<td style="padding:6px 0;color:#111;font-size:13px;text-align:right;">"{message}"</td></tr>' if message else "")
+    delivery_line = (f'<p style="font-size:14px;color:#374151;line-height:1.6;">We\'ll deliver it to '
+                     f'<strong>{recipient_name or recipient_email}</strong> on <strong>{deliver_at[:10]}</strong>. '
+                     f'Here\'s your receipt, which you\'re welcome to forward.</p>'
+                     if deliver_at else
+                     f'<p style="font-size:14px;color:#374151;line-height:1.6;">Thank you — your gift is on its way. '
+                     f'We\'ve emailed access directly to <strong>{recipient_name or recipient_email}</strong>. '
+                     f'Here\'s your receipt, which you\'re welcome to forward.</p>')
     inner = (
         f'<p style="font-size:15px;color:#111;">Hi {buyer_name or "there"},</p>'
-        f'<p style="font-size:14px;color:#374151;line-height:1.6;">Thank you — your gift is on its way. '
-        f'We\'ve emailed access directly to <strong>{recipient_name or recipient_email}</strong>. '
-        f'Here\'s your receipt, which you\'re welcome to forward.</p>'
+        f'{delivery_line}'
         f'<table style="width:100%;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;margin-top:14px;border-collapse:separate;">'
         f'<tr><td style="padding:6px 0;color:#6b7280;font-size:13px;">Gift</td><td style="padding:6px 0;color:#111;font-weight:600;font-size:13px;text-align:right;">{item_title}</td></tr>'
         f'<tr><td style="padding:6px 0;color:#6b7280;font-size:13px;">Recipient</td><td style="padding:6px 0;color:#111;font-size:13px;text-align:right;">{recipient_name or ""}{(" · " + recipient_email) if recipient_email else ""}</td></tr>'

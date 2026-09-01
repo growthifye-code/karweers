@@ -3215,7 +3215,7 @@ def _enrich_cards(items):
 
 async def _ensure_topic_profile(name: str, context: str) -> dict:
     import hashlib
-    key = hashlib.md5(f"{name}|{context}".lower().encode()).hexdigest()
+    key = hashlib.sha256(f"{name}|{context}".lower().encode()).hexdigest()
     doc = await db.topic_content.find_one({"_id": key})
     if doc:
         try:

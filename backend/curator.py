@@ -146,7 +146,7 @@ def _published_ts(v: dict) -> float:
 
 
 def _seed(video_id: str, salt: str) -> int:
-    return int(hashlib.md5(f"{salt}:{video_id}".encode()).hexdigest(), 16)
+    return int(hashlib.sha256(f"{salt}:{video_id}".encode()).hexdigest(), 16)
 
 
 def _dedupe(videos: list) -> list:

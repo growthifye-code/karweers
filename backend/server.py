@@ -4697,6 +4697,14 @@ async def list_strategy_tools():
              "tagline": t["tagline"], "what_it_is": t["what_it_is"]} for t in STRATEGY_TOOLS]
 
 
+@api_router.get("/strategy-tools-bundle.pdf")
+async def strategy_toolkit_bundle():
+    from strategy_pdf import build_toolkit_bundle_pdf
+    pdf = await asyncio.to_thread(build_toolkit_bundle_pdf)
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": 'attachment; filename="SK-Complete-Strategy-Toolkit.pdf"'})
+
+
 @api_router.get("/strategy-tools/{slug}.pdf")
 async def strategy_tool_pdf(slug: str):
     from strategy_tools import tool_by_slug
@@ -5703,6 +5711,72 @@ async def cms_delete(collection: str, item_id: str, admin: dict = Depends(requir
 @api_router.get("/admin/commerce/orders")
 async def admin_commerce_orders(admin: dict = Depends(require_admin)):
     return [_pub(d) for d in await db.orders.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)]
+
+
+@api_router.get("/admin/commerce/orders/export")
+async def admin_commerce_orders_export(admin: dict = Depends(require_admin)):
+    """Streams all orders as CSV for bookkeeping / GST filing."""
+    import csv as _csv
+    orders = await db.orders.find({}, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    buf = io.StringIO()
+    w = _csv.writer(buf)
+    w.writerow(["Date", "Order ID", "Buyer Name", "Buyer Email", "Item", "Kind",
+                "List Price (INR)", "Discount (INR)", "Amount Paid (INR)", "Promo Code",
+                "Status", "Paid At", "Razorpay Payment ID", "Gift Recipient", "Gift Recipient Email"])
+    for o in orders:
+        gift = o.get("gift") or {}
+        w.writerow([
+            (o.get("created_at") or "")[:19].replace("T", " "),
+            o.get("id", ""),
+            o.get("name", ""),
+            o.get("email", ""),
+            o.get("ref_title", ""),
+            o.get("kind", ""),
+            o.get("list_price", o.get("amount", "")),
+            o.get("discount", 0),
+            o.get("amount", ""),
+            o.get("promo_code") or "",
+            "paid" if o.get("paid") else (o.get("status") or ""),
+            (o.get("paid_at") or "")[:19].replace("T", " "),
+            o.get("razorpay_payment_id", ""),
+            gift.get("recipient_name", ""),
+            gift.get("recipient_email", ""),
+        ])
+    fname = f"sk-orders-{datetime.now(timezone.utc).date().isoformat()}.csv"
+    return Response(content=buf.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename={fname}"})
+
+
+@api_router.get("/me/orders")
+async def my_orders(user: dict = Depends(get_current_user)):
+    """The signed-in client's own purchases (matched by email), with download links + gifts sent."""
+    email = (user.get("email") or "").strip().lower()
+    if not email:
+        return {"purchases": [], "gifts_sent": []}
+    docs = await db.orders.find({"email": email, "paid": True}, {"_id": 0}).sort("paid_at", -1).to_list(500)
+    purchases, gifts_sent = [], []
+    for o in docs:
+        gift = o.get("gift") or {}
+        row = {
+            "id": o.get("id"),
+            "kind": o.get("kind"),
+            "title": o.get("ref_title"),
+            "amount": o.get("amount"),
+            "promo_code": o.get("promo_code"),
+            "discount": o.get("discount", 0),
+            "paid_at": o.get("paid_at") or o.get("created_at"),
+            "download_url": o.get("download_url") or "",
+        }
+        if gift.get("recipient_email"):
+            gifts_sent.append({**row,
+                               "recipient_name": gift.get("recipient_name", ""),
+                               "recipient_email": gift.get("recipient_email", ""),
+                               "message": gift.get("message", ""),
+                               "delivered": o.get("gift_delivered", True),
+                               "deliver_at": o.get("gift_deliver_at")})
+        else:
+            purchases.append(row)
+    return {"purchases": purchases, "gifts_sent": gifts_sent}
 
 
 @api_router.post("/admin/commerce/nudge-abandoned")

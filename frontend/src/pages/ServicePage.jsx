@@ -85,6 +85,19 @@ export default function ServicePage() {
         </div>
       </section>
 
+      {Array.isArray(svc.proof) && svc.proof.length > 0 && (
+        <section className="border-t border-border bg-[hsl(var(--primary))]/[0.06]" data-testid="proof-strip">
+          <div className="mx-auto grid max-w-7xl grid-cols-2 gap-6 px-6 py-10 lg:grid-cols-4 lg:px-10">
+            {svc.proof.map((p) => (
+              <div key={p.label} data-testid={`proof-${p.label}`} className="text-left">
+                <p className="font-display text-3xl font-black leading-none text-[hsl(var(--primary))] sm:text-4xl">{p.value}</p>
+                <p className="mt-2 text-sm text-muted-foreground">{p.label}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="border-t border-border py-24">
         <div className="mx-auto max-w-7xl px-6 lg:px-10">
           <h2 className="font-display text-3xl font-bold tracking-tight sm:text-4xl">The workflow</h2>

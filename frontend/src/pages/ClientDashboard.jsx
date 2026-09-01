@@ -10,6 +10,7 @@ import api, { track } from "@/lib/api";
 import {
   Sparkles, Calendar, BookOpen, GraduationCap, ArrowUpRight, LifeBuoy,
   ShieldCheck, Download, Trash2, Check, MessageSquarePlus, FileText, XCircle, Trophy,
+  ShoppingBag, Gift,
 } from "lucide-react";
 
 const PRIORITIES = ["low", "medium", "high"];
@@ -118,6 +119,66 @@ function ServiceDesk() {
     </section>
   );
 }
+
+const inr = (v) => "\u20b9" + Number(v || 0).toLocaleString("en-IN");
+const fmtDate = (s) => { try { return new Date(s).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }); } catch { return (s || "").slice(0, 10); } };
+
+function OrderHistory() {
+  const [data, setData] = useState({ purchases: [], gifts_sent: [] });
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    api.get("/me/orders").then((r) => setData(r.data || { purchases: [], gifts_sent: [] }))
+      .catch(() => {}).finally(() => setLoaded(true));
+  }, []);
+  const { purchases, gifts_sent } = data;
+  if (loaded && purchases.length === 0 && gifts_sent.length === 0) {
+    return (
+      <section className="mt-14" data-testid="order-history">
+        <div className="flex items-center gap-2"><ShoppingBag className="h-5 w-5 text-[hsl(var(--primary))]" /><h2 className="font-display text-2xl font-bold">My Purchases</h2></div>
+        <div className="mt-6 rounded-2xl border border-border bg-card p-6" data-testid="orders-empty">
+          <p className="text-sm text-muted-foreground">You haven't purchased anything yet. Explore playbooks, toolkits and cohorts.</p>
+          <Link to="/products" className="mt-4 inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-5 py-2.5 text-sm font-semibold text-[hsl(var(--primary-foreground))]">Browse products <ArrowUpRight className="h-4 w-4" /></Link>
+        </div>
+      </section>
+    );
+  }
+  if (!loaded) return null;
+  return (
+    <section className="mt-14" data-testid="order-history">
+      <div className="flex items-center gap-2"><ShoppingBag className="h-5 w-5 text-[hsl(var(--primary))]" /><h2 className="font-display text-2xl font-bold">My Purchases</h2></div>
+      {purchases.length > 0 && (
+        <div className="mt-6 space-y-3" data-testid="orders-list">
+          {purchases.map((o) => (
+            <div key={o.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card p-5" data-testid={`order-${o.id}`}>
+              <div>
+                <p className="font-display text-lg font-bold">{o.title}</p>
+                <p className="mt-1 text-xs text-muted-foreground capitalize">{o.kind} · {fmtDate(o.paid_at)} · Paid {inr(o.amount)}{o.promo_code ? ` · ${o.promo_code}` : ""}</p>
+              </div>
+              {o.download_url
+                ? <button onClick={() => window.open(o.download_url, "_blank")} data-testid={`order-download-${o.id}`} className="inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-4 py-2 text-sm font-semibold text-[hsl(var(--primary-foreground))] hover:-translate-y-0.5 transition-transform"><Download className="h-4 w-4" /> Download</button>
+                : <span className="rounded-full bg-secondary px-3 py-1.5 text-xs font-semibold text-muted-foreground">{o.kind === "cohort" ? "Seat booked" : "Delivered by email"}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      {gifts_sent.length > 0 && (
+        <div className="mt-8" data-testid="gifts-sent">
+          <div className="flex items-center gap-2"><Gift className="h-5 w-5 text-[hsl(var(--primary))]" /><h3 className="font-display text-lg font-bold">Gifts you've sent</h3></div>
+          <div className="mt-4 space-y-3">
+            {gifts_sent.map((g) => (
+              <div key={g.id} className="rounded-2xl border border-border bg-card p-5" data-testid={`gift-${g.id}`}>
+                <p className="font-display font-bold">{g.title}</p>
+                <p className="mt-1 text-xs text-muted-foreground">To {g.recipient_name || g.recipient_email} ({g.recipient_email}) · {fmtDate(g.paid_at)} · {inr(g.amount)}</p>
+                <p className="mt-1 text-xs font-semibold text-[hsl(var(--primary))]">{g.delivered ? "Delivered" : (g.deliver_at ? `Scheduled for ${fmtDate(g.deliver_at)}` : "Pending delivery")}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 
 export default function ClientDashboard() {
   const { user, logout } = useAuth();
@@ -288,6 +349,8 @@ export default function ClientDashboard() {
             </div>
           )}
         </section>
+
+        <OrderHistory />
 
         <ServiceDesk />
 

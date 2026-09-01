@@ -11,15 +11,18 @@ function ToolDownloadModal({ tool, onClose }) {
   const [captcha, setCaptcha] = useState("");
   const [busy, setBusy] = useState(false);
   if (!tool) return null;
+  const isBundle = tool.slug === "__bundle__";
+  const pdfUrl = isBundle ? `${API}/strategy-tools-bundle.pdf` : `${API}/strategy-tools/${tool.slug}.pdf`;
+  const source = isBundle ? "strategy-toolkit-bundle" : `strategy-tool-${tool.slug}`;
   const submit = async (e) => {
     e.preventDefault();
     if (!form.email) { toast.error("Please enter your email."); return; }
     if (!captcha) { toast.error("Please complete the captcha."); return; }
     setBusy(true);
     try {
-      await api.post("/nurture/subscribe", { email: form.email, name: form.name, source: `strategy-tool-${tool.slug}`, captcha_token: captcha });
+      await api.post("/nurture/subscribe", { email: form.email, name: form.name, source, captcha_token: captcha });
       toast.success("Enjoy the toolkit — your download is starting.");
-      window.open(`${API}/strategy-tools/${tool.slug}.pdf`, "_blank");
+      window.open(pdfUrl, "_blank");
       onClose();
     } catch (err) {
       toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Something went wrong.");
@@ -30,12 +33,12 @@ function ToolDownloadModal({ tool, onClose }) {
       <div className="w-full max-w-md rounded-3xl border border-border bg-card p-7 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[hsl(var(--primary))]">Free toolkit</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[hsl(var(--primary))]">{isBundle ? "Complete toolkit" : "Free toolkit"}</p>
             <h3 className="mt-1 font-display text-xl font-bold leading-tight">{tool.name}</h3>
           </div>
           <button onClick={onClose} data-testid="tool-modal-close" className="grid h-9 w-9 place-items-center rounded-full border border-border hover:bg-secondary"><X className="h-4 w-4" /></button>
         </div>
-        <p className="mt-3 text-sm text-muted-foreground">Get the branded worksheet + operational guidelines as a PDF. Pop in your email and it's yours.</p>
+        <p className="mt-3 text-sm text-muted-foreground">{isBundle ? "Get all 13 frameworks in one premium PDF — diagrams and operational guidelines. Pop in your email and it's yours." : "Get the branded worksheet + operational guidelines as a PDF. Pop in your email and it's yours."}</p>
         <form onSubmit={submit} className="mt-5 space-y-3">
           <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="First name" data-testid="tool-name" className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm outline-none focus:border-[hsl(var(--primary))]" />
           <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} type="email" placeholder="you@company.com" data-testid="tool-email" className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm outline-none focus:border-[hsl(var(--primary))]" />

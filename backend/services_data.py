@@ -51,6 +51,12 @@ SERVICES = [
         "title": "M&A Advisory",
         "tagline": "Sudarshan's signature strength — deals won after signing, not just at the table.",
         "hero_image": IMG["finance"],
+        "proof": [
+            {"value": "$2B+", "label": "Transaction value advised"},
+            {"value": "15+", "label": "Buy & sell-side deals"},
+            {"value": "Loyalty", "label": "Airline programme carve-outs"},
+            {"value": "6", "label": "Sectors covered"},
+        ],
         "overview": "End-to-end M&A advisory — thesis, target screening, valuation, diligence, structuring and the integration that actually captures value. Sudarshan brings hands-on deal experience across sectors, including complex carve-outs such as airline loyalty programmes — where a frequent-flyer business is separated, valued and monetised as a standalone asset. Most deals destroy value in integration; these are built to create it.",
         "workflow": [
             {"key": "thesis", "title": "Thesis & Screening", "summary": "Buy a capability, not a logo.",
@@ -84,6 +90,12 @@ SERVICES = [
         "title": "Fund Raising & Capital",
         "tagline": "Over $3 billion raised — capital strategy from an operator who has closed the rounds.",
         "hero_image": IMG["finance"],
+        "proof": [
+            {"value": "$3B+", "label": "Capital raised & closed"},
+            {"value": "Equity·Debt·Blended", "label": "Instruments structured"},
+            {"value": "Project→Corporate", "label": "Across funding stages"},
+            {"value": "Multi-sector", "label": "Energy, infra & industrials"},
+        ],
         "overview": "Capital-raising advisory across equity, debt and blended finance — from readiness and narrative to structuring, investor engagement and close. Sudarshan has led and supported fund-raises totalling over $3 billion successfully completed, spanning project, growth and corporate capital. Capital follows credibility; we do the work that gets you funded in the quarters before the raise, not the week of it.",
         "workflow": [
             {"key": "readiness", "title": "Capital Readiness", "summary": "Be bankable before you fundraise.",

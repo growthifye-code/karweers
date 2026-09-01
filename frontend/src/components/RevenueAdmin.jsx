@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, X, Package, Users, FileText, Quote, Receipt, Tag, Link2 as LinkIcon, Package2, LayoutDashboard, Search } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Package, Users, FileText, Quote, Receipt, Tag, Link2 as LinkIcon, Package2, LayoutDashboard, Search, Download } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import api from "@/lib/api";
 import { formatApiErrorDetail } from "@/context/AuthContext";
@@ -237,6 +237,7 @@ function CollectionPanel({ collection }) {
 function OrdersPanel() {
   const [orders, setOrders] = useState([]);
   const [nudging, setNudging] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [q, setQ] = useState("");
   useEffect(() => { api.get("/admin/commerce/orders").then((r) => setOrders(r.data)).catch(() => {}); }, []);
   const revenue = orders.filter((o) => o.paid).reduce((s, o) => s + Number(o.amount || 0), 0);
@@ -248,6 +249,22 @@ function OrdersPanel() {
     catch { toast.error("Couldn't run the nudge sweep."); }
     finally { setNudging(false); }
   };
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const res = await api.get("/admin/commerce/orders/export", { responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: "text/csv" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `sk-orders-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success("Orders exported.");
+    } catch { toast.error("Couldn't export orders."); }
+    finally { setExporting(false); }
+  };
   return (
     <div data-testid="cms-panel-orders">
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -257,9 +274,12 @@ function OrdersPanel() {
           <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs text-muted-foreground">Revenue</p><p className="font-display text-2xl font-bold text-[hsl(var(--primary))]">{inr(revenue)}</p></div>
         </div>
       </div>
-      <div className="mb-4 flex items-center justify-between rounded-2xl border border-border bg-secondary/30 px-4 py-3">
+      <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-border bg-secondary/30 px-4 py-3">
         <p className="text-sm text-muted-foreground">Email everyone who started but didn't pay (idle 1-24h) a one-tap finish link with their code.</p>
-        <button onClick={nudge} disabled={nudging} data-testid="nudge-abandoned" className="shrink-0 rounded-full bg-[hsl(var(--primary))] px-4 py-2 text-sm font-semibold text-[hsl(var(--primary-foreground))] disabled:opacity-60">{nudging ? "Sending…" : "Nudge abandoned"}</button>
+        <div className="flex shrink-0 items-center gap-2">
+          <button onClick={exportCsv} disabled={exporting || orders.length === 0} data-testid="export-orders" className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-4 py-2 text-sm font-semibold hover:border-[hsl(var(--primary))] disabled:opacity-60"><Download className="h-4 w-4" />{exporting ? "Exporting…" : "Download CSV"}</button>
+          <button onClick={nudge} disabled={nudging} data-testid="nudge-abandoned" className="rounded-full bg-[hsl(var(--primary))] px-4 py-2 text-sm font-semibold text-[hsl(var(--primary-foreground))] disabled:opacity-60">{nudging ? "Sending…" : "Nudge abandoned"}</button>
+        </div>
       </div>
       <div className="relative mb-4">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

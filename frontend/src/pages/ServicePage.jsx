@@ -7,6 +7,7 @@ import Footer from "@/components/Footer";
 import Seo from "@/components/Seo";
 import api from "@/lib/api";
 import { SK_PORTRAITS } from "@/lib/assets";
+import StrategyToolkit from "@/components/StrategyToolkit";
 
 export default function ServicePage() {
   const { slug, phase } = useParams();
@@ -115,6 +116,8 @@ export default function ServicePage() {
           </div>
         </div>
       </section>
+
+      {svc.slug === "business-strategy" && <StrategyToolkit />}
 
       <section className="border-t border-border py-20 text-center">
         <div className="mx-auto max-w-2xl px-6">

@@ -1,0 +1,27 @@
+{
+  "summary": "Iteration 19: Verified new Services build-out (business-strategy / ma-advisory / fund-raising with signature flag), 13-tool Strategy Toolkit, 6 Strategy Insights, PDF generation, and frontend integration. Backend: 14/14 pytest passed. Frontend: /services order + 3 signature badges + 8 navbar labels correct; /services/business-strategy shows 4 phases + strategy-toolkit (13 tools) + strategy-insights (6 cards); email-gate modal opens & form fills; hCaptcha renders (real sitekey, not test — requires user click); ma-advisory shows airline loyalty/frequent-flyer carve-out; fund-raising shows '$3 billion'; /strategy-insights/ma-value-creation renders title + 4 sections. No 'AI' word anywhere on tested pages.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Tool download email-gate", "issue": "hCaptcha uses production sitekey (73c8f63e-...) rather than the hCaptcha test sitekey (10000000-ffff-ffff-ffff-000000000001). Review request said preview auto-passes; in reality a user click on the hCaptcha checkbox is still required. Not a blocker — modal, email input and submit button all wire correctly to /api/nurture/subscribe. Full end-to-end submit cannot be automated in headless Playwright without solving captcha.", "affected_selectors": ["tool-download-submit"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration19_strategy.py", "/app/test_reports/pytest/iteration_19.xml"],
+  "action_items": [
+    "Optional: switch REACT_APP_HCAPTCHA_SITEKEY to the hCaptcha test sitekey (10000000-ffff-ffff-ffff-000000000001) on the preview host so the tool-download flow can be end-to-end automated. Current behavior is otherwise correct."
+  ],
+  "critical_code_review_comments": [
+    "server.py is >5800 lines — should be split into routers (services, strategy, deals, etc). Not blocking iteration 19 but growing risk.",
+    "server.py uses deprecated @app.on_event startup/shutdown — migrate to FastAPI lifespan handlers.",
+    "Route ordering in server.py correctly places /strategy-tools/{slug}.pdf before /strategy-tools/{slug} — verified working (Ansoff & Fishbone PDFs both return valid %PDF)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration19_strategy.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "None (pure read-only + one nurture subscribe attempt with TEST_ email prefix on business-strategy modal).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All new /api/services, /api/strategy-tools (+ .pdf), /api/strategy-insights endpoints verified via /app/backend/tests/test_iteration19_strategy.py. Run with: cd /app/backend && PYTHONPATH=/app/backend pytest tests/test_iteration19_strategy.py -v -o addopts=''. The addopts override is needed because /app/backend/pytest.ini adds -n auto/--dist loadscope from pytest-xdist which the local ini requires. Frontend verified on /services, /services/business-strategy (toolkit modal), /services/ma-advisory, /services/fund-raising, /strategy-tools, /strategy-insights/ma-value-creation. Note: hCaptcha on preview uses real sitekey — automated captcha solve is not possible; verify manually or switch sitekey.",
+  "rca of the issue": "N/A — no bugs found."
+}

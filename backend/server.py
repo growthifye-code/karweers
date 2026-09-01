@@ -4669,11 +4669,17 @@ async def booking_reschedule_request(body: TokenIn, background_tasks: Background
 
 
 # ---------------- Services ----------------
+_SERVICE_ORDER = ["business-strategy", "ma-advisory", "fund-raising", "premium-consultation",
+                  "business-coaching", "re-storage-hydrogen", "green-climate-financing", "asset-monetisation"]
+
+
 @api_router.get("/services")
 async def list_services():
+    ordered = sorted(SERVICE_PAGES, key=lambda s: _SERVICE_ORDER.index(s["slug"]) if s["slug"] in _SERVICE_ORDER else 99)
     return [{"slug": s["slug"], "title": s["title"], "tagline": s["tagline"],
-             "overview": s["overview"], "portrait": s["portrait"], "hero_image": s["hero_image"]}
-            for s in SERVICE_PAGES]
+             "overview": s["overview"], "portrait": s["portrait"], "hero_image": s["hero_image"],
+             "signature": s.get("signature", False)}
+            for s in ordered]
 
 
 @api_router.get("/services/{slug}")
@@ -4682,6 +4688,51 @@ async def get_service(slug: str):
         if s["slug"] == slug:
             return s
     raise HTTPException(status_code=404, detail="Service not found")
+
+
+@api_router.get("/strategy-tools")
+async def list_strategy_tools():
+    from strategy_tools import STRATEGY_TOOLS
+    return [{"slug": t["slug"], "name": t["name"], "category": t["category"],
+             "tagline": t["tagline"], "what_it_is": t["what_it_is"]} for t in STRATEGY_TOOLS]
+
+
+@api_router.get("/strategy-tools/{slug}.pdf")
+async def strategy_tool_pdf(slug: str):
+    from strategy_tools import tool_by_slug
+    from strategy_pdf import build_tool_pdf
+    t = tool_by_slug(slug)
+    if not t:
+        raise HTTPException(status_code=404, detail="Tool not found")
+    pdf = await asyncio.to_thread(build_tool_pdf, t)
+    fname = f"SK-{slug}.pdf"
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+@api_router.get("/strategy-tools/{slug}")
+async def get_strategy_tool(slug: str):
+    from strategy_tools import tool_by_slug
+    t = tool_by_slug(slug)
+    if not t:
+        raise HTTPException(status_code=404, detail="Tool not found")
+    return t
+
+
+@api_router.get("/strategy-insights")
+async def list_strategy_insights():
+    from strategy_insights import STRATEGY_INSIGHTS
+    return [{"slug": a["slug"], "title": a["title"], "dek": a["dek"],
+             "read_time": a["read_time"], "category": a["category"]} for a in STRATEGY_INSIGHTS]
+
+
+@api_router.get("/strategy-insights/{slug}")
+async def get_strategy_insight(slug: str):
+    from strategy_insights import insight_by_slug
+    a = insight_by_slug(slug)
+    if not a:
+        raise HTTPException(status_code=404, detail="Insight not found")
+    return a
 
 
 # ---------------- Deals ticker (Google News RSS) ----------------

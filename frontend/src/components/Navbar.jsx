@@ -6,11 +6,14 @@ import { useAuth } from "@/context/AuthContext";
 import { CONTACT } from "@/lib/assets";
 
 export const SERVICE_LINKS = [
+  { slug: "business-strategy", label: "Business & Growth Strategy" },
+  { slug: "ma-advisory", label: "M&A Advisory" },
+  { slug: "fund-raising", label: "Fund Raising & Capital" },
   { slug: "premium-consultation", label: "Premium 1:1 Consultation" },
+  { slug: "business-coaching", label: "Business Coaching" },
   { slug: "re-storage-hydrogen", label: "RE, Storage & Green Hydrogen" },
   { slug: "green-climate-financing", label: "Green & Climate Financing" },
   { slug: "asset-monetisation", label: "Government Asset Monetisation" },
-  { slug: "business-coaching", label: "Business Coaching" },
 ];
 
 export const PROGRAM_LINKS = [

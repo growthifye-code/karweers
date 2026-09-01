@@ -22,6 +22,14 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - Client auth + admin panel
 
 ## Implemented (2026-06)
+### Services Build-Out: Strategy, M&A, Fund Raising + Strategy Toolkit (2026-06, latest)
+- **3 new signature services** (services_data.py, flagged `signature:true`, ordered first): **Business & Growth Strategy** (phases: Market Entry, Feasibility, Growth, Portfolio Optimisation), **M&A Advisory** (copy highlights airline loyalty-programme / frequent-flyer carve-out & monetisation experience), **Fund Raising & Capital** (copy highlights "over $3 billion raised"). Full service order: strategy → M&A → fund-raising → premium-consultation → business-coaching → RE/storage → green-financing → asset-monetisation (via `_SERVICE_ORDER` in server.py). Signature badge shown on ServicesIndex cards.
+- **13-tool Strategy Toolkit** (strategy_tools.py): Ansoff, SWOT/TOWS, McKinsey 7S, Porter's Five Forces, BCG, PESTLE, Value Chain, Balanced Scorecard, VRIO, Blue Ocean ERRC, 5 Whys, Fishbone, Issue Tree (MECE). Each renders a branded PDF worksheet + operational guidelines (strategy_pdf.py, reportlab). Endpoints: `/api/strategy-tools`, `/api/strategy-tools/{slug}`, `/api/strategy-tools/{slug}.pdf` (registered before the `{slug}` route). Downloads are **email-gated** → `/api/nurture/subscribe` then PDF opens (feeds nurture funnel).
+- **6 strategy insight blogs** (strategy_insights.py, McKinsey/BCG/Bain-caliber): `/api/strategy-insights` + `/{slug}`. Reader at `/strategy-insights/:slug`.
+- Frontend: `StrategyToolkit.jsx` (tools + insights + email-gate modal) shown on the Business Strategy service page and a dedicated `/strategy-tools` page; `StrategyInsightPage.jsx` reader; Navbar SERVICE_LINKS reordered + expanded to 8.
+- Tested iteration_19: backend 14/14, frontend 100%, zero bugs. (hCaptcha uses the live sitekey site-wide; backend auto-accepts on preview — same UX as all other forms.)
+
+
 ### Gift Preview + Order Search (2026-06, latest)
 - **Gift Preview**: buyers can preview the exact gift email before paying. Refactored the gift email into a shared `render_gift_email_html()` (used by both the real email and the preview), exposed via `POST /api/commerce/gift-preview`. The checkout modal shows a "Preview the gift email" button that renders the real HTML in an iframe (recipient name, buyer name, message and scheduled date all reflected). Verified via curl + screenshot.
 - **Order Search**: the admin Orders panel has a search box (data-testid order-search) that filters live by buyer name, email, item title, promo code, or gift recipient name/email — client-side over the loaded orders.

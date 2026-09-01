@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, Star } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import Seo from "@/components/Seo";
@@ -30,6 +30,11 @@ export default function ServicesIndex() {
             <Link key={s.slug} to={`/services/${s.slug}`} data-testid={`service-card-${s.slug}`} className="group grid gap-0 overflow-hidden rounded-2xl border border-border bg-card transition-transform hover:-translate-y-1 sm:grid-cols-[1fr_140px]">
               <div className="p-8">
                 <p className="font-display text-sm font-bold text-muted-foreground">0{i + 1}</p>
+                {s.signature && (
+                  <span data-testid={`signature-badge-${s.slug}`} className="mt-2 inline-flex items-center gap-1 rounded-full bg-[hsl(var(--primary))]/15 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-[hsl(var(--primary))]">
+                    <Star className="h-3 w-3" /> Signature strength
+                  </span>
+                )}
                 <h3 className="mt-3 font-display text-xl font-bold leading-snug group-hover:text-[hsl(var(--primary))]">{s.title}</h3>
                 <p className="mt-3 text-sm leading-relaxed text-muted-foreground line-clamp-3">{s.overview}</p>
                 <span className="mt-5 inline-flex items-center gap-1 text-sm font-semibold text-[hsl(var(--primary))]">Explore <ArrowUpRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" /></span>

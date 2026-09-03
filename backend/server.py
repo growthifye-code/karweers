@@ -103,21 +103,23 @@ def verify_captcha(token, ip=None, request=None):
     if HCAPTCHA_SECRET == _HCAPTCHA_TEST_SECRET:
         return True
     try:
+        # Only `secret` + `response` are required. The optional `sitekey`/`remoteip`
+        # params can only ADD failure modes (e.g. sitekey-secret-mismatch), so we omit
+        # them for a robust, standard verification.
         form = {"secret": HCAPTCHA_SECRET, "response": token}
-        if HCAPTCHA_SITEKEY:
-            form["sitekey"] = HCAPTCHA_SITEKEY
-        if ip:
-            form["remoteip"] = ip
         r = requests.post("https://api.hcaptcha.com/siteverify", data=form, timeout=10)
         data = r.json()
         ok = data.get("success", False)
     except Exception:
         raise HTTPException(status_code=503, detail="Captcha service unavailable")
     if not ok:
+        codes = data.get("error-codes") or []
         # Diagnostic only: hCaptcha error-codes + hostname (never the token/secret).
         logger.warning("hCaptcha verification failed: error-codes=%s hostname=%s sitekey=%s",
-                       data.get("error-codes"), data.get("hostname"), HCAPTCHA_SITEKEY)
-        raise HTTPException(status_code=403, detail="Captcha verification failed")
+                       codes, data.get("hostname"), HCAPTCHA_SITEKEY)
+        # Surface the exact hCaptcha code so config issues are diagnosable without server logs.
+        suffix = f" [{', '.join(codes)}]" if codes else ""
+        raise HTTPException(status_code=403, detail=f"Captcha verification failed{suffix}")
     return True
 
 

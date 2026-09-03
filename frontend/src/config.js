@@ -16,10 +16,15 @@ export function getAdminPath() {
 }
 
 export function getHcaptchaSitekey() {
+  // Prefer the build-time env value (the source of truth after a key rotation) so a stale
+  // localStorage cache from a previous key can never serve an outdated sitekey. Fall back to
+  // the backend-provided value only when the env var is unset.
+  const envKey = process.env.REACT_APP_HCAPTCHA_SITEKEY || "";
+  if (envKey) return envKey;
   try {
-    return localStorage.getItem("sk_hcaptcha_sitekey") || process.env.REACT_APP_HCAPTCHA_SITEKEY || "";
+    return localStorage.getItem("sk_hcaptcha_sitekey") || "";
   } catch {
-    return process.env.REACT_APP_HCAPTCHA_SITEKEY || "";
+    return "";
   }
 }
 

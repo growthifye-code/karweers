@@ -11,6 +11,7 @@ import logging
 import uuid
 import time
 import io
+import re
 import random
 import hashlib
 import razorpay
@@ -4747,7 +4748,7 @@ async def list_strategy_tools():
 @api_router.get("/strategy-tools-bundle.pdf")
 async def strategy_toolkit_bundle(request: Request):
     await _enforce_collateral_gate(request, "tool-bundle")
-    await _record_collateral_download(key="tool-bundle")
+    await _record_collateral_download(key="tool-bundle", ip=_client_ip(request))
     managed = await _managed_collateral_response("tool-bundle")
     if managed:
         return managed
@@ -4760,7 +4761,7 @@ async def strategy_toolkit_bundle(request: Request):
 @api_router.get("/strategy-tools/{slug}.pdf")
 async def strategy_tool_pdf(slug: str, request: Request):
     await _enforce_collateral_gate(request, f"tool:{slug}")
-    await _record_collateral_download(key=f"tool:{slug}")
+    await _record_collateral_download(key=f"tool:{slug}", ip=_client_ip(request))
     managed = await _managed_collateral_response(f"tool:{slug}")
     if managed:
         return managed
@@ -6745,7 +6746,7 @@ async def admin_promo_analytics(admin: dict = Depends(require_admin)):
 @api_router.get("/blueprint/starter.pdf")
 async def blueprint_starter(request: Request):
     await _enforce_collateral_gate(request, "leadmagnet:starter")
-    await _record_collateral_download(key="leadmagnet:starter")
+    await _record_collateral_download(key="leadmagnet:starter", ip=_client_ip(request))
     managed = await _managed_collateral_response("leadmagnet:starter")
     if managed:
         return managed
@@ -6778,13 +6779,21 @@ async def blueprint_download(order_id: str):
 # manual upload, AI-generate, edit and realtime publish (+ notify).
 # ============================================================================
 
-async def _record_collateral_download(*, key: str = None, cid: str = None):
-    """Increment cumulative + weekly download counters for a collateral item."""
-    wk = _iso_week()
+async def _record_collateral_download(*, key: str = None, cid: str = None, ip: str = None):
+    """Increment cumulative + weekly download counters, deduped per IP+item+day so the
+    leaderboard/analytics can't be inflated by hammering the endpoint."""
     q = {"id": cid} if cid else {"key": key}
-    doc = await db.collateral.find_one(q, {"_id": 0, "dl_week": 1, "downloads_week": 1})
+    doc = await db.collateral.find_one(q, {"_id": 0, "id": 1, "dl_week": 1, "downloads_week": 1})
     if doc is None:
         return
+    if ip:
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        dedup_key = f"{ip}:{doc.get('id') or key}:{day}"
+        try:
+            await db.collateral_dl_dedup.insert_one({"_id": dedup_key, "at": datetime.now(timezone.utc)})
+        except DuplicateKeyError:
+            return  # already counted this IP for this item today
+    wk = _iso_week()
     dw = int((doc or {}).get("downloads_week", 0) or 0) + 1 if (doc or {}).get("dl_week") == wk else 1
     await db.collateral.update_one(q, {"$inc": {"downloads": 1}, "$set": {"dl_week": wk, "downloads_week": dw}})
 
@@ -7026,11 +7035,13 @@ async def admin_upload_collateral(cid: str, file: UploadFile = File(...), admin:
 
 
 @api_router.get("/collateral/{cid}/file")
-async def serve_collateral_file(cid: str):
+async def serve_collateral_file(cid: str, request: Request):
     doc = await db.collateral.find_one({"id": cid, "is_deleted": {"$ne": True}}, {"_id": 0})
     f = (doc or {}).get("file") or {}
     if not doc or not doc.get("live") or not f.get("storage_path"):
         raise HTTPException(status_code=404, detail="File not available")
+    if doc.get("gated") and not _download_gate_ok(request):
+        raise HTTPException(status_code=403, detail="gated")
     from storage_helper import get_object
     try:
         data, ctype = await asyncio.to_thread(get_object, f["storage_path"])
@@ -7038,7 +7049,7 @@ async def serve_collateral_file(cid: str):
         logger.exception("collateral serve failed for %s", cid)
         raise HTTPException(status_code=502, detail="Storage read failed")
     fname = f.get("filename") or f"{doc.get('key')}.bin"
-    await _record_collateral_download(cid=cid)
+    await _record_collateral_download(cid=cid, ip=_client_ip(request))
     return Response(content=data, media_type=f.get("content_type") or ctype,
                     headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
@@ -7164,18 +7175,20 @@ class DownloadUnlock(BaseModel):
     source: Optional[str] = "gated-download"
 
 
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
 @api_router.post("/collateral/unlock")
 async def collateral_unlock(body: DownloadUnlock, request: Request, response: Response):
-    """Capture an email into the nurture funnel and set a 30-day unlock cookie for gated downloads."""
+    """Quietly capture an email into the funnel and set a 30-day unlock cookie for gated downloads.
+    Does NOT send email (the /nurture/subscribe path, which is captcha-gated, owns welcome emails) —
+    this prevents the endpoint from being abused to email arbitrary addresses."""
     if body.email:
         email = body.email.strip().lower()
-        existing = await db.subscribers.find_one({"email": email}, {"_id": 0, "email": 1})
-        await db.subscribers.update_one({"email": email}, {"$setOnInsert": {
-            "email": email, "name": body.name or "there", "source": body.source or "gated-download",
-            "created_at": now_iso()}}, upsert=True)
-        if not existing and os.environ.get("GMAIL_APP_PASSWORD"):
-            loop = asyncio.get_event_loop()
-            loop.run_in_executor(None, lambda: send_nurture_welcome_email(email, body.name or "there", PUBLIC_SITE, _unsub_url(email)))
+        if EMAIL_RE.match(email):
+            await db.subscribers.update_one({"email": email}, {"$setOnInsert": {
+                "email": email, "name": (body.name or "there")[:120], "source": (body.source or "gated-download")[:80],
+                "created_at": now_iso()}}, upsert=True)
     token = pyjwt.encode({"purpose": "dl_gate", "exp": datetime.now(timezone.utc) + timedelta(days=30)},
                          get_jwt_secret(), algorithm="HS256")
     response.set_cookie("dl_gate", token, httponly=True, secure=True, samesite="none", max_age=30 * 24 * 3600, path="/")
@@ -7245,6 +7258,7 @@ async def startup():
     await _ensure_index(db.insight_view_dedup, "at", expireAfterSeconds=172800)
     await _ensure_index(db.collateral, "key", unique=True)
     await _ensure_index(db.collateral, "id", unique=True)
+    await _ensure_index(db.collateral_dl_dedup, "at", expireAfterSeconds=172800)
     try:
         from storage_helper import init_storage
         await asyncio.to_thread(init_storage)

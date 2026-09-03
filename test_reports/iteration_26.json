@@ -1,0 +1,29 @@
+{
+  "summary": "Iteration 26 — analytics counters, gate enforcement/unlock/toggle, and bulk-refresh guard/status all verified. Backend pytest: 9/9 passing (list surface with total_downloads/leaderboard/refresh + per-item downloads/downloads_week/gated/gatable; /api/strategy-tools now includes 'gated' bool per tool; gated PDF → 403 {detail:'gated'} without dl_gate cookie; POST /api/collateral/unlock returns {ok:true}, sets httpOnly dl_gate cookie, upserts into db.subscribers; download with cookie → 200 pdf + counter incremented + item appears in leaderboard; admin /gate toggle flips gated true↔false and enforces/permits accordingly; GET /admin/collateral/ai-refresh-status returns running/total/done/finished_at; POST /admin/collateral/ai-refresh-all returns 409 when app_meta.collateral_refresh.running=true (verified WITHOUT triggering a real 14-PDF run). Frontend: /admin Collateral tab renders collateral-refresh-panel + collateral-bulk-refresh (NOT clicked), collateral-leaderboard ('Top downloaded'), 15 collateral-gate-<id> toggles, downloads badges ('N (N/wk)'), and 'Email-gated'/'Open' badges per card. Public /strategy-tools: clicking a GATED tool (tool-download-ansoff-matrix) opens tool-download-modal ✓; toggling swot-tows to open and clicking tool-download-swot-tows does NOT open the modal (direct download) ✓. Note: collateral-refresh-progress element only renders when a refresh is running/finished — not a bug.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration26_downloads.py",
+    "/app/test_reports/pytest/iteration26.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py has grown past 7300 lines — collateral/gate/download/admin logic should live in its own module (recurring comment from iter 25).",
+    "FastAPI on_event startup/shutdown still deprecated — migrate to lifespan handlers.",
+    "_bulk_ai_refresh has no cancellation / stale-lock recovery: if the backend restarts mid-run, app_meta.collateral_refresh.running stays true and blocks further refreshes with 409 permanently until manually reset. Consider a stale-lock TTL (e.g. reset if started_at older than 30 min without progress)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration26_downloads.py"
+  ],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "100% (all target testids present, gated/open behavior verified on /strategy-tools)"},
+  "test_credentials": "sudarshan@karweers.com / Sudarshan@2026 — preview accepts captcha_token='x' with consent:true.",
+  "seed_data_creation": "None persisted. Toggled ansoff-matrix (kept gated=true) and swot-tows (temporarily gated=false, then reverted to gated=true). Reset db.collateral counters on tool:ansoff-matrix to downloads=0/downloads_week=0. Deleted subscribers with email ~ ^test_iter26_ . Reset app_meta.collateral_refresh.running=false (never left as true).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend tests at /app/backend/tests/test_iteration26_downloads.py. Run: `cd /app/backend && MONGO_URL=mongodb://localhost:27017 DB_NAME=test_database PYTHONPATH=/app/backend pytest tests/test_iteration26_downloads.py -v`. IMPORTANT: the tool slug in the problem statement (energy-strategy-hub) is not a real strategy tool — actual keys are e.g. 'tool:ansoff-matrix', 'tool:swot-tows', etc.; the URL 'energy-strategy-hub.preview...' is just the preview host. Admin list returns keys like 'tool:<slug>'. To test 409 on ai-refresh-all WITHOUT triggering a real 14-PDF AI run, directly toggle db.app_meta._id=collateral_refresh running:true, POST, assert 409, then reset. Never click frontend collateral-bulk-refresh. Frontend admin auth: POST /api/auth/login → set localStorage.sk_token via page.add_init_script BEFORE navigating to /admin (otherwise the initial /auth/me call fails and redirects to /login).",
+  "rca of the issue": "N/A — no bugs found."
+}

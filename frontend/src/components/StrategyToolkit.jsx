@@ -21,6 +21,8 @@ function ToolDownloadModal({ tool, onClose }) {
     setBusy(true);
     try {
       await api.post("/nurture/subscribe", { email: form.email, name: form.name, source, captcha_token: captcha });
+      // Set the download-unlock cookie so the gated PDF passes the backend gate.
+      await api.post("/collateral/unlock", { email: form.email, name: form.name, source });
       toast.success("Enjoy the toolkit — your download is starting.");
       window.open(pdfUrl, "_blank");
       onClose();
@@ -61,6 +63,14 @@ export default function StrategyToolkit({ showInsights = true }) {
     if (showInsights) api.get("/strategy-insights").then((r) => setInsights(r.data)).catch(() => {});
   }, [showInsights]);
 
+  const handleDownload = (t) => {
+    if (t.gated === false) {
+      window.open(`${API}/strategy-tools/${t.slug}.pdf`, "_blank");
+    } else {
+      setActive(t);
+    }
+  };
+
   return (
     <>
       <section className="border-t border-border bg-secondary/30 py-16 lg:py-20" data-testid="strategy-toolkit">
@@ -74,7 +84,7 @@ export default function StrategyToolkit({ showInsights = true }) {
                 <span className="text-[11px] font-bold uppercase tracking-wide text-[hsl(var(--primary))]">{t.category}</span>
                 <h3 className="mt-2 font-display text-lg font-bold leading-snug">{t.name}</h3>
                 <p className="mt-2 flex-1 text-sm leading-relaxed text-muted-foreground line-clamp-3">{t.tagline}</p>
-                <button onClick={() => setActive(t)} data-testid={`tool-download-${t.slug}`} className="mt-5 inline-flex items-center gap-1.5 self-start rounded-full border border-border px-4 py-2 text-sm font-semibold transition-colors group-hover:bg-[hsl(var(--primary))] group-hover:text-[hsl(var(--primary-foreground))]">
+                <button onClick={() => handleDownload(t)} data-testid={`tool-download-${t.slug}`} className="mt-5 inline-flex items-center gap-1.5 self-start rounded-full border border-border px-4 py-2 text-sm font-semibold transition-colors group-hover:bg-[hsl(var(--primary))] group-hover:text-[hsl(var(--primary-foreground))]">
                   <FileText className="h-4 w-4" /> Download worksheet
                 </button>
               </div>

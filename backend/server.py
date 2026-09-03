@@ -4736,12 +4736,18 @@ async def get_service(slug: str):
 @api_router.get("/strategy-tools")
 async def list_strategy_tools():
     from strategy_tools import STRATEGY_TOOLS
+    gated_map = {}
+    async for c in db.collateral.find({"key": {"$regex": "^tool:"}}, {"_id": 0, "key": 1, "gated": 1}):
+        gated_map[c["key"].split("tool:", 1)[1]] = bool(c.get("gated"))
     return [{"slug": t["slug"], "name": t["name"], "category": t["category"],
-             "tagline": t["tagline"], "what_it_is": t["what_it_is"]} for t in STRATEGY_TOOLS]
+             "tagline": t["tagline"], "what_it_is": t["what_it_is"],
+             "gated": gated_map.get(t["slug"], True)} for t in STRATEGY_TOOLS]
 
 
 @api_router.get("/strategy-tools-bundle.pdf")
-async def strategy_toolkit_bundle():
+async def strategy_toolkit_bundle(request: Request):
+    await _enforce_collateral_gate(request, "tool-bundle")
+    await _record_collateral_download(key="tool-bundle")
     managed = await _managed_collateral_response("tool-bundle")
     if managed:
         return managed
@@ -4752,7 +4758,9 @@ async def strategy_toolkit_bundle():
 
 
 @api_router.get("/strategy-tools/{slug}.pdf")
-async def strategy_tool_pdf(slug: str):
+async def strategy_tool_pdf(slug: str, request: Request):
+    await _enforce_collateral_gate(request, f"tool:{slug}")
+    await _record_collateral_download(key=f"tool:{slug}")
     managed = await _managed_collateral_response(f"tool:{slug}")
     if managed:
         return managed
@@ -6735,7 +6743,9 @@ async def admin_promo_analytics(admin: dict = Depends(require_admin)):
 
 
 @api_router.get("/blueprint/starter.pdf")
-async def blueprint_starter():
+async def blueprint_starter(request: Request):
+    await _enforce_collateral_gate(request, "leadmagnet:starter")
+    await _record_collateral_download(key="leadmagnet:starter")
     managed = await _managed_collateral_response("leadmagnet:starter")
     if managed:
         return managed
@@ -6767,6 +6777,35 @@ async def blueprint_download(order_id: str):
 # lead-magnet PDFs, digital products/e-books, plus video/audio references) with
 # manual upload, AI-generate, edit and realtime publish (+ notify).
 # ============================================================================
+
+async def _record_collateral_download(*, key: str = None, cid: str = None):
+    """Increment cumulative + weekly download counters for a collateral item."""
+    wk = _iso_week()
+    q = {"id": cid} if cid else {"key": key}
+    doc = await db.collateral.find_one(q, {"_id": 0, "dl_week": 1, "downloads_week": 1})
+    if doc is None:
+        return
+    dw = int((doc or {}).get("downloads_week", 0) or 0) + 1 if (doc or {}).get("dl_week") == wk else 1
+    await db.collateral.update_one(q, {"$inc": {"downloads": 1}, "$set": {"dl_week": wk, "downloads_week": dw}})
+
+
+def _download_gate_ok(request) -> bool:
+    tok = request.cookies.get("dl_gate")
+    if not tok:
+        return False
+    try:
+        data = pyjwt.decode(tok, get_jwt_secret(), algorithms=["HS256"])
+        return data.get("purpose") == "dl_gate"
+    except Exception:
+        return False
+
+
+async def _enforce_collateral_gate(request, key: str):
+    """Block a gated free-download unless the visitor has unlocked (email captured)."""
+    doc = await db.collateral.find_one({"key": key}, {"_id": 0, "gated": 1})
+    if doc and doc.get("gated") and not _download_gate_ok(request):
+        raise HTTPException(status_code=403, detail="gated")
+
 
 async def _managed_collateral_response(key: str):
     """If a LIVE managed file override exists for this key, serve it; else None."""
@@ -6815,6 +6854,9 @@ async def _seed_collateral():
             "live": False,
             "version": 0,
             "gen_status": "idle",
+            "gated": str(d["key"]).startswith("tool"),
+            "downloads": 0,
+            "downloads_week": 0,
             "is_deleted": False,
             "created_at": now_iso(),
             "updated_at": now_iso(),
@@ -6843,6 +6885,10 @@ def _collateral_public(doc: dict) -> dict:
         "live": bool(doc.get("live")), "serving_managed_file": managed,
         "live_url": live_url, "version": doc.get("version", 0),
         "gen_status": doc.get("gen_status", "idle"),
+        "gated": bool(doc.get("gated")),
+        "gatable": doc.get("kind") in ("pdf", "ebook", "doc") and not str(doc.get("key", "")).startswith("product:"),
+        "downloads": int(doc.get("downloads", 0) or 0),
+        "downloads_week": int(doc.get("downloads_week", 0) or 0) if doc.get("dl_week") == _iso_week() else 0,
         "updated_at": doc.get("updated_at"),
     }
 
@@ -6897,7 +6943,15 @@ async def admin_list_collateral(admin: dict = Depends(require_admin)):
     for it in items:
         cats.setdefault(it["category"], 0)
         cats[it["category"]] += 1
-    return {"items": items, "counts": cats, "total": len(items)}
+    leaderboard = sorted([i for i in items if i["downloads"] > 0], key=lambda x: x["downloads"], reverse=True)[:5]
+    leaderboard = [{"id": i["id"], "title": i["title"], "category": i["category"],
+                    "downloads": i["downloads"], "downloads_week": i["downloads_week"]} for i in leaderboard]
+    total_downloads = sum(i["downloads"] for i in items)
+    refresh = await db.app_meta.find_one({"_id": "collateral_refresh"}, {"_id": 0}) or {}
+    return {"items": items, "counts": cats, "total": len(items),
+            "total_downloads": total_downloads, "leaderboard": leaderboard,
+            "refresh": {"running": bool(refresh.get("running")), "total": refresh.get("total", 0),
+                        "done": refresh.get("done", 0), "finished_at": refresh.get("finished_at")}}
 
 
 @api_router.post("/admin/collateral")
@@ -6984,6 +7038,7 @@ async def serve_collateral_file(cid: str):
         logger.exception("collateral serve failed for %s", cid)
         raise HTTPException(status_code=502, detail="Storage read failed")
     fname = f.get("filename") or f"{doc.get('key')}.bin"
+    await _record_collateral_download(cid=cid)
     return Response(content=data, media_type=f.get("content_type") or ctype,
                     headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
@@ -7089,6 +7144,78 @@ async def admin_unpublish_collateral(cid: str, admin: dict = Depends(require_adm
     return _collateral_public(doc)
 
 
+class CollateralGate(BaseModel):
+    gated: bool
+
+
+@api_router.post("/admin/collateral/{cid}/gate")
+async def admin_gate_collateral(cid: str, body: CollateralGate, admin: dict = Depends(require_admin)):
+    doc = await db.collateral.find_one({"id": cid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Collateral not found")
+    await db.collateral.update_one({"id": cid}, {"$set": {"gated": bool(body.gated), "updated_at": now_iso()}})
+    doc = await db.collateral.find_one({"id": cid}, {"_id": 0})
+    return _collateral_public(doc)
+
+
+class DownloadUnlock(BaseModel):
+    name: Optional[str] = ""
+    email: Optional[str] = None
+    source: Optional[str] = "gated-download"
+
+
+@api_router.post("/collateral/unlock")
+async def collateral_unlock(body: DownloadUnlock, request: Request, response: Response):
+    """Capture an email into the nurture funnel and set a 30-day unlock cookie for gated downloads."""
+    if body.email:
+        email = body.email.strip().lower()
+        existing = await db.subscribers.find_one({"email": email}, {"_id": 0, "email": 1})
+        await db.subscribers.update_one({"email": email}, {"$setOnInsert": {
+            "email": email, "name": body.name or "there", "source": body.source or "gated-download",
+            "created_at": now_iso()}}, upsert=True)
+        if not existing and os.environ.get("GMAIL_APP_PASSWORD"):
+            loop = asyncio.get_event_loop()
+            loop.run_in_executor(None, lambda: send_nurture_welcome_email(email, body.name or "there", PUBLIC_SITE, _unsub_url(email)))
+    token = pyjwt.encode({"purpose": "dl_gate", "exp": datetime.now(timezone.utc) + timedelta(days=30)},
+                         get_jwt_secret(), algorithm="HS256")
+    response.set_cookie("dl_gate", token, httponly=True, secure=True, samesite="none", max_age=30 * 24 * 3600, path="/")
+    return {"ok": True}
+
+
+async def _bulk_ai_refresh():
+    tools = await db.collateral.find(
+        {"key": {"$regex": "^tool:"}, "is_deleted": {"$ne": True}}, {"_id": 0, "id": 1}).to_list(100)
+    ids = [t["id"] for t in tools]
+    await db.app_meta.update_one({"_id": "collateral_refresh"},
+                                 {"$set": {"running": True, "total": len(ids), "done": 0,
+                                           "started_at": now_iso(), "finished_at": None}}, upsert=True)
+    for tid in ids:
+        try:
+            await _collateral_ai_generate(tid, "")
+            await db.collateral.update_one({"id": tid}, {"$set": {"live": True, "updated_at": now_iso()}})
+        except Exception:
+            logger.exception("bulk refresh failed for %s", tid)
+        await db.app_meta.update_one({"_id": "collateral_refresh"}, {"$inc": {"done": 1}})
+    await db.app_meta.update_one({"_id": "collateral_refresh"},
+                                 {"$set": {"running": False, "finished_at": now_iso()}})
+
+
+@api_router.post("/admin/collateral/ai-refresh-all")
+async def admin_bulk_refresh(background: BackgroundTasks, admin: dict = Depends(require_admin)):
+    meta = await db.app_meta.find_one({"_id": "collateral_refresh"}, {"_id": 0})
+    if meta and meta.get("running"):
+        raise HTTPException(status_code=409, detail="A refresh is already running.")
+    background.add_task(_bulk_ai_refresh)
+    return {"ok": True, "running": True}
+
+
+@api_router.get("/admin/collateral/ai-refresh-status")
+async def admin_bulk_refresh_status(admin: dict = Depends(require_admin)):
+    meta = await db.app_meta.find_one({"_id": "collateral_refresh"}, {"_id": 0}) or {}
+    return {"running": bool(meta.get("running")), "total": meta.get("total", 0),
+            "done": meta.get("done", 0), "finished_at": meta.get("finished_at")}
+
+
 app.include_router(api_router)
 
 
@@ -7126,6 +7253,9 @@ async def startup():
         logger.error("Object storage init failed: %s", e)
     try:
         await _seed_collateral()
+        # Backfill gated defaults for any pre-existing collateral docs.
+        await db.collateral.update_many({"key": {"$regex": "^tool"}, "gated": {"$exists": False}}, {"$set": {"gated": True}})
+        await db.collateral.update_many({"gated": {"$exists": False}}, {"$set": {"gated": False}})
         logger.info("Collateral seeded")
     except Exception:
         logger.exception("Collateral seed failed")

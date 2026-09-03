@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import {
   FileText, Upload, Wand2, Globe, Eye, Pencil, Trash2, Plus, X, Search,
   Radio, RadioTower, FileDown, Video, Music, Loader2, MapPin, RefreshCw,
+  Lock, Unlock, Trophy, Download,
 } from "lucide-react";
 import api, { API } from "@/lib/api";
 
@@ -45,6 +46,9 @@ function Modal({ title, onClose, children, testid }) {
 export default function CollateralAdmin() {
   const [items, setItems] = useState([]);
   const [counts, setCounts] = useState({});
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [totalDownloads, setTotalDownloads] = useState(0);
+  const [refresh, setRefresh] = useState({ running: false, total: 0, done: 0 });
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState("");
@@ -56,15 +60,54 @@ export default function CollateralAdmin() {
   const [creating, setCreating] = useState(false);
   const uploadRefs = useRef({});
   const pollRef = useRef(null);
+  const refreshPollRef = useRef(null);
 
   const load = () => {
     setLoading(true);
     api.get("/admin/collateral")
-      .then((r) => { setItems(r.data.items); setCounts(r.data.counts); })
+      .then((r) => {
+        setItems(r.data.items); setCounts(r.data.counts);
+        setLeaderboard(r.data.leaderboard || []); setTotalDownloads(r.data.total_downloads || 0);
+        if (r.data.refresh) setRefresh(r.data.refresh);
+      })
       .catch(() => toast.error("Couldn't load collateral — please re-login."))
       .finally(() => setLoading(false));
   };
-  useEffect(() => { load(); return () => clearInterval(pollRef.current); }, []);
+  useEffect(() => { load(); return () => { clearInterval(pollRef.current); clearInterval(refreshPollRef.current); }; }, []);
+
+  // Poll bulk-refresh progress while running.
+  useEffect(() => {
+    clearInterval(refreshPollRef.current);
+    if (refresh.running) {
+      refreshPollRef.current = setInterval(() => {
+        api.get("/admin/collateral/ai-refresh-status").then((r) => {
+          setRefresh(r.data);
+          if (!r.data.running) { clearInterval(refreshPollRef.current); toast.success("Toolkit refreshed — fresh AI PDFs are live."); load(); }
+        }).catch(() => {});
+      }, 5000);
+    }
+    return () => clearInterval(refreshPollRef.current);
+  }, [refresh.running]);
+
+  const toggleGate = async (item) => {
+    setBusy(item.id);
+    try {
+      await api.post(`/admin/collateral/${item.id}/gate`, { gated: !item.gated });
+      toast.success(!item.gated ? "Email now required before download." : "Download is now open (no email).");
+      load();
+    } catch { toast.error("Couldn't update gate"); } finally { setBusy(""); }
+  };
+
+  const bulkRefresh = async () => {
+    if (!window.confirm("Regenerate AND publish fresh AI PDFs for all 14 strategy tools? This uses your AI credits and takes a few minutes.")) return;
+    try {
+      await api.post("/admin/collateral/ai-refresh-all");
+      setRefresh({ running: true, total: 14, done: 0 });
+      toast.message("Refreshing the whole toolkit with AI…");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Couldn't start refresh");
+    }
+  };
 
   // Poll while any AI generation is running.
   useEffect(() => {
@@ -165,6 +208,44 @@ export default function CollateralAdmin() {
         </button>
       </div>
 
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="rounded-2xl border border-border bg-card p-5 lg:col-span-1" data-testid="collateral-refresh-panel">
+          <p className="flex items-center gap-2 font-display text-sm font-bold"><Wand2 className="h-4 w-4 text-[hsl(var(--primary))]" /> Bulk AI refresh</p>
+          <p className="mt-1 text-xs text-muted-foreground">Regenerate & publish fresh AI PDFs for all 14 strategy tools in one click.</p>
+          {refresh.running ? (
+            <div className="mt-3" data-testid="collateral-refresh-progress">
+              <div className="flex items-center justify-between text-xs font-medium"><span>Refreshing…</span><span>{refresh.done}/{refresh.total}</span></div>
+              <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-secondary">
+                <div className="h-full bg-[hsl(var(--primary))] transition-all" style={{ width: `${refresh.total ? (refresh.done / refresh.total) * 100 : 0}%` }} />
+              </div>
+            </div>
+          ) : (
+            <button onClick={bulkRefresh} data-testid="collateral-bulk-refresh"
+              className="mt-3 inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-xs font-semibold hover:bg-secondary">
+              <RefreshCw className="h-3.5 w-3.5" /> Regenerate all toolkit PDFs
+            </button>
+          )}
+        </div>
+        <div className="rounded-2xl border border-border bg-card p-5 lg:col-span-2" data-testid="collateral-leaderboard">
+          <div className="flex items-center justify-between">
+            <p className="flex items-center gap-2 font-display text-sm font-bold"><Trophy className="h-4 w-4 text-[hsl(var(--accent))]" /> Top downloaded</p>
+            <span className="text-xs text-muted-foreground">{totalDownloads.toLocaleString()} total downloads</span>
+          </div>
+          {leaderboard.length === 0 ? (
+            <p className="mt-3 text-xs text-muted-foreground">No downloads yet — once visitors grab your resources, the winners show up here.</p>
+          ) : (
+            <ol className="mt-3 space-y-1.5">
+              {leaderboard.map((l, i) => (
+                <li key={l.id} className="flex items-center justify-between text-sm" data-testid={`leaderboard-row-${l.id}`}>
+                  <span className="flex items-center gap-2 truncate"><span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-secondary text-[11px] font-bold">{i + 1}</span><span className="truncate">{l.title}</span></span>
+                  <span className="shrink-0 text-xs font-semibold">{l.downloads.toLocaleString()} <span className="font-normal text-muted-foreground">({l.downloads_week} this wk)</span></span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      </div>
+
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[220px]">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -206,6 +287,10 @@ export default function CollateralAdmin() {
                     <span className="rounded bg-secondary px-2 py-0.5 font-medium capitalize">{item.kind}</span>
                     {typeof item.price === "number" && <span className="rounded bg-secondary px-2 py-0.5 font-medium">₹{item.price}</span>}
                     <span className="rounded bg-secondary px-2 py-0.5 font-medium">v{item.version}</span>
+                    <span className="inline-flex items-center gap-1 rounded bg-secondary px-2 py-0.5 font-medium"><Download className="h-3 w-3" /> {item.downloads} ({item.downloads_week} wk)</span>
+                    {item.gatable && (item.gated
+                      ? <span className="inline-flex items-center gap-1 rounded bg-[hsl(var(--accent))]/20 px-2 py-0.5 font-medium text-[hsl(var(--accent-foreground))]"><Lock className="h-3 w-3" /> Email-gated</span>
+                      : <span className="inline-flex items-center gap-1 rounded bg-secondary px-2 py-0.5 font-medium"><Unlock className="h-3 w-3" /> Open</span>)}
                     {item.has_file && <span className="rounded bg-secondary px-2 py-0.5 font-medium">{item.serving_managed_file ? "Serving uploaded file" : "File ready"}</span>}
                     {running && <span className="inline-flex items-center gap-1 rounded bg-[hsl(var(--primary))]/15 px-2 py-0.5 font-medium text-[hsl(var(--primary))]"><Loader2 className="h-3 w-3 animate-spin" /> Generating…</span>}
                     {item.gen_status === "error" && <span className="rounded bg-red-500/15 px-2 py-0.5 font-medium text-red-500">Generation failed</span>}
@@ -234,6 +319,12 @@ export default function CollateralAdmin() {
                     )}
                     <button onClick={() => setEditing({ ...item })} data-testid={`collateral-edit-${item.id}`}
                       className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs font-medium hover:bg-secondary"><Pencil className="h-3.5 w-3.5" /> Edit</button>
+                    {item.gatable && (
+                      <button onClick={() => toggleGate(item)} disabled={busy === item.id} data-testid={`collateral-gate-${item.id}`}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs font-medium hover:bg-secondary disabled:opacity-50">
+                        {item.gated ? <><Unlock className="h-3.5 w-3.5" /> Remove gate</> : <><Lock className="h-3.5 w-3.5" /> Require email</>}
+                      </button>
+                    )}
                     <input type="file" hidden ref={(el) => (uploadRefs.current[item.id] = el)}
                       onChange={(e) => { uploadFile(item, e.target.files?.[0]); e.target.value = ""; }} />
                     <button onClick={() => uploadRefs.current[item.id]?.click()} disabled={busy === item.id} data-testid={`collateral-upload-${item.id}`}

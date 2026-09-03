@@ -329,7 +329,15 @@ LOGIN_LOCKOUT_MINUTES = 15
 
 
 def _client_ip(request: Request) -> str:
-    """Real client IP behind the ingress proxy (X-Forwarded-For), else socket peer."""
+    """Authoritative client IP. Behind Cloudflare, CF-Connecting-IP is set by CF and
+    cannot be spoofed by the client, so it takes priority over the (client-forgeable)
+    left-most X-Forwarded-For value. Falls back to XFF/socket for non-CF (preview) env."""
+    cf = request.headers.get("cf-connecting-ip")
+    if cf:
+        return cf.strip()
+    tci = request.headers.get("true-client-ip")
+    if tci:
+        return tci.strip()
     xff = request.headers.get("x-forwarded-for")
     if xff:
         return xff.split(",")[0].strip()

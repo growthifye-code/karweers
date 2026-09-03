@@ -1,5 +1,5 @@
 import "@/App.css";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { BrowserRouter, Routes, Route, useLocation, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider } from "@/context/AuthContext";
@@ -50,10 +50,9 @@ import VpnGate from "@/components/VpnGate";
 
 function AppRoutes() {
   const location = useLocation();
-  const [adminPath, setAdminPath] = useState(getAdminPath());
-  useEffect(() => {
-    loadPublicConfig().then((cfg) => { if (cfg?.admin_path) setAdminPath(cfg.admin_path); });
-  }, []);
+  // Load non-sensitive public config (hCaptcha sitekey) once at startup.
+  useEffect(() => { loadPublicConfig(); }, []);
+  const adminPath = getAdminPath();
   // Process Google OAuth callback FIRST (session_id in URL fragment).
   if (location.hash?.includes("session_id=")) return <AuthCallback />;
   return (

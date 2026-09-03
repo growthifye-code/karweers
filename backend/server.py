@@ -3790,9 +3790,10 @@ ADMIN_PATH = os.environ.get("ADMIN_PATH", "/sk-control-92f4a7e1")  # obscured ad
 # ---------------- Public config (single source of truth for the frontend) ----------------
 @api_router.get("/public-config")
 async def public_config():
-    """Non-sensitive config the frontend reads at startup (admin console path + captcha sitekey)."""
+    """Non-sensitive config the frontend reads at startup (captcha sitekey only).
+    NOTE: the admin console path is intentionally NOT exposed here — it stays a
+    build-time constant in the frontend so the URL is not disclosed over the API."""
     return {
-        "admin_path": ADMIN_PATH,
         "hcaptcha_sitekey": os.environ.get("HCAPTCHA_SITEKEY", ""),
     }
 
@@ -3800,6 +3801,7 @@ async def public_config():
 # ---------------- Admin Magic Link (emergency fallback login) ----------------
 MAGIC_LINK_TTL_MIN = int(os.environ.get("MAGIC_LINK_TTL_MIN", "15"))
 MAGIC_LINK_MAX_PER_WINDOW = int(os.environ.get("MAGIC_LINK_MAX_PER_WINDOW", "3"))
+MAGIC_LINK_MAX_PER_IP = int(os.environ.get("MAGIC_LINK_MAX_PER_IP", "5"))
 MAGIC_LINK_WINDOW_MIN = int(os.environ.get("MAGIC_LINK_WINDOW_MIN", "15"))
 
 
@@ -3850,21 +3852,26 @@ async def request_magic_link(body: MagicLinkIn, request: Request, background: Ba
     email = (body.email or "").lower().strip()
     # Only allowlisted admins ever get a link; everyone else gets a silent OK.
     if email in ADMIN_ALLOWLIST:
+        client_ip = _client_ip(request)
         window_start = datetime.now(timezone.utc) - timedelta(minutes=MAGIC_LINK_WINDOW_MIN)
+        ws_iso = window_start.isoformat()
         recent = await db.magic_links.count_documents({
-            "email": email, "created_at": {"$gte": window_start.isoformat()}})
-        if recent < MAGIC_LINK_MAX_PER_WINDOW:
+            "email": email, "created_at": {"$gte": ws_iso}})
+        # Per-IP cap: one source can't spam either admin inbox even across both addresses.
+        recent_ip = await db.magic_links.count_documents({
+            "ip": client_ip, "created_at": {"$gte": ws_iso}})
+        if recent < MAGIC_LINK_MAX_PER_WINDOW and recent_ip < MAGIC_LINK_MAX_PER_IP:
             jti = uuid.uuid4().hex
             now = datetime.now(timezone.utc)
             await db.magic_links.insert_one({
                 "jti": jti, "email": email, "used": False,
                 "created_at": now.isoformat(),
                 "expire_at": now + timedelta(minutes=MAGIC_LINK_TTL_MIN),
-                "ip": _client_ip(request),
+                "ip": client_ip,
             })
             link = f"{_site_base(request)}/api/auth/magic-login?token={_magic_token(email, jti)}"
             from emailer import send_admin_magic_link_email
-            background.add_task(send_admin_magic_link_email, email, link, MAGIC_LINK_TTL_MIN, _client_ip(request))
+            background.add_task(send_admin_magic_link_email, email, link, MAGIC_LINK_TTL_MIN, client_ip)
     return {"ok": True}
 
 

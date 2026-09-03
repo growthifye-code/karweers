@@ -553,3 +553,7 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - **[LOW — FIXED] magic_links hygiene**: added unique index on jti + TTL index on expire_at (1h) for auto-cleanup.
 - **[INFO — trade-off] /api/public-config exposes admin_path publicly**, which removes the admin-URL obscurity (real protection remains auth + ADMIN_ALLOWLIST). Inherent to the rotate-without-rebuild requirement; can be gated on request.
 - **[LOW — accepted] magic-link token in query string** (single-use + 15min + immediate consumption) and no per-IP cap (bounded to 3/15min per admin email).
+
+## Update (2026-09-03) — Public Config Gate + Magic Link per-IP cap
+- **Admin path no longer exposed**: GET /api/public-config now returns ONLY hcaptcha_sitekey. The admin console path is back to a build-time constant (frontend/src/config.js ADMIN_CONSOLE_PATH) — keep it in sync with backend ADMIN_PATH in .env when rotating. Verified: public-config = {hcaptcha_sitekey}.
+- **Magic link per-IP cap**: added MAGIC_LINK_MAX_PER_IP (default 5) alongside the per-email cap (3) — a single IP cannot spam either admin inbox even across both allowlisted addresses. Verified: 3+3 attempts from one IP across both admin emails stored only 5.

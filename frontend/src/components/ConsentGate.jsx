@@ -1,42 +1,24 @@
 import { useState } from "react";
-import { Check, FileText, ShieldCheck, X } from "lucide-react";
+import { X } from "lucide-react";
 import { DOCS } from "@/pages/LegalPage";
 
-// Consent: a simple tick confirms agreement to Terms & Privacy. The documents
-// remain openable in an in-page modal (optional reading — no new tab), preserving
-// the sign-in form state.
+// Consent: a single simple tick confirms agreement. Terms & Privacy are inline
+// links that optionally open in an in-page modal (no reading required to proceed).
 export default function ConsentGate({ agreed, setAgreed }) {
-  const [termsOpened, setTermsOpened] = useState(false);
-  const [privacyOpened, setPrivacyOpened] = useState(false);
   const [activeDoc, setActiveDoc] = useState(null); // "terms" | "privacy" | null
-
-  const openDoc = (key, mark) => { mark(true); setActiveDoc(key); };
+  const openDoc = (key) => setActiveDoc(key);
   const doc = activeDoc ? DOCS[activeDoc] : null;
 
-  const DocBtn = ({ opened, onClick, icon: Icon, label, testid }) => (
-    <button type="button" onClick={onClick} data-testid={testid}
-      className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2.5 text-xs font-semibold transition-colors ${
-        opened ? "border-[hsl(var(--primary))] text-[hsl(var(--primary))]" : "border-border text-foreground hover:bg-secondary"}`}>
-      {opened ? <Check className="h-3.5 w-3.5" /> : <Icon className="h-3.5 w-3.5" />} {label}
-    </button>
-  );
-
   return (
-    <div className="rounded-xl border border-border bg-secondary/40 p-4" data-testid="consent-gate">
-      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Before you continue</p>
-      <p className="mt-1 text-xs text-muted-foreground">Just tick to confirm — no need to open the documents (they're here if you'd like to read them).</p>
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <DocBtn opened={termsOpened} onClick={() => openDoc("terms", setTermsOpened)} icon={FileText} label="Terms & Conditions" testid="consent-open-terms" />
-        <DocBtn opened={privacyOpened} onClick={() => openDoc("privacy", setPrivacyOpened)} icon={ShieldCheck} label="Privacy Policy" testid="consent-open-privacy" />
-      </div>
-      <label className="mt-3 flex items-start gap-2.5 text-xs cursor-pointer text-foreground">
+    <div data-testid="consent-gate">
+      <label className="flex items-start gap-2.5 text-xs cursor-pointer text-foreground">
         <input type="checkbox" data-testid="consent-checkbox"
           checked={agreed} onChange={(e) => setAgreed(e.target.checked)}
           className="mt-0.5 h-4 w-4 shrink-0 accent-[hsl(var(--primary))]" />
         <span>
           I have read and agree to the{" "}
-          <button type="button" onClick={() => openDoc("terms", setTermsOpened)} className="font-semibold text-[hsl(var(--primary))] underline">Terms &amp; Conditions</button>{" "}and{" "}
-          <button type="button" onClick={() => openDoc("privacy", setPrivacyOpened)} className="font-semibold text-[hsl(var(--primary))] underline">Privacy Policy</button>.
+          <button type="button" data-testid="consent-open-terms" onClick={() => openDoc("terms")} className="font-semibold text-[hsl(var(--primary))] underline">Terms &amp; Conditions</button>{" "}and{" "}
+          <button type="button" data-testid="consent-open-privacy" onClick={() => openDoc("privacy")} className="font-semibold text-[hsl(var(--primary))] underline">Privacy Policy</button>.
         </span>
       </label>
 

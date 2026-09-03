@@ -24,7 +24,7 @@ export default function ConsentGate({ agreed, setAgreed }) {
   return (
     <div className="rounded-xl border border-border bg-secondary/40 p-4" data-testid="consent-gate">
       <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Before you continue</p>
-      <p className="mt-1 text-xs text-muted-foreground">Tick to confirm your agreement. You can open either document to read it (optional).</p>
+      <p className="mt-1 text-xs text-muted-foreground">Just tick to confirm — no need to open the documents (they're here if you'd like to read them).</p>
       <div className="mt-3 grid grid-cols-2 gap-2">
         <DocBtn opened={termsOpened} onClick={() => openDoc("terms", setTermsOpened)} icon={FileText} label="Terms & Conditions" testid="consent-open-terms" />
         <DocBtn opened={privacyOpened} onClick={() => openDoc("privacy", setPrivacyOpened)} icon={ShieldCheck} label="Privacy Policy" testid="consent-open-privacy" />
@@ -34,7 +34,7 @@ export default function ConsentGate({ agreed, setAgreed }) {
           checked={agreed} onChange={(e) => setAgreed(e.target.checked)}
           className="mt-0.5 h-4 w-4 shrink-0 accent-[hsl(var(--primary))]" />
         <span>
-          I agree to the{" "}
+          I have read and agree to the{" "}
           <button type="button" onClick={() => openDoc("terms", setTermsOpened)} className="font-semibold text-[hsl(var(--primary))] underline">Terms &amp; Conditions</button>{" "}and{" "}
           <button type="button" onClick={() => openDoc("privacy", setPrivacyOpened)} className="font-semibold text-[hsl(var(--primary))] underline">Privacy Policy</button>.
         </span>

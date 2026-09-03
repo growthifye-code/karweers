@@ -80,13 +80,16 @@ PREVIEW_HOST_MARKERS = ("preview.emergentagent.com", "preview.emergentcf.cloud",
 
 
 def _is_preview_host(request=None) -> bool:
+    # SECURITY: derive preview-vs-production ONLY from the Host header, which the
+    # ingress/Cloudflare sets to the real routing host and a browser cannot forge to reach
+    # the production origin. X-Forwarded-Host and Origin are client-spoofable and MUST NOT
+    # gate the captcha auto-pass (doing so allowed a full captcha bypass on production).
     host = ""
     if request is not None:
-        host = (request.headers.get("x-forwarded-host") or request.headers.get("origin")
-                or request.headers.get("host") or "")
+        host = request.headers.get("host", "") or ""
     if not host:
         host = _current_host.get() or ""
-    host = host.lower()
+    host = host.split(":")[0].strip().lower()
     return any(m in host for m in PREVIEW_HOST_MARKERS)
 
 

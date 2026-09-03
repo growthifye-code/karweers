@@ -3877,26 +3877,71 @@ async def request_magic_link(body: MagicLinkIn, request: Request, background: Ba
 
 @api_router.get("/auth/magic-login")
 async def magic_login(token: str, request: Request):
-    """Verify a magic-link token, mint an admin session, and redirect into the console."""
+    """Render a click-to-confirm interstitial. The token is NOT consumed here — email
+    link-scanners/prefetchers that auto-fetch this GET cannot burn the token or receive a
+    minted JWT. A real human clicks 'Sign in', which POSTs to /auth/magic-exchange."""
     front = _site_base(request)
-    fail = RedirectResponse(f"{front}/login?magic=invalid")
+    # Light validation for a friendly error page (no consumption, no enumeration risk).
+    valid = False
     try:
         data = pyjwt.decode(token, get_jwt_secret(), algorithms=["HS256"])
+        valid = data.get("purpose") == "magic_login" and (data.get("email") or "").lower() in ADMIN_ALLOWLIST
     except Exception:
-        return fail
+        valid = False
+    if not valid:
+        return RedirectResponse(f"{front}/login?magic=invalid")
+    tok_js = json.dumps(token)
+    base_js = json.dumps(front)
+    admin_js = json.dumps(ADMIN_PATH)
+    page = f"""<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><title>Admin sign-in</title>
+<style>body{{margin:0;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0A0A0A;color:#fff;display:flex;min-height:100vh;align-items:center;justify-content:center}}
+.card{{max-width:380px;padding:40px 32px;text-align:center}}
+h1{{font-size:22px;margin:0 0 8px}}p{{color:#9ca3af;font-size:14px;line-height:1.6;margin:0 0 24px}}
+button{{background:#C6F135;color:#0A0A0A;border:0;border-radius:999px;padding:14px 28px;font-size:15px;font-weight:700;cursor:pointer}}
+button:disabled{{opacity:.6;cursor:default}}.err{{color:#f87171;font-size:13px;margin-top:14px;min-height:18px}}</style></head>
+<body><div class="card"><h1>Secure admin sign-in</h1>
+<p>Click below to finish signing in to the Sudarshan Karweer admin console. This link is single-use.</p>
+<button id="go" onclick="signIn()">Sign in to admin</button><div class="err" id="err"></div></div>
+<script>
+var TOKEN={tok_js},BASE={base_js},ADMIN={admin_js};
+async function signIn(){{
+  var b=document.getElementById('go'),e=document.getElementById('err');b.disabled=true;b.textContent='Signing in…';e.textContent='';
+  try{{
+    var r=await fetch(BASE+'/api/auth/magic-exchange',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{token:TOKEN}})}});
+    var d=await r.json();
+    if(r.ok&&d.token){{try{{localStorage.setItem('sk_token',d.token);}}catch(x){{}}window.location.replace(ADMIN);}}
+    else{{e.textContent='This link is invalid or already used. Please request a new one.';b.disabled=false;b.textContent='Sign in to admin';}}
+  }}catch(x){{e.textContent='Something went wrong. Please try again.';b.disabled=false;b.textContent='Sign in to admin';}}
+}}
+</script></body></html>"""
+    return HTMLResponse(page)
+
+
+class MagicExchangeIn(BaseModel):
+    token: str
+
+
+@api_router.post("/auth/magic-exchange")
+async def magic_exchange(body: MagicExchangeIn, request: Request):
+    """Consume a magic-link token (single-use) and mint the admin JWT. Only reached by a
+    real human clicking the interstitial button — never by an email prefetch."""
+    try:
+        data = pyjwt.decode(body.token, get_jwt_secret(), algorithms=["HS256"])
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid or expired link")
     if data.get("purpose") != "magic_login":
-        return fail
+        raise HTTPException(status_code=400, detail="Invalid link")
     email = (data.get("email") or "").lower()
     jti = data.get("jti")
     if email not in ADMIN_ALLOWLIST or not jti:
-        return fail
-    # Enforce single use.
+        raise HTTPException(status_code=400, detail="Invalid link")
     rec = await db.magic_links.find_one_and_update(
         {"jti": jti, "email": email, "used": False},
         {"$set": {"used": True, "used_at": now_iso()}})
     if not rec:
-        return fail
-    # Ensure the admin user exists (allowlisted email is always an admin).
+        raise HTTPException(status_code=400, detail="This link is invalid or already used")
     user = await db.users.find_one({"email": email})
     if not user:
         uid = str(uuid.uuid4())
@@ -3907,8 +3952,9 @@ async def magic_login(token: str, request: Request):
     role = "admin"
     if user.get("role") != role:
         await db.users.update_one({"id": user["id"]}, {"$set": {"role": role}})
+    await audit(request, email, "admin_magic_login", target=email, meta="magic-link sign-in")
     jwt_token = create_access_token(user["id"], email, role)
-    return RedirectResponse(f"{front}/login#magic_token={jwt_token}")
+    return {"token": jwt_token}
 
 
 

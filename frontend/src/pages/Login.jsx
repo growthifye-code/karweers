@@ -34,16 +34,9 @@ export default function Login() {
   const [magicBusy, setMagicBusy] = useState(false);
   const [magicSent, setMagicSent] = useState(false);
 
-  // Handle the magic-link round trip: backend redirects here with the admin JWT in the
-  // URL fragment (never sent to a server). Store it and bounce into the admin console.
+  // The magic-link flow now completes server-side (interstitial → POST exchange → admin).
+  // We only need to surface an error if the link was invalid/expired.
   useEffect(() => {
-    const hash = window.location.hash || "";
-    const m = hash.match(/magic_token=([^&]+)/);
-    if (m && m[1]) {
-      localStorage.setItem("sk_token", decodeURIComponent(m[1]));
-      window.location.replace(getAdminPath());
-      return;
-    }
     const q = new URLSearchParams(window.location.search);
     if (q.get("magic") === "invalid") {
       setError("That sign-in link is invalid or has expired. Request a fresh one below.");

@@ -80,6 +80,10 @@ def build_tool_pdf(tool):
         "Want help applying this to a live decision? Book a 1:1 strategy session with Sudarshan Karweer at "
         "<b>www.sudarshankarweer.com</b>.", S["body"]))
     story.append(Paragraph("© Sudarshan Karweer · Strategic Advisory. Framework worksheet for professional use.", S["small"]))
+    doc.build(story)
+    return buf.getvalue()
+
+
 def _tool_section(S, tool, PageBreak_cls):
     flow = [PageBreak_cls()]
     flow.append(Paragraph(tool["category"].upper(), S["kicker"]))

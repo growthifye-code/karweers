@@ -10,6 +10,7 @@ import api, { API } from "@/lib/api";
 import VaultPanel from "@/pages/VaultPanel";
 import InsightsAdmin from "@/components/InsightsAdmin";
 import RevenueAdmin from "@/components/RevenueAdmin";
+import CollateralAdmin from "@/components/CollateralAdmin";
 
 const CATS = [
   { key: "news", label: "News" },
@@ -561,10 +562,10 @@ export default function AdminDashboard() {
         <p className="mt-1 text-sm text-muted-foreground">Signed in as {user?.email}</p>
 
         <div className="mt-8 flex flex-wrap gap-2 border-b border-border pb-4">
-          {["overview", "crm", "leads", "bookings", "availability", "tickets", "articles", "insights", "create", "revenue", "subscribers", "consent", "vault"].map((t) => (
+          {["overview", "crm", "leads", "bookings", "availability", "tickets", "articles", "insights", "collateral", "create", "revenue", "subscribers", "consent", "vault"].map((t) => (
             <button key={t} onClick={() => setTab(t)} data-testid={`admin-tab-${t}`}
               className={`rounded-full px-4 py-2 text-sm font-medium capitalize transition-colors ${tab === t ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]" : "border border-border text-muted-foreground hover:bg-secondary"}`}>
-              {t === "create" ? "Create" : t === "crm" ? "CRM" : t === "tickets" ? "Service Desk" : t === "consent" ? "Consent Log" : t === "revenue" ? "Revenue" : t === "insights" ? "SK Insights" : t}
+              {t === "create" ? "Create" : t === "crm" ? "CRM" : t === "tickets" ? "Service Desk" : t === "consent" ? "Consent Log" : t === "revenue" ? "Revenue" : t === "insights" ? "SK Insights" : t === "collateral" ? "Collateral" : t}
               {t === "bookings" && upcomingCount > 0 && <span data-testid="bookings-badge" className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold normal-case ${tab === t ? "bg-[hsl(var(--primary-foreground))] text-[hsl(var(--primary))]" : "bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]"}`}>{upcomingCount} in 48h</span>}
             </button>
           ))}
@@ -1549,6 +1550,7 @@ export default function AdminDashboard() {
 
         {tab === "revenue" && <RevenueAdmin />}
         {tab === "insights" && <InsightsAdmin />}
+        {tab === "collateral" && <CollateralAdmin />}
         {tab === "vault" && <VaultPanel />}
         {activeClient && (
           <div className="fixed inset-0 z-50 flex justify-end bg-black/50" onClick={() => setActiveClient(null)} data-testid="client-drawer">

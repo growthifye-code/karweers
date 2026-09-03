@@ -48,7 +48,7 @@ export default function ConsentRenewalPrompt() {
         <h2 className="mt-3 font-display text-2xl font-bold">Please review & re-agree</h2>
         <p className="mt-2 text-sm text-muted-foreground">
           We've updated our Terms &amp; Conditions and Privacy Policy{version ? <> (version {version})</> : null}.
-          Please read both and confirm your agreement to continue with full access.
+          Please tick to confirm your agreement to continue with full access.
         </p>
         <div className="mt-5">
           <ConsentGate agreed={agreed} setAgreed={setAgreed} />

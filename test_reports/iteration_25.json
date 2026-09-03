@@ -1,0 +1,30 @@
+{
+  "summary": "Iteration 25 — Collateral & Downloads admin manager + consent tick UX. All 9 backend pytest tests pass (list/counts, ansoff PDF non-empty regression, upload→publish override→unpublish revert, offline gate on public /api/collateral/{id}/file, edit metadata, product price sync, create+delete custom, built-in delete forbidden 400, AI-generate reaching gen_status='done' via Emergent LLM). Frontend Collateral tab renders 20 cards (Strategy Tool 14, Digital Product 3, Lead Magnet 1, Video 1, Audio 1) with correct status/version/where-it's-used, all action buttons (view/edit/upload/AI/publish/unpublish/delete) and all four modals (collateral-edit-modal/collateral-ai-modal/collateral-publish-modal/collateral-create-modal) with edit-save/ai-run/publish-confirm/publish-notify/create-save inputs render. Insights & Revenue admin tabs still render (regression OK). Consent tick change verified: /login checkbox (data-testid consent-checkbox) is enabled with disabled=false without opening Terms/Privacy; single click marks it checked and enables Sign in. Test cleanup: reverted 5-Whys metadata; no items left live.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Admin > Collateral", "issues": ["Nice-to-have: modal doesn't close on Escape key — only via the X (modal-close) button. Not blocking, but common UX expectation."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration25_collateral.py",
+    "/app/test_reports/pytest/iteration25.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is 7000+ lines — should be split into feature modules (collateral, admin, auth, strategy tools). Deferred, not blocking.",
+    "FastAPI on_event('startup'/'shutdown') is deprecated — migrate to lifespan handlers when convenient.",
+    "Consider adding Escape-key close in the Modal component in CollateralAdmin.jsx for consistency with admin UX."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration25_collateral.py"
+  ],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "100% (all testids present, modals open, list renders, consent UX verified)"},
+  "test_credentials": "sudarshan@karweers.com / Sudarshan@2026 (admin). Preview backend accepts captcha_token='x' with consent:true.",
+  "seed_data_creation": "None persisted — TEST_custom_asset created & deleted, 5-Whys metadata & any override was reverted / unpublished.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend test suite for collateral lives at /app/backend/tests/test_iteration25_collateral.py. Run with: `cd /app/backend && MONGO_URL=mongodb://localhost:27017 DB_NAME=test_database PYTHONPATH=/app/backend pytest tests/test_iteration25_collateral.py -v -n 0`. Note admin list returns items with keys: id (uuid), key (e.g. 'tool:five-whys'), kind ('pdf'/'video'/'audio'), category (human label 'Strategy Tool' etc), locations (list) — NOT snake_case 'strategy_tool'/'used_in'. Preview backend has aggressive IP block; clear via `mongosh test_database --eval 'db.blocked_ips.deleteMany({})'` if needed. Frontend hCaptcha is real on /login even on preview — bypass by POSTing /api/auth/login with captcha_token='x', then setting localStorage.sk_token before navigating to /admin. Modal close-on-Escape does NOT work; use [data-testid=modal-close] to dismiss."
+}

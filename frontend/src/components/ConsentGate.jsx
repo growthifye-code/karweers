@@ -2,14 +2,13 @@ import { useState } from "react";
 import { Check, FileText, ShieldCheck, X } from "lucide-react";
 import { DOCS } from "@/pages/LegalPage";
 
-// Strict consent: the "I agree" checkbox is disabled until BOTH the Terms &
-// Conditions and Privacy Policy have been opened. Docs open in an in-page modal
-// (same page — no new tab) so the sign-in form state is preserved.
+// Consent: a simple tick confirms agreement to Terms & Privacy. The documents
+// remain openable in an in-page modal (optional reading — no new tab), preserving
+// the sign-in form state.
 export default function ConsentGate({ agreed, setAgreed }) {
   const [termsOpened, setTermsOpened] = useState(false);
   const [privacyOpened, setPrivacyOpened] = useState(false);
   const [activeDoc, setActiveDoc] = useState(null); // "terms" | "privacy" | null
-  const bothOpened = termsOpened && privacyOpened;
 
   const openDoc = (key, mark) => { mark(true); setActiveDoc(key); };
   const doc = activeDoc ? DOCS[activeDoc] : null;
@@ -25,26 +24,21 @@ export default function ConsentGate({ agreed, setAgreed }) {
   return (
     <div className="rounded-xl border border-border bg-secondary/40 p-4" data-testid="consent-gate">
       <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Before you continue</p>
-      <p className="mt-1 text-xs text-muted-foreground">Please open and read both documents, then confirm your agreement.</p>
+      <p className="mt-1 text-xs text-muted-foreground">Tick to confirm your agreement. You can open either document to read it (optional).</p>
       <div className="mt-3 grid grid-cols-2 gap-2">
         <DocBtn opened={termsOpened} onClick={() => openDoc("terms", setTermsOpened)} icon={FileText} label="Terms & Conditions" testid="consent-open-terms" />
         <DocBtn opened={privacyOpened} onClick={() => openDoc("privacy", setPrivacyOpened)} icon={ShieldCheck} label="Privacy Policy" testid="consent-open-privacy" />
       </div>
-      <label className={`mt-3 flex items-start gap-2.5 text-xs ${bothOpened ? "cursor-pointer text-foreground" : "cursor-not-allowed text-muted-foreground opacity-70"}`}>
-        <input type="checkbox" data-testid="consent-checkbox" disabled={!bothOpened}
+      <label className="mt-3 flex items-start gap-2.5 text-xs cursor-pointer text-foreground">
+        <input type="checkbox" data-testid="consent-checkbox"
           checked={agreed} onChange={(e) => setAgreed(e.target.checked)}
           className="mt-0.5 h-4 w-4 shrink-0 accent-[hsl(var(--primary))]" />
         <span>
-          I have read and agree to the{" "}
+          I agree to the{" "}
           <button type="button" onClick={() => openDoc("terms", setTermsOpened)} className="font-semibold text-[hsl(var(--primary))] underline">Terms &amp; Conditions</button>{" "}and{" "}
           <button type="button" onClick={() => openDoc("privacy", setPrivacyOpened)} className="font-semibold text-[hsl(var(--primary))] underline">Privacy Policy</button>.
         </span>
       </label>
-      {!bothOpened && (
-        <p className="mt-2 text-[11px] font-medium text-amber-500" data-testid="consent-hint">
-          Open both documents above to enable this checkbox.
-        </p>
-      )}
 
       {doc && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" data-testid="consent-doc-modal">

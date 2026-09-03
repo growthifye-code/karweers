@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, Depends, BackgroundTasks
+from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, Depends, BackgroundTasks, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, JSONResponse, RedirectResponse, HTMLResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -4742,6 +4742,9 @@ async def list_strategy_tools():
 
 @api_router.get("/strategy-tools-bundle.pdf")
 async def strategy_toolkit_bundle():
+    managed = await _managed_collateral_response("tool-bundle")
+    if managed:
+        return managed
     from strategy_pdf import build_toolkit_bundle_pdf
     pdf = await asyncio.to_thread(build_toolkit_bundle_pdf)
     return Response(content=pdf, media_type="application/pdf",
@@ -4750,6 +4753,9 @@ async def strategy_toolkit_bundle():
 
 @api_router.get("/strategy-tools/{slug}.pdf")
 async def strategy_tool_pdf(slug: str):
+    managed = await _managed_collateral_response(f"tool:{slug}")
+    if managed:
+        return managed
     from strategy_tools import tool_by_slug
     from strategy_pdf import build_tool_pdf
     t = tool_by_slug(slug)
@@ -6730,6 +6736,9 @@ async def admin_promo_analytics(admin: dict = Depends(require_admin)):
 
 @api_router.get("/blueprint/starter.pdf")
 async def blueprint_starter():
+    managed = await _managed_collateral_response("leadmagnet:starter")
+    if managed:
+        return managed
     from blueprint_pdf import build_starter_pdf
     pdf = await asyncio.to_thread(build_starter_pdf)
     return Response(content=pdf, media_type="application/pdf",
@@ -6750,6 +6759,334 @@ async def blueprint_download(order_id: str):
         pdf = await asyncio.to_thread(build_starter_pdf)
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Content-Disposition": 'attachment; filename="SK-Leadership-Blueprint.pdf"'})
+
+
+# ============================================================================
+# COLLATERAL / DOWNLOADABLES MANAGER
+# Unified admin registry of every downloadable on the site (strategy tool PDFs,
+# lead-magnet PDFs, digital products/e-books, plus video/audio references) with
+# manual upload, AI-generate, edit and realtime publish (+ notify).
+# ============================================================================
+
+async def _managed_collateral_response(key: str):
+    """If a LIVE managed file override exists for this key, serve it; else None."""
+    doc = await db.collateral.find_one(
+        {"key": key, "live": True, "is_deleted": {"$ne": True}}, {"_id": 0})
+    f = (doc or {}).get("file") or {}
+    if not f.get("storage_path"):
+        return None
+    try:
+        from storage_helper import get_object
+        data, ctype = await asyncio.to_thread(get_object, f["storage_path"])
+    except Exception:
+        logger.exception("collateral override fetch failed for %s", key)
+        return None
+    fname = f.get("filename") or (key.replace(":", "-") + ".pdf")
+    return Response(content=data, media_type=f.get("content_type") or ctype,
+                    headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+async def _seed_collateral():
+    """Idempotently seed default collateral entries (only inserts missing keys)."""
+    from collateral import default_collateral
+    products = await db.products.find({}, {"_id": 0}).to_list(200)
+    defaults = default_collateral(products)
+    existing = set()
+    async for d in db.collateral.find({}, {"_id": 0, "key": 1}):
+        existing.add(d["key"])
+    for d in defaults:
+        if d["key"] in existing:
+            continue
+        await db.collateral.insert_one({
+            "id": str(uuid.uuid4()),
+            "key": d["key"],
+            "kind": d.get("kind", "pdf"),
+            "category": d.get("category", "Other"),
+            "title": d.get("title", ""),
+            "description": d.get("description", ""),
+            "cta_label": d.get("cta_label", "Download"),
+            "price": d.get("price"),
+            "default_route": d.get("default_route", ""),
+            "external_url": d.get("external_url", ""),
+            "locations": d.get("locations", []),
+            "source": d.get("source", "generated"),
+            "origin": "seed",
+            "file": None,
+            "live": False,
+            "version": 0,
+            "gen_status": "idle",
+            "is_deleted": False,
+            "created_at": now_iso(),
+            "updated_at": now_iso(),
+        })
+
+
+def _collateral_public(doc: dict) -> dict:
+    """Shape a collateral doc for the admin UI, resolving the live download URL."""
+    f = doc.get("file") or {}
+    if doc.get("live") and f.get("storage_path"):
+        live_url = f"/api/collateral/{doc['id']}/file"
+        managed = True
+    else:
+        live_url = doc.get("default_route") or doc.get("external_url") or ""
+        managed = False
+    return {
+        "id": doc["id"], "key": doc["key"], "kind": doc.get("kind"),
+        "category": doc.get("category"), "title": doc.get("title", ""),
+        "description": doc.get("description", ""), "cta_label": doc.get("cta_label", ""),
+        "price": doc.get("price"), "locations": doc.get("locations", []),
+        "source": doc.get("source"), "origin": doc.get("origin", "seed"),
+        "external_url": doc.get("external_url", ""),
+        "default_route": doc.get("default_route", ""),
+        "has_file": bool(f.get("storage_path")),
+        "file_name": f.get("filename", ""), "file_size": f.get("size", 0),
+        "live": bool(doc.get("live")), "serving_managed_file": managed,
+        "live_url": live_url, "version": doc.get("version", 0),
+        "gen_status": doc.get("gen_status", "idle"),
+        "updated_at": doc.get("updated_at"),
+    }
+
+
+class CollateralPatch(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    cta_label: Optional[str] = None
+    price: Optional[float] = None
+    external_url: Optional[str] = None
+
+
+class CollateralCreate(BaseModel):
+    title: str
+    category: str = "Custom"
+    kind: str = "doc"
+    description: Optional[str] = ""
+    cta_label: Optional[str] = "Download"
+    price: Optional[float] = None
+    external_url: Optional[str] = ""
+    page: Optional[str] = ""
+
+
+class CollateralAIGen(BaseModel):
+    instructions: Optional[str] = ""
+
+
+class CollateralPublish(BaseModel):
+    notify: bool = False
+
+
+_COLLATERAL_MIME = {
+    "pdf": "application/pdf", "epub": "application/epub+zip",
+    "doc": "application/msword", "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "xls": "application/vnd.ms-excel", "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "ppt": "application/vnd.ms-powerpoint", "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "csv": "text/csv", "txt": "text/plain", "zip": "application/zip",
+    "mp3": "audio/mpeg", "wav": "audio/wav", "m4a": "audio/mp4", "mp4": "video/mp4",
+    "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+}
+_COLLATERAL_MAX_BYTES = 40 * 1024 * 1024  # 40MB
+
+
+@api_router.get("/admin/collateral")
+async def admin_list_collateral(admin: dict = Depends(require_admin)):
+    await _seed_collateral()
+    docs = await db.collateral.find({"is_deleted": {"$ne": True}}, {"_id": 0}).to_list(500)
+    items = [_collateral_public(d) for d in docs]
+    order = {"Strategy Tool": 0, "Digital Product": 1, "Lead Magnet": 2, "Video": 3, "Audio": 4, "Custom": 5}
+    items.sort(key=lambda x: (order.get(x["category"], 9), x["title"].lower()))
+    cats = {}
+    for it in items:
+        cats.setdefault(it["category"], 0)
+        cats[it["category"]] += 1
+    return {"items": items, "counts": cats, "total": len(items)}
+
+
+@api_router.post("/admin/collateral")
+async def admin_create_collateral(body: CollateralCreate, admin: dict = Depends(require_admin)):
+    cid = str(uuid.uuid4())
+    doc = {
+        "id": cid, "key": f"custom:{cid}", "kind": body.kind, "category": body.category or "Custom",
+        "title": body.title.strip(), "description": (body.description or "").strip(),
+        "cta_label": body.cta_label or "Download", "price": body.price,
+        "default_route": "", "external_url": (body.external_url or "").strip(),
+        "locations": ([{"page": body.page, "label": body.page, "cta": body.cta_label or "Download"}] if body.page else []),
+        "source": "external" if body.external_url else "manual", "origin": "custom",
+        "file": None, "live": bool(body.external_url), "version": 0, "gen_status": "idle",
+        "is_deleted": False, "created_at": now_iso(), "updated_at": now_iso(),
+    }
+    await db.collateral.insert_one(doc)
+    return _collateral_public(doc)
+
+
+@api_router.patch("/admin/collateral/{cid}")
+async def admin_patch_collateral(cid: str, body: CollateralPatch, admin: dict = Depends(require_admin)):
+    doc = await db.collateral.find_one({"id": cid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Collateral not found")
+    upd = {k: v for k, v in body.model_dump().items() if v is not None}
+    upd["updated_at"] = now_iso()
+    await db.collateral.update_one({"id": cid}, {"$set": upd})
+    if "price" in upd and doc.get("key", "").startswith("product:"):
+        slug = doc["key"].split("product:", 1)[1]
+        await db.products.update_one({"slug": slug}, {"$set": {"price": upd["price"]}})
+    doc = await db.collateral.find_one({"id": cid}, {"_id": 0})
+    return _collateral_public(doc)
+
+
+@api_router.delete("/admin/collateral/{cid}")
+async def admin_delete_collateral(cid: str, admin: dict = Depends(require_admin)):
+    doc = await db.collateral.find_one({"id": cid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Collateral not found")
+    if doc.get("origin") != "custom":
+        raise HTTPException(status_code=400, detail="Only custom collateral can be deleted; take built-in items offline instead.")
+    await db.collateral.update_one({"id": cid}, {"$set": {"is_deleted": True, "live": False, "updated_at": now_iso()}})
+    return {"ok": True}
+
+
+@api_router.post("/admin/collateral/{cid}/upload")
+async def admin_upload_collateral(cid: str, file: UploadFile = File(...), admin: dict = Depends(require_admin)):
+    doc = await db.collateral.find_one({"id": cid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Collateral not found")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(data) > _COLLATERAL_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="File too large (max 40MB)")
+    ext = (file.filename.rsplit(".", 1)[-1].lower() if file.filename and "." in file.filename else "bin")
+    ctype = file.content_type or _COLLATERAL_MIME.get(ext, "application/octet-stream")
+    path = f"sk-collateral/{cid}/{uuid.uuid4()}.{ext}"
+    from storage_helper import put_object
+    try:
+        result = await asyncio.to_thread(put_object, path, data, ctype)
+    except Exception:
+        logger.exception("collateral upload failed for %s", cid)
+        raise HTTPException(status_code=502, detail="Storage upload failed")
+    await db.collateral.update_one({"id": cid}, {"$set": {
+        "file": {"storage_path": result["path"], "filename": file.filename or f"{doc.get('key')}.{ext}",
+                 "content_type": ctype, "size": result.get("size", len(data))},
+        "version": int(doc.get("version", 0)) + 1, "gen_status": "idle", "updated_at": now_iso(),
+    }})
+    doc = await db.collateral.find_one({"id": cid}, {"_id": 0})
+    return _collateral_public(doc)
+
+
+@api_router.get("/collateral/{cid}/file")
+async def serve_collateral_file(cid: str):
+    doc = await db.collateral.find_one({"id": cid, "is_deleted": {"$ne": True}}, {"_id": 0})
+    f = (doc or {}).get("file") or {}
+    if not doc or not doc.get("live") or not f.get("storage_path"):
+        raise HTTPException(status_code=404, detail="File not available")
+    from storage_helper import get_object
+    try:
+        data, ctype = await asyncio.to_thread(get_object, f["storage_path"])
+    except Exception:
+        logger.exception("collateral serve failed for %s", cid)
+        raise HTTPException(status_code=502, detail="Storage read failed")
+    fname = f.get("filename") or f"{doc.get('key')}.bin"
+    return Response(content=data, media_type=f.get("content_type") or ctype,
+                    headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+async def _collateral_ai_generate(cid: str, instructions: str):
+    doc = await db.collateral.find_one({"id": cid}, {"_id": 0})
+    if not doc:
+        return
+    try:
+        prompt = (
+            "You are Sudarshan Karweer, a top-tier strategy & corporate advisor. Write a premium, "
+            "consultant-grade downloadable document.\n"
+            f"TITLE: {doc.get('title')}\n"
+            f"TOPIC/DESCRIPTION: {doc.get('description')}\n"
+            f"EXTRA INSTRUCTIONS: {instructions or 'None'}\n\n"
+            "Return ONLY valid JSON (no markdown fences) with this exact shape:\n"
+            '{"title": str, "subtitle": str, "sections": [{"heading": str, "body": str}], "key_takeaways": [str, str, str]}\n'
+            "Write 5-7 substantive sections. In each section body, separate paragraphs with a single newline. "
+            "Be specific, practical and India/global-relevant. No preamble, JSON only."
+        )
+        chat = new_chat(f"collateral-{cid}")
+        text = ""
+        async for ev in chat.stream_message(UserMessage(text=prompt)):
+            if isinstance(ev, TextDelta):
+                text += ev.content
+        raw = text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```", 2)[1] if "```" in raw[3:] else raw.strip("`")
+            raw = raw[4:] if raw.lower().startswith("json") else raw
+        start, end = raw.find("{"), raw.rfind("}")
+        content = json.loads(raw[start:end + 1]) if start >= 0 else {"title": doc.get("title"), "sections": [], "key_takeaways": []}
+        from collateral_pdf import build_collateral_pdf
+        pdf = await asyncio.to_thread(build_collateral_pdf, content)
+        path = f"sk-collateral/{cid}/{uuid.uuid4()}.pdf"
+        from storage_helper import put_object
+        result = await asyncio.to_thread(put_object, path, pdf, "application/pdf")
+        fname = f"SK-{(doc.get('title') or 'document').strip().replace(' ', '-')[:60]}.pdf"
+        await db.collateral.update_one({"id": cid}, {"$set": {
+            "file": {"storage_path": result["path"], "filename": fname, "content_type": "application/pdf",
+                     "size": result.get("size", len(pdf))},
+            "version": int(doc.get("version", 0)) + 1, "gen_status": "done", "updated_at": now_iso(),
+        }})
+    except Exception:
+        logger.exception("collateral AI generate failed for %s", cid)
+        await db.collateral.update_one({"id": cid}, {"$set": {"gen_status": "error", "updated_at": now_iso()}})
+
+
+@api_router.post("/admin/collateral/{cid}/ai-generate")
+async def admin_ai_generate_collateral(cid: str, body: CollateralAIGen, background: BackgroundTasks,
+                                       admin: dict = Depends(require_admin)):
+    doc = await db.collateral.find_one({"id": cid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Collateral not found")
+    if doc.get("kind") not in ("pdf", "ebook", "doc"):
+        raise HTTPException(status_code=400, detail="AI generation produces a PDF; only document-type collateral is supported.")
+    await db.collateral.update_one({"id": cid}, {"$set": {"gen_status": "running", "updated_at": now_iso()}})
+    background.add_task(_collateral_ai_generate, cid, body.instructions or "")
+    return {"ok": True, "gen_status": "running"}
+
+
+async def _notify_collateral_update(doc: dict):
+    try:
+        title = doc.get("title", "a resource")
+        subs = await db.subscribers.find({"unsubscribed": {"$ne": True}}, {"_id": 0, "email": 1, "name": 1}).to_list(5000)
+        loop = asyncio.get_event_loop()
+        for s in subs:
+            if not s.get("email"):
+                continue
+            loop.run_in_executor(None, lambda ss=s: send_admin_notify(
+                ss["email"], f"Updated: {title} is now available",
+                f"Hi {ss.get('name') or 'there'},\n\nWe've just refreshed \"{title}\". "
+                f"Grab the latest version here: {PUBLIC_SITE}\n\n— Team Sudarshan Karweer"))
+    except Exception:
+        logger.exception("collateral notify failed")
+
+
+@api_router.post("/admin/collateral/{cid}/publish")
+async def admin_publish_collateral(cid: str, body: CollateralPublish, background: BackgroundTasks,
+                                   admin: dict = Depends(require_admin)):
+    doc = await db.collateral.find_one({"id": cid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Collateral not found")
+    f = doc.get("file") or {}
+    if not f.get("storage_path") and not doc.get("external_url"):
+        raise HTTPException(status_code=400, detail="Upload a file or set an external URL before publishing.")
+    await db.collateral.update_one({"id": cid}, {"$set": {"live": True, "updated_at": now_iso()}})
+    if doc.get("key", "").startswith("product:") and f.get("storage_path"):
+        slug = doc["key"].split("product:", 1)[1]
+        await db.products.update_one({"slug": slug}, {"$set": {"download_url": f"/api/collateral/{cid}/file", "active": True}})
+    if body.notify:
+        background.add_task(_notify_collateral_update, doc)
+    doc = await db.collateral.find_one({"id": cid}, {"_id": 0})
+    return _collateral_public(doc)
+
+
+@api_router.post("/admin/collateral/{cid}/unpublish")
+async def admin_unpublish_collateral(cid: str, admin: dict = Depends(require_admin)):
+    doc = await db.collateral.find_one({"id": cid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Collateral not found")
+    await db.collateral.update_one({"id": cid}, {"$set": {"live": False, "updated_at": now_iso()}})
+    doc = await db.collateral.find_one({"id": cid}, {"_id": 0})
+    return _collateral_public(doc)
 
 
 app.include_router(api_router)
@@ -6779,6 +7116,19 @@ async def startup():
     await _ensure_index(db.articles, "slug", unique=True)
     await _ensure_index(db.consultations, "slot_date")
     await _ensure_index(db.insight_view_dedup, "at", expireAfterSeconds=172800)
+    await _ensure_index(db.collateral, "key", unique=True)
+    await _ensure_index(db.collateral, "id", unique=True)
+    try:
+        from storage_helper import init_storage
+        await asyncio.to_thread(init_storage)
+        logger.info("Object storage initialized")
+    except Exception as e:
+        logger.error("Object storage init failed: %s", e)
+    try:
+        await _seed_collateral()
+        logger.info("Collateral seeded")
+    except Exception:
+        logger.exception("Collateral seed failed")
     # Warm the in-memory ban cache with any still-active bans.
     now = datetime.now(timezone.utc)
     async for b in db.blocked_ips.find({}, {"_id": 0, "ip": 1, "banned_until": 1, "scope": 1}):

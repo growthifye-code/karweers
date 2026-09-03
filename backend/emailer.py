@@ -699,6 +699,36 @@ def send_test_email(to_email: str) -> str:
     return _smtp_send(msg)
 
 
+def send_admin_magic_link_email(to_email: str, link: str, expiry_min: int = 15, ip: str = "") -> str:
+    """Emergency admin sign-in link (fallback when the captcha/login is unavailable)."""
+    user = os.environ.get("GMAIL_USER")
+    pwd = os.environ.get("GMAIL_APP_PASSWORD")
+    if not user or not pwd or not to_email:
+        return "skipped"
+    ip_line = (f'<p style="font-size:12px;color:#9ca3af;margin-top:14px;">Requested from IP {_html.escape(ip)}. '
+               f'If this wasn\'t you, ignore this email — the link is single-use and expires shortly.</p>') if ip else ""
+    inner = (
+        '<p style="font-size:15px;color:#111;font-weight:600;">Your secure admin sign-in link</p>'
+        '<p style="font-size:14px;color:#374151;line-height:1.6;">Use the button below to sign in to the '
+        'Sudarshan Karweer admin console. No password or captcha required.</p>'
+        f'<a href="{link}" style="display:inline-block;margin-top:14px;background:#C6F135;color:#0A0A0A;'
+        f'padding:12px 24px;border-radius:999px;text-decoration:none;font-weight:700;font-size:14px;">Sign in to admin</a>'
+        f'<p style="font-size:13px;color:#374151;line-height:1.6;margin-top:16px;">This link is '
+        f'<strong>single-use</strong> and expires in <strong>{int(expiry_min)} minutes</strong>.</p>'
+        f'<p style="font-size:12px;color:#9ca3af;word-break:break-all;margin-top:6px;">{_html.escape(link)}</p>'
+        f'{ip_line}'
+        '<p style="font-size:13px;color:#374151;margin-top:16px;">— Sudarshan Karweer platform security</p>'
+    )
+    msg = EmailMessage()
+    msg["Subject"] = "Your secure admin sign-in link"
+    msg["From"] = user
+    msg["To"] = to_email
+    msg.set_content(f"Your secure admin sign-in link (expires in {int(expiry_min)} min, single-use): {link}")
+    msg.add_alternative(_shell("Admin sign-in", inner), subtype="html")
+    return _smtp_send(msg)
+
+
+
 
 def _inr(v) -> str:
     try:

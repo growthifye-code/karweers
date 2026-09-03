@@ -1,8 +1,9 @@
 import "@/App.css";
+import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, useLocation, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider } from "@/context/AuthContext";
-import { ADMIN_PATH } from "@/config";
+import { getAdminPath, loadPublicConfig } from "@/config";
 import Home from "@/pages/Home";
 import AboutPage from "@/pages/AboutPage";
 import ServicesIndex from "@/pages/ServicesIndex";
@@ -49,6 +50,10 @@ import VpnGate from "@/components/VpnGate";
 
 function AppRoutes() {
   const location = useLocation();
+  const [adminPath, setAdminPath] = useState(getAdminPath());
+  useEffect(() => {
+    loadPublicConfig().then((cfg) => { if (cfg?.admin_path) setAdminPath(cfg.admin_path); });
+  }, []);
   // Process Google OAuth callback FIRST (session_id in URL fragment).
   if (location.hash?.includes("session_id=")) return <AuthCallback />;
   return (
@@ -96,7 +101,7 @@ function AppRoutes() {
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
       <Route path="/dashboard" element={<ProtectedRoute><ClientDashboard /></ProtectedRoute>} />
-      <Route path={ADMIN_PATH} element={<ProtectedRoute admin><AdminDashboard /></ProtectedRoute>} />
+      <Route path={adminPath} element={<ProtectedRoute admin><AdminDashboard /></ProtectedRoute>} />
       <Route path="/admin" element={<Navigate to="/login" replace />} />
       <Route path="/booking/manage" element={<BookingManage />} />
     </Routes>

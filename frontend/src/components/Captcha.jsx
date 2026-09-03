@@ -1,5 +1,6 @@
 import { forwardRef } from "react";
 import HCaptcha from "@hcaptcha/react-hcaptcha";
+import { getHcaptchaSitekey } from "@/config";
 
 // hCaptcha's official always-pass TEST sitekey (works on ANY hostname, never challenges).
 const TEST_SITEKEY = "10000000-ffff-ffff-ffff-000000000001";
@@ -8,13 +9,14 @@ const TEST_SITEKEY = "10000000-ffff-ffff-ffff-000000000001";
 // cannot complete a challenge on the ephemeral preview domain. Select by EXACT hostname:
 // real key only on production; the always-pass test key everywhere else (preview/localhost).
 // The backend already auto-passes captcha on preview hosts, so the test token is accepted
-// on preview and full siteverify runs only on production.
+// on preview and full siteverify runs only on production. The production sitekey is served
+// by the backend (/api/public-config → getHcaptchaSitekey) so it can be rotated via .env.
 const PRODUCTION_HOSTNAMES = new Set(["sudarshankarweer.com", "www.sudarshankarweer.com"]);
 
 function pickSitekey() {
   const host = (typeof window !== "undefined" ? window.location.hostname : "").toLowerCase();
   if (PRODUCTION_HOSTNAMES.has(host)) {
-    return process.env.REACT_APP_HCAPTCHA_SITEKEY || TEST_SITEKEY;
+    return getHcaptchaSitekey() || TEST_SITEKEY;
   }
   return TEST_SITEKEY;
 }

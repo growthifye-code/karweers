@@ -542,3 +542,8 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - On failure, the exact hCaptcha error-codes are appended to the 403 detail (e.g. "Captcha verification failed [sitekey-secret-mismatch]") so config issues are diagnosable from the login screen without server-log access. Still logged server-side too.
 - Frontend & backend sitekeys confirmed matching (73c8f63e...). If it still fails post-redeploy, the bracketed code identifies whether it's an account mismatch (sitekey-secret-mismatch), stale deployed secret (invalid-input-secret), or domain/token issue (invalid-input-response).
 - Self-tested via direct verify_captcha() call: bad token -> "Captcha verification failed [invalid-input-response]". Needs REDEPLOY to reach the live site.
+
+## Iteration 5.x (2026-09-03) — Admin Magic Link + Env-driven Admin Path & Captcha
+- **Env-driven Admin Path**: `ADMIN_PATH` now read from backend/.env; frontend fetches it + the hCaptcha sitekey from new `GET /api/public-config` at startup (config.js getAdminPath/getHcaptchaSitekey/loadPublicConfig, cached in localStorage). App.js admin Route + lib/api.js interceptor + Captcha.jsx use the runtime value. Rotate the admin URL by editing ADMIN_PATH only.
+- **Admin Magic Link fallback**: emergency passwordless admin sign-in if captcha fails. POST /api/auth/magic-link (allowlist-only, silent success, 3/15min rate limit, single-use 15-min token in `magic_links`), GET /api/auth/magic-login (verifies+single-use, mints admin JWT, redirects `/login#magic_token=`). Login.jsx magic panel (magic-toggle/magic-email/magic-submit) + `#magic_token=` handler. New emailer send_admin_magic_link_email.
+- Verified via curl (all paths incl. single-use + rate-limit) + screenshot. Test data cleaned.

@@ -3784,7 +3784,110 @@ async def list_subscribers(admin: dict = Depends(require_admin)):
 
 
 PUBLIC_SITE = "https://www.sudarshankarweer.com"
-ADMIN_PATH = "/sk-control-92f4a7e1"  # obscured admin console path (kept in sync with frontend src/config.js)
+ADMIN_PATH = os.environ.get("ADMIN_PATH", "/sk-control-92f4a7e1")  # obscured admin console path (kept in sync with frontend via /api/public-config)
+
+
+# ---------------- Public config (single source of truth for the frontend) ----------------
+@api_router.get("/public-config")
+async def public_config():
+    """Non-sensitive config the frontend reads at startup (admin console path + captcha sitekey)."""
+    return {
+        "admin_path": ADMIN_PATH,
+        "hcaptcha_sitekey": os.environ.get("HCAPTCHA_SITEKEY", ""),
+    }
+
+
+# ---------------- Admin Magic Link (emergency fallback login) ----------------
+MAGIC_LINK_TTL_MIN = int(os.environ.get("MAGIC_LINK_TTL_MIN", "15"))
+MAGIC_LINK_MAX_PER_WINDOW = int(os.environ.get("MAGIC_LINK_MAX_PER_WINDOW", "3"))
+MAGIC_LINK_WINDOW_MIN = int(os.environ.get("MAGIC_LINK_WINDOW_MIN", "15"))
+
+
+def _magic_token(email: str, jti: str) -> str:
+    return pyjwt.encode({
+        "purpose": "magic_login",
+        "email": (email or "").lower(),
+        "jti": jti,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=MAGIC_LINK_TTL_MIN),
+    }, get_jwt_secret(), algorithm="HS256")
+
+
+def _site_base(request: Request) -> str:
+    """Best-effort public base URL for building same-domain links (works on preview + prod)."""
+    origin = request.headers.get("origin")
+    if origin:
+        return origin.rstrip("/")
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+    if host:
+        proto = request.headers.get("x-forwarded-proto", "https")
+        return f"{proto}://{host}"
+    return PUBLIC_SITE
+
+
+class MagicLinkIn(BaseModel):
+    email: EmailStr
+
+
+@api_router.post("/auth/magic-link")
+async def request_magic_link(body: MagicLinkIn, request: Request, background: BackgroundTasks):
+    """Email an admin a single-use, short-lived sign-in link. Silent success (no user enumeration)."""
+    email = (body.email or "").lower().strip()
+    # Only allowlisted admins ever get a link; everyone else gets a silent OK.
+    if email in ADMIN_ALLOWLIST:
+        window_start = datetime.now(timezone.utc) - timedelta(minutes=MAGIC_LINK_WINDOW_MIN)
+        recent = await db.magic_links.count_documents({
+            "email": email, "created_at": {"$gte": window_start.isoformat()}})
+        if recent < MAGIC_LINK_MAX_PER_WINDOW:
+            jti = uuid.uuid4().hex
+            now = datetime.now(timezone.utc)
+            await db.magic_links.insert_one({
+                "jti": jti, "email": email, "used": False,
+                "created_at": now.isoformat(),
+                "expire_at": now + timedelta(minutes=MAGIC_LINK_TTL_MIN),
+                "ip": _client_ip(request),
+            })
+            link = f"{_site_base(request)}/api/auth/magic-login?token={_magic_token(email, jti)}"
+            from emailer import send_admin_magic_link_email
+            background.add_task(send_admin_magic_link_email, email, link, MAGIC_LINK_TTL_MIN, _client_ip(request))
+    return {"ok": True}
+
+
+@api_router.get("/auth/magic-login")
+async def magic_login(token: str, request: Request):
+    """Verify a magic-link token, mint an admin session, and redirect into the console."""
+    front = _site_base(request)
+    fail = RedirectResponse(f"{front}/login?magic=invalid")
+    try:
+        data = pyjwt.decode(token, get_jwt_secret(), algorithms=["HS256"])
+    except Exception:
+        return fail
+    if data.get("purpose") != "magic_login":
+        return fail
+    email = (data.get("email") or "").lower()
+    jti = data.get("jti")
+    if email not in ADMIN_ALLOWLIST or not jti:
+        return fail
+    # Enforce single use.
+    rec = await db.magic_links.find_one_and_update(
+        {"jti": jti, "email": email, "used": False},
+        {"$set": {"used": True, "used_at": now_iso()}})
+    if not rec:
+        return fail
+    # Ensure the admin user exists (allowlisted email is always an admin).
+    user = await db.users.find_one({"email": email})
+    if not user:
+        uid = str(uuid.uuid4())
+        user = {"id": uid, "email": email, "name": "Sudarshan Karweer",
+                "password_hash": hash_password(uuid.uuid4().hex), "role": "admin",
+                "created_at": now_iso()}
+        await db.users.insert_one(dict(user))
+    role = "admin"
+    if user.get("role") != role:
+        await db.users.update_one({"id": user["id"]}, {"$set": {"role": role}})
+    jwt_token = create_access_token(user["id"], email, role)
+    return RedirectResponse(f"{front}/login#magic_token={jwt_token}")
+
+
 
 
 def _unsub_token(email: str) -> str:

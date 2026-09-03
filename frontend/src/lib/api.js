@@ -1,5 +1,5 @@
 import axios from "axios";
-import { ADMIN_PATH } from "@/config";
+import { getAdminPath } from "@/config";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
@@ -20,7 +20,7 @@ api.interceptors.response.use(
     if (error?.response?.status === 401) {
       localStorage.removeItem("sk_token");
       const p = window.location.pathname;
-      if ((p.startsWith(ADMIN_PATH) || p.startsWith("/admin") || p.startsWith("/dashboard")) && p !== "/login") {
+      if ((p.startsWith(getAdminPath()) || p.startsWith("/admin") || p.startsWith("/dashboard")) && p !== "/login") {
         window.location.replace("/login");
       }
     }

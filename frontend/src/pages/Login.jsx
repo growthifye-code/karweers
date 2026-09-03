@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Logo } from "@/components/Navbar";
@@ -6,7 +6,8 @@ import { useAuth, friendlyAuthError } from "@/context/AuthContext";
 import { SK_PHOTOS } from "@/lib/assets";
 import Captcha from "@/components/Captcha";
 import ConsentGate from "@/components/ConsentGate";
-import { ADMIN_PATH } from "@/config";
+import { getAdminPath } from "@/config";
+import api from "@/lib/api";
 
 function GoogleIcon() {
   return (
@@ -28,6 +29,27 @@ export default function Login() {
   const [agreed, setAgreed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [showMagic, setShowMagic] = useState(false);
+  const [magicEmail, setMagicEmail] = useState("");
+  const [magicBusy, setMagicBusy] = useState(false);
+  const [magicSent, setMagicSent] = useState(false);
+
+  // Handle the magic-link round trip: backend redirects here with the admin JWT in the
+  // URL fragment (never sent to a server). Store it and bounce into the admin console.
+  useEffect(() => {
+    const hash = window.location.hash || "";
+    const m = hash.match(/magic_token=([^&]+)/);
+    if (m && m[1]) {
+      localStorage.setItem("sk_token", decodeURIComponent(m[1]));
+      window.location.replace(getAdminPath());
+      return;
+    }
+    const q = new URLSearchParams(window.location.search);
+    if (q.get("magic") === "invalid") {
+      setError("That sign-in link is invalid or has expired. Request a fresh one below.");
+      setShowMagic(true);
+    }
+  }, []);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -38,7 +60,7 @@ export default function Login() {
     try {
       const user = await login(email, password, captcha, agreed);
       toast.success("Welcome back!");
-      navigate(user.role === "admin" ? ADMIN_PATH : "/dashboard");
+      navigate(user.role === "admin" ? getAdminPath() : "/dashboard");
     } catch (err) {
       setError(friendlyAuthError(err, "Login failed"));
     } finally {
@@ -56,6 +78,23 @@ export default function Login() {
     } catch (err) {
       setError(friendlyAuthError(err, "Google sign-in failed"));
       setBusy(false);
+    }
+  };
+
+  const sendMagicLink = async () => {
+    if (!magicEmail) { setError("Enter your admin email to receive a sign-in link."); return; }
+    setMagicBusy(true);
+    setError("");
+    try {
+      await api.post("/auth/magic-link", { email: magicEmail });
+      setMagicSent(true);
+      toast.success("If that email is an admin, a secure sign-in link is on its way.");
+    } catch (err) {
+      // Silent success by design — surface only genuine transport errors.
+      setMagicSent(true);
+      toast.success("If that email is an admin, a secure sign-in link is on its way.");
+    } finally {
+      setMagicBusy(false);
     }
   };
 
@@ -95,6 +134,31 @@ export default function Login() {
             <GoogleIcon /> Continue with Google
           </button>
           <p className="mt-3 text-center text-xs text-muted-foreground">{!agreed ? "Agree to the Terms & Privacy above to continue." : !captcha ? "Complete the captcha above to continue with Google." : "Google sign-in unlocks personalised recommendations & your Learning Hub."}</p>
+
+          <div className="mt-6 rounded-lg border border-border/60 bg-secondary/30 p-4">
+            {!showMagic ? (
+              <button type="button" data-testid="magic-toggle" onClick={() => setShowMagic(true)}
+                className="text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
+                Admin having trouble with the captcha? Email me a secure sign-in link
+              </button>
+            ) : magicSent ? (
+              <p className="text-xs text-muted-foreground" data-testid="magic-sent">
+                If that email belongs to an admin, a single-use sign-in link is on its way. It expires in 15 minutes — check your inbox.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-xs font-semibold text-foreground">Admin magic sign-in</p>
+                <p className="text-xs text-muted-foreground">Emergency backdoor for admins if the captcha is unavailable. We email a single-use link (no password needed).</p>
+                <input value={magicEmail} onChange={(e) => setMagicEmail(e.target.value)} type="email" placeholder="Admin email" data-testid="magic-email"
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]" />
+                <button type="button" onClick={sendMagicLink} disabled={magicBusy} data-testid="magic-submit"
+                  className="w-full rounded-full border border-border bg-background px-4 py-2.5 text-xs font-semibold transition-colors hover:bg-secondary disabled:opacity-60">
+                  {magicBusy ? "Sending…" : "Email me a sign-in link"}
+                </button>
+              </div>
+            )}
+          </div>
+
           <p className="mt-6 text-sm text-muted-foreground">
             New client? <Link to="/register" className="font-semibold text-[hsl(var(--primary))]">Create an account</Link>
           </p>

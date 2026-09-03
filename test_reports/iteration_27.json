@@ -1,0 +1,30 @@
+{
+  "summary": "Iteration 27 — schedule toggle, gate-unlock logging, abuse dashboard fields, and friendly error path all validated. Backend pytest: 5/5 passing (POST /api/admin/collateral/ai-refresh-schedule flips scheduled on and off; GET /api/admin/collateral/ai-refresh-status returns full shape {running,total,done,finished_at,scheduled,last_auto_run}; POST /api/collateral/unlock inserts masked email into db.gate_unlocks and it surfaces in GET /api/admin/security under gate_unlocks[] with unlocks_today >= 1; /admin/security response now carries download_activity {top:[{title,category,downloads,downloads_week}], downloads_today, total} and gate_unlocks/unlocks_today alongside existing banned/alerts/offenders/trend; wrong-password login still returns 401 so frontend can distinguish it from 5xx friendly-busy). Frontend admin (/admin): Overview 'Download activity' (download-spikes) and 'Recent gate unlocks' (gate-unlocks) panels both render inside abuse-activity grid; Collateral tab (admin-tab-collateral) shows collateral-refresh-panel with the new collateral-schedule-toggle checkbox — toggling flips scheduled false→true, success toast 'Monthly auto-refresh ON — runs on the 1st of each month.' fires, and after full page reload the checked state persists (verified true→true, then reset to OFF as cleanup). The collateral-bulk-refresh button was NOT clicked. Friendly-error UI path: could not be exercised in-browser because the /login form's hCaptcha widget blocks submit before the API call fires (both the intercepted-502 case and the wrong-password case surfaced 'Please complete the captcha.' first). The friendlyAuthError() helper in AuthContext.js is however correctly wired (returns the 'briefly busy' string on no-response / 5xx / non-JSON body / 520/522/524, and passes through Pydantic detail otherwise) and Login.jsx + Register.jsx both use it in catch blocks — code path validated by inspection.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration27.py",
+    "/app/test_reports/pytest/iteration27.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now ~7400 lines — collateral/schedule/security surface still deserves its own module (recurring since iter 25/26).",
+    "FastAPI @app.on_event startup/shutdown remains deprecated — migrate to lifespan handlers.",
+    "_digest_scheduler() runs _bulk_ai_refresh on the 1st of the month based on last_auto_run, but there is no stale-lock guard on app_meta.collateral_refresh.running — if a scheduled auto-run crashes mid-way, running stays true and every future refresh (auto or manual) will 409 until DB is manually reset. Add a TTL/started_at-based stale-lock recovery.",
+    "collateral_unlock() logs an event to db.gate_unlocks on every POST including when the email is invalid or missing (email_masked becomes '—'). Consider only logging when EMAIL_RE matches to keep the abuse dashboard clean; today an attacker spamming the endpoint with empty payloads inflates unlocks_today with '—' rows."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration27.py"
+  ],
+  "success_rate": {"backend": "100% (5/5)", "frontend": "100% for testable paths (schedule toggle + persistence + overview panels). Friendly-error UI branch not exercisable in-browser due to captcha guard; code path verified by source review."},
+  "test_credentials": "sudarshan@karweers.com / Sudarshan@2026 (preview accepts captcha_token='x' with consent:true on API).",
+  "seed_data_creation": "Cleaned up. Deleted test subscribers matching /^test_iter27_/ and gate_unlocks rows with source='test-iter27'. collateral_refresh_schedule.enabled reset to false (verified). No other persisted data.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend tests at /app/backend/tests/test_iteration27.py. Login uses field 'access_token' in response body (fallback 'token'). To test the friendly-error UI path in-browser you cannot rely on real submit because /login gates on captcha resolution — either (a) call setError() directly via a component test, or (b) mock window.hcaptcha to bypass the widget then intercept /api/auth/login. schedule persistence assertion works: page.reload() + re-click admin-tab-collateral, re-read the checkbox state. NEVER click collateral-bulk-refresh (real 14-PDF AI run). Overview panels render inside data-testid='abuse-activity' grid — both download-spikes and gate-unlocks show even when empty (they gate only on security.download_activity being present).",
+  "rca of the issue": "N/A — no bugs found."
+}

@@ -109,6 +109,18 @@ export default function CollateralAdmin() {
     }
   };
 
+  const [scheduled, setScheduled] = useState(false);
+  useEffect(() => {
+    api.get("/admin/collateral/ai-refresh-status").then((r) => setScheduled(!!r.data.scheduled)).catch(() => {});
+  }, []);
+  const toggleSchedule = async () => {
+    try {
+      const r = await api.post("/admin/collateral/ai-refresh-schedule", { enabled: !scheduled });
+      setScheduled(r.data.scheduled);
+      toast.success(r.data.scheduled ? "Monthly auto-refresh ON — runs on the 1st of each month." : "Monthly auto-refresh OFF.");
+    } catch { toast.error("Couldn't update schedule"); }
+  };
+
   // Poll while any AI generation is running.
   useEffect(() => {
     const anyRunning = items.some((i) => i.gen_status === "running");
@@ -225,6 +237,10 @@ export default function CollateralAdmin() {
               <RefreshCw className="h-3.5 w-3.5" /> Regenerate all toolkit PDFs
             </button>
           )}
+          <label className="mt-3 flex items-center gap-2 text-xs cursor-pointer" data-testid="collateral-schedule-toggle">
+            <input type="checkbox" checked={scheduled} onChange={toggleSchedule} className="h-4 w-4 accent-[hsl(var(--primary))]" />
+            <span>Auto-refresh monthly (1st of each month)</span>
+          </label>
         </div>
         <div className="rounded-2xl border border-border bg-card p-5 lg:col-span-2" data-testid="collateral-leaderboard">
           <div className="flex items-center justify-between">

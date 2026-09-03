@@ -11,6 +11,7 @@ import VaultPanel from "@/pages/VaultPanel";
 import InsightsAdmin from "@/components/InsightsAdmin";
 import RevenueAdmin from "@/components/RevenueAdmin";
 import CollateralAdmin from "@/components/CollateralAdmin";
+import { ADMIN_PATH } from "@/config";
 
 const CATS = [
   { key: "news", label: "News" },
@@ -178,8 +179,8 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search).get("calendar");
-    if (p === "connected") { toast.success("Google Calendar connected — confirmed sessions will sync automatically."); window.history.replaceState({}, "", "/admin"); }
-    else if (p === "error") { toast.error("Could not connect Google Calendar. Please try again."); window.history.replaceState({}, "", "/admin"); }
+    if (p === "connected") { toast.success("Google Calendar connected — confirmed sessions will sync automatically."); window.history.replaceState({}, "", ADMIN_PATH); }
+    else if (p === "error") { toast.error("Could not connect Google Calendar. Please try again."); window.history.replaceState({}, "", ADMIN_PATH); }
   }, []);
 
   const calWarnedRef = useRef(false);
@@ -822,6 +823,47 @@ export default function AdminDashboard() {
                             <span className="ml-auto text-muted-foreground">{a.created_at ? new Date(a.created_at).toLocaleString() : ""}</span>
                           </div>
                         ))}
+                      </div>
+                    </div>
+                  )}
+                  {security && security.download_activity && (
+                    <div className="mt-5 grid gap-4 md:grid-cols-2" data-testid="abuse-activity">
+                      <div className="rounded-xl border border-border p-4" data-testid="download-spikes">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-sm font-bold">Download activity</h4>
+                          <span className="text-xs text-muted-foreground">{security.download_activity.downloads_today} today · {security.download_activity.total} total</span>
+                        </div>
+                        {security.download_activity.top.length === 0 ? (
+                          <p className="mt-2 text-xs text-muted-foreground">No downloads recorded yet.</p>
+                        ) : (
+                          <ul className="mt-3 space-y-1.5">
+                            {security.download_activity.top.map((t, i) => (
+                              <li key={i} className="flex items-center justify-between text-xs" data-testid={`download-spike-${i}`}>
+                                <span className="truncate pr-2">{t.title}</span>
+                                <span className="shrink-0 font-semibold">{t.downloads_week} <span className="font-normal text-muted-foreground">this wk</span></span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                      <div className="rounded-xl border border-border p-4" data-testid="gate-unlocks">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-sm font-bold">Recent gate unlocks</h4>
+                          <span className="text-xs text-muted-foreground">{security.unlocks_today || 0} today</span>
+                        </div>
+                        {(!security.gate_unlocks || security.gate_unlocks.length === 0) ? (
+                          <p className="mt-2 text-xs text-muted-foreground">No email-gated downloads unlocked yet.</p>
+                        ) : (
+                          <ul className="mt-3 space-y-1.5">
+                            {security.gate_unlocks.slice(0, 6).map((u, i) => (
+                              <li key={i} className="flex items-center gap-2 text-xs" data-testid={`gate-unlock-${i}`}>
+                                <span className="font-medium">{u.email_masked}</span>
+                                <span className="font-mono text-muted-foreground">{u.ip}</span>
+                                <span className="ml-auto text-muted-foreground">{u.at ? new Date(u.at).toLocaleString() : ""}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
                       </div>
                     </div>
                   )}

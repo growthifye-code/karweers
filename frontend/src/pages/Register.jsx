@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Logo } from "@/components/Navbar";
-import { useAuth, formatApiErrorDetail } from "@/context/AuthContext";
+import { useAuth, friendlyAuthError } from "@/context/AuthContext";
 import { SK_PHOTOS } from "@/lib/assets";
 import Captcha from "@/components/Captcha";
 import ConsentGate from "@/components/ConsentGate";
@@ -38,7 +38,7 @@ export default function Register() {
       toast.success("Account created!");
       navigate("/dashboard");
     } catch (err) {
-      setError(formatApiErrorDetail(err.response?.data?.detail) || "Registration failed");
+      setError(friendlyAuthError(err, "Registration failed"));
     } finally {
       setBusy(false);
     }
@@ -54,7 +54,7 @@ export default function Register() {
     try {
       await loginWithGoogle(captcha, agreed);
     } catch (err) {
-      setError(formatApiErrorDetail(err.response?.data?.detail) || "Google sign-in failed");
+      setError(friendlyAuthError(err, "Google sign-in failed"));
       setBusy(false);
     }
   };

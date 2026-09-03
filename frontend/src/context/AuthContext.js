@@ -13,7 +13,9 @@ export function AuthProvider({ children }) {
     // Returning from Google OAuth — let AuthCallback exchange the session first.
     if (window.location.hash?.includes("session_id=")) { setLoading(false); return; }
     // /auth/me resolves either a JWT (bearer) or a Google session cookie.
-    api.get("/auth/me")
+    // A timeout guarantees we never hang on a protected page — on any failure the
+    // user falls through to unauthenticated and ProtectedRoute sends them to /login.
+    api.get("/auth/me", { timeout: 12000 })
       .then((r) => setUser(r.data))
       .catch(() => { localStorage.removeItem("sk_token"); })
       .finally(() => setLoading(false));
@@ -80,4 +82,20 @@ export function formatApiErrorDetail(detail) {
     return detail.map((e) => (e && typeof e.msg === "string" ? e.msg : JSON.stringify(e))).filter(Boolean).join(" ");
   if (detail && typeof detail.msg === "string") return detail.msg;
   return String(detail);
+}
+
+// Turns any auth failure into a user-friendly message. Origin blips (no response,
+// 5xx, or a non-JSON body like a raw Cloudflare error page) become a clean retry hint.
+export function friendlyAuthError(err, fallback = "Something went wrong. Please try again.") {
+  const res = err && err.response;
+  const status = res && res.status;
+  const data = res && res.data;
+  if (!res || (status && status >= 500) || (status === 520) || (status === 522) || (status === 524)) {
+    return "The server was briefly busy. Please try again in a moment.";
+  }
+  if (typeof data === "string") {
+    // Non-JSON body (e.g. a Cloudflare/HTML error page) — never surface raw markup.
+    return "The server was briefly busy. Please try again in a moment.";
+  }
+  return formatApiErrorDetail(data && data.detail) || fallback;
 }

@@ -2,10 +2,11 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Logo } from "@/components/Navbar";
-import { useAuth, formatApiErrorDetail } from "@/context/AuthContext";
+import { useAuth, friendlyAuthError } from "@/context/AuthContext";
 import { SK_PHOTOS } from "@/lib/assets";
 import Captcha from "@/components/Captcha";
 import ConsentGate from "@/components/ConsentGate";
+import { ADMIN_PATH } from "@/config";
 
 function GoogleIcon() {
   return (
@@ -37,9 +38,9 @@ export default function Login() {
     try {
       const user = await login(email, password, captcha, agreed);
       toast.success("Welcome back!");
-      navigate(user.role === "admin" ? "/admin" : "/dashboard");
+      navigate(user.role === "admin" ? ADMIN_PATH : "/dashboard");
     } catch (err) {
-      setError(formatApiErrorDetail(err.response?.data?.detail) || "Login failed");
+      setError(friendlyAuthError(err, "Login failed"));
     } finally {
       setBusy(false);
     }
@@ -53,7 +54,7 @@ export default function Login() {
     try {
       await loginWithGoogle(captcha, agreed);
     } catch (err) {
-      setError(formatApiErrorDetail(err.response?.data?.detail) || "Google sign-in failed");
+      setError(friendlyAuthError(err, "Google sign-in failed"));
       setBusy(false);
     }
   };

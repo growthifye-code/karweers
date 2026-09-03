@@ -4,6 +4,7 @@ import { Menu, X, ArrowUpRight, ChevronDown, Phone, Mail } from "lucide-react";
 import ThemeToggle from "@/components/ThemeToggle";
 import { useAuth } from "@/context/AuthContext";
 import { CONTACT } from "@/lib/assets";
+import { ADMIN_PATH } from "@/config";
 
 export const SERVICE_LINKS = [
   { slug: "business-strategy", label: "Business & Growth Strategy" },
@@ -113,7 +114,7 @@ export default function Navbar() {
             <ThemeToggle />
             {user ? (
               <>
-                <Link to={user.role === "admin" ? "/admin" : "/dashboard"} data-testid="nav-dashboard" className="text-sm font-medium text-muted-foreground hover:text-foreground">{user.role === "admin" ? "Admin" : "Dashboard"}</Link>
+                <Link to={user.role === "admin" ? ADMIN_PATH : "/dashboard"} data-testid="nav-dashboard" className="text-sm font-medium text-muted-foreground hover:text-foreground">{user.role === "admin" ? "Admin" : "Dashboard"}</Link>
                 <button onClick={() => { logout(); navigate("/"); }} data-testid="nav-logout" className="text-sm font-medium text-muted-foreground hover:text-foreground">Logout</button>
               </>
             ) : (

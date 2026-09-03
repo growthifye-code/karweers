@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { track } from "@/lib/api";
+import { ADMIN_PATH } from "@/config";
 
 const LABELS = {
   "/": "Home", "/about": "About", "/services": "Services", "/insights": "Insights",
@@ -15,7 +16,7 @@ export default function PageTracker() {
   useEffect(() => {
     if (!user) return;
     const path = location.pathname;
-    if (path.startsWith("/admin") || path.startsWith("/dashboard")) return;
+    if (path.startsWith(ADMIN_PATH) || path.startsWith("/admin") || path.startsWith("/dashboard")) return;
     const label = LABELS[path] || (path.startsWith("/services/") ? "Service page" : path);
     track("page", path, label);
   }, [location.pathname, user]);

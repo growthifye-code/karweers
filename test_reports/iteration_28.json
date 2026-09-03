@@ -1,0 +1,41 @@
+{
+  "summary": "Verified admin path obfuscation, session-expiry redirect, and signed-token endpoints for blueprint download & resume payment. Backend: 8/8 pytest passed. Frontend: /admin -> /login redirect works, /sk-control-92f4a7e1 (unauth) -> /login, invalid sk_token in localStorage -> token cleared + redirected to /login (no hang), correct admin login lands on /sk-control-92f4a7e1 with dashboard fully rendered, wrong password shows the specific 'Invalid email or password' (not the generic 'briefly busy' fallback).",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration28_admin_obfuscation_tokens.py",
+    "/app/test_reports/pytest/iter28.xml"
+  ],
+  "action_items": [
+    "MINOR (docs mismatch): The review_request mentions data-testid 'admin-dashboard' but AdminDashboard.jsx only exposes 'admin-overview' and 'admin-tab-*' (e.g. admin-tab-collateral). Consider adding a root data-testid='admin-dashboard' on the outer container for easier future automation. Not blocking — dashboard renders correctly."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 7444 lines — should be split into modules (auth/payments/collateral/insights/admin).",
+    "Response interceptor in lib/api.js correctly redirects only for /admin, ADMIN_PATH and /dashboard on 401 — good scoping. Consider skipping the redirect during initial /auth/me bootstrap to avoid a flash-redirect on public pages that happen to make an auth-needing call (currently guarded by pathname check, works)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration28_admin_obfuscation_tokens.py"
+  ],
+  "success_rate": { "backend": "100%", "frontend": "100%" },
+  "test_credentials": "Admin: sudarshan@karweers.com / Sudarshan@2026 (from /app/memory/test_credentials.md).",
+  "seed_data_creation": "None. Cleared db.blocked_ips and db.login_attempts to avoid throttling during test run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend enforces captcha-gate on /api/auth/login (returns 400 'Captcha verification required' without a valid token). For UI tests, click the hCaptcha 'I am human' checkbox inside the hcaptcha iframe (frame url contains 'hcaptcha.com'; selector '#checkbox') then wait ~5-6s for auto-pass before clicking submit. AdminDashboard has no root 'admin-dashboard' testid; assert 'admin-tab-collateral' or 'admin-overview' instead. ADMIN_PATH = /sk-control-92f4a7e1. Token stored in localStorage as 'sk_token'.",
+  "verified_behaviors": [
+    "/admin (React) redirects to /login via <Navigate replace>",
+    "GET /sk-control-92f4a7e1 without auth -> /login (ProtectedRoute)",
+    "Correct admin login navigates to /sk-control-92f4a7e1 and renders full Admin Dashboard (Overview/CRM/Leads/Bookings/Availability/Service Desk/Articles/SK Insights/Collateral/Create/Revenue/Subscribers/Consent Log/Vault tabs visible)",
+    "Invalid sk_token in localStorage -> axios 401 interceptor clears token AND redirects to /login (no hang, 12s /auth/me timeout also in place)",
+    "Wrong-password login shows 'Invalid email or password' (specific 4xx), not 'server was briefly busy' (friendly path reserved for 5xx / non-JSON)",
+    "GET /api/blueprint/download?token=<invalid> -> 400 'invalid or has expired'",
+    "GET /api/blueprint/download?token missing -> 422 (FastAPI validation)",
+    "GET /api/blueprint/download/<unknown-id> -> 404 (legacy route)",
+    "GET /api/payments/resume/<unknown-raw-id> -> 404",
+    "GET /api/payments/resume/<garbage-jwt> -> 404 (decode fails, falls back to raw-id lookup)"
+  ]
+}

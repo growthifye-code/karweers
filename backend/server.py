@@ -1099,10 +1099,28 @@ async def admin_security(admin: dict = Depends(require_admin)):
                 days[i]["total"] += 1
                 break
 
+    # Recent gated-download unlocks (email captures) + download activity spikes.
+    unlocks = await db.gate_unlocks.find({}, {"_id": 0}).sort("at", -1).to_list(20)
+    wk = _iso_week()
+    dl_docs = await db.collateral.find(
+        {"is_deleted": {"$ne": True}}, {"_id": 0, "title": 1, "category": 1, "downloads": 1, "downloads_week": 1, "dl_week": 1}).to_list(500)
+    top_downloads = sorted(
+        [{"title": d.get("title"), "category": d.get("category"),
+          "downloads": int(d.get("downloads", 0) or 0),
+          "downloads_week": int(d.get("downloads_week", 0) or 0) if d.get("dl_week") == wk else 0}
+         for d in dl_docs if int(d.get("downloads", 0) or 0) > 0],
+        key=lambda x: x["downloads_week"], reverse=True)[:6]
+    today = now.strftime("%Y-%m-%d")
+    downloads_today = await db.collateral_dl_dedup.count_documents({"_id": {"$regex": f":{today}$"}})
+    unlocks_today = await db.gate_unlocks.count_documents({"day": today})
+
     return {"banned": banned, "active_bans": sum(1 for b in banned if b["active"]),
             "alerts": alerts, "unseen": unseen, "trend": days,
             "offenders": await _top_offenders(), "networks": _last_networks,
-            "countries": _last_countries, "blocked_countries": sorted(await blocked_countries())}
+            "countries": _last_countries, "blocked_countries": sorted(await blocked_countries()),
+            "gate_unlocks": unlocks, "unlocks_today": unlocks_today,
+            "download_activity": {"top": top_downloads, "downloads_today": downloads_today,
+                                  "total": sum(int(d.get("downloads", 0) or 0) for d in dl_docs)}}
 
 
 class CountryIn(BaseModel):
@@ -2226,6 +2244,15 @@ async def _digest_scheduler():
                 rlast = (rmeta or {}).get("last_run", "")
                 if not rlast or rlast[:7] != now.strftime("%Y-%m"):
                     await _send_monthly_report()
+            # Optional monthly AI toolkit refresh (opt-in) — 1st of month.
+            if EMERGENT_LLM_KEY and now.day == 1:
+                sched = await db.app_meta.find_one({"_id": "collateral_refresh_schedule"}) or {}
+                if sched.get("enabled") and sched.get("last_auto_run", "")[:7] != now.strftime("%Y-%m"):
+                    running = (await db.app_meta.find_one({"_id": "collateral_refresh"}) or {}).get("running")
+                    if not running:
+                        await db.app_meta.update_one({"_id": "collateral_refresh_schedule"},
+                                                     {"$set": {"last_auto_run": now_iso()}}, upsert=True)
+                        asyncio.create_task(_bulk_ai_refresh())
         except Exception:
             logger.exception("scheduler error")
         await asyncio.sleep(3600)
@@ -3755,6 +3782,7 @@ async def list_subscribers(admin: dict = Depends(require_admin)):
 
 
 PUBLIC_SITE = "https://www.sudarshankarweer.com"
+ADMIN_PATH = "/sk-control-92f4a7e1"  # obscured admin console path (kept in sync with frontend src/config.js)
 
 
 def _unsub_token(email: str) -> str:
@@ -4187,11 +4215,13 @@ async def abandon_payment(bid: str):
 
 @api_router.get("/payments/resume/{bid}")
 async def resume_payment(bid: str):
-    """Reopen checkout for an unpaid booking (used by the abandoned-cart nudge link)."""
-    b = await db.consultations.find_one({"id": bid}, {"_id": 0})
+    """Reopen checkout for an unpaid booking (used by the abandoned-cart nudge link).
+    `bid` may be a signed resume token (new links) or a raw id (legacy links)."""
+    real_bid = _read_resume_token(bid) or bid
+    b = await db.consultations.find_one({"id": real_bid}, {"_id": 0})
     if not b or b.get("paid") or b.get("status") != "pending_payment":
         raise HTTPException(status_code=404, detail="This booking is no longer awaiting payment.")
-    return {"booking_id": bid, "order_id": b.get("razorpay_order_id"), "amount": b.get("amount_paise"),
+    return {"booking_id": real_bid, "order_id": b.get("razorpay_order_id"), "amount": b.get("amount_paise"),
             "currency": "INR", "key_id": os.environ.get("RAZORPAY_KEY_ID", ""), "package": b.get("package"),
             "slot_date": b.get("slot_date"), "slot_time": b.get("slot_time"),
             "breakdown": {"base": b.get("amount"), "gst_pct": b.get("gst_pct", GST_PCT),
@@ -4291,7 +4321,7 @@ async def _process_pending_payments():
             {"status": "pending_payment", "paid": {"$ne": True}, "nudged_at": {"$exists": False},
              "created_at": {"$lt": nudge_before, "$gte": release_before}}).to_list(200)
         for b in pend:
-            resume_url = f"{PUBLIC_SITE}/resume/{b['id']}"
+            resume_url = f"{PUBLIC_SITE}/resume/{_resume_token(b['id'])}"
             try:
                 await asyncio.to_thread(send_abandoned_nudge_email, b.get("email", ""), b, resume_url)
             except Exception:
@@ -4568,6 +4598,34 @@ def _booking_token(bid: str) -> str:
     return pyjwt.encode({"purpose": "booking_manage", "bid": bid,
                          "exp": datetime.now(timezone.utc) + timedelta(days=60)},
                         get_jwt_secret(), algorithm="HS256")
+
+
+def _download_token(oid: str) -> str:
+    return pyjwt.encode({"purpose": "blueprint_dl", "oid": oid,
+                         "exp": datetime.now(timezone.utc) + timedelta(days=365)},
+                        get_jwt_secret(), algorithm="HS256")
+
+
+def _read_download_token(tok: str) -> Optional[str]:
+    try:
+        d = pyjwt.decode(tok, get_jwt_secret(), algorithms=["HS256"])
+        return d.get("oid") if d.get("purpose") == "blueprint_dl" else None
+    except Exception:
+        return None
+
+
+def _resume_token(bid: str) -> str:
+    return pyjwt.encode({"purpose": "resume", "bid": bid,
+                         "exp": datetime.now(timezone.utc) + timedelta(days=30)},
+                        get_jwt_secret(), algorithm="HS256")
+
+
+def _read_resume_token(tok: str) -> Optional[str]:
+    try:
+        d = pyjwt.decode(tok, get_jwt_secret(), algorithms=["HS256"])
+        return d.get("bid") if d.get("purpose") == "resume" else None
+    except Exception:
+        return None
 
 
 def _read_booking_token(tok: str) -> Optional[str]:
@@ -5935,10 +5993,10 @@ async def calendar_oauth_start(admin: dict = Depends(require_admin)):
 async def calendar_oauth_callback(request: Request, code: str = "", state: str = "", error: str = ""):
     front = os.environ.get("WEBAUTHN_ORIGIN", "")
     if error or not code:
-        return RedirectResponse(f"{front}/admin?calendar=error")
+        return RedirectResponse(f"{front}{ADMIN_PATH}?calendar=error")
     email = _gcal_read_state(state)
     if not email or email.lower() not in ADMIN_ALLOWLIST:
-        return RedirectResponse(f"{front}/admin?calendar=error")
+        return RedirectResponse(f"{front}{ADMIN_PATH}?calendar=error")
     try:
         loop = asyncio.get_event_loop()
         resp = await loop.run_in_executor(None, lambda: requests.post(GCAL_TOKEN_URI, data={
@@ -5946,7 +6004,7 @@ async def calendar_oauth_callback(request: Request, code: str = "", state: str =
             "redirect_uri": GCAL_REDIRECT_URI, "grant_type": "authorization_code"}, timeout=20))
         tok = resp.json()
         if not tok.get("access_token"):
-            return RedirectResponse(f"{front}/admin?calendar=error")
+            return RedirectResponse(f"{front}{ADMIN_PATH}?calendar=error")
         update = {"_id": "google_calendar", "email": email,
                   "token_enc": _enc(tok["access_token"]), "connected_at": now_iso()}
         if tok.get("refresh_token"):
@@ -5955,8 +6013,8 @@ async def calendar_oauth_callback(request: Request, code: str = "", state: str =
         await audit(request, email, "calendar_connected")
     except Exception:
         logger.exception("Calendar OAuth callback failed")
-        return RedirectResponse(f"{front}/admin?calendar=error")
-    return RedirectResponse(f"{front}/admin?calendar=connected")
+        return RedirectResponse(f"{front}{ADMIN_PATH}?calendar=error")
+    return RedirectResponse(f"{front}{ADMIN_PATH}?calendar=connected")
 
 
 @api_router.post("/admin/calendar/disconnect")
@@ -6389,7 +6447,7 @@ async def commerce_verify(body: CommerceVerifyIn):
     if o["kind"] == "product":
         prod = await db.products.find_one({"slug": o["ref_id"]}, {"_id": 0})
         if (prod or {}).get("type") == "blueprint" and (o.get("meta") or {}).get("scores"):
-            download_url = f"/api/blueprint/download/{o['id']}"
+            download_url = f"/api/blueprint/download?token={_download_token(o['id'])}"
         elif (prod or {}).get("download_url"):
             download_url = prod["download_url"]
         else:
@@ -6764,8 +6822,7 @@ async def blueprint_starter(request: Request):
                     headers={"Content-Disposition": 'attachment; filename="SK-Leadership-Blueprint-Starter.pdf"'})
 
 
-@api_router.get("/blueprint/download/{order_id}")
-async def blueprint_download(order_id: str):
+async def _serve_blueprint(order_id: str):
     o = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not o or not o.get("paid"):
         raise HTTPException(status_code=404, detail="Blueprint not found or payment not confirmed.")
@@ -6778,6 +6835,20 @@ async def blueprint_download(order_id: str):
         pdf = await asyncio.to_thread(build_starter_pdf)
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Content-Disposition": 'attachment; filename="SK-Leadership-Blueprint.pdf"'})
+
+
+@api_router.get("/blueprint/download")
+async def blueprint_download_token(token: str):
+    order_id = _read_download_token(token)
+    if not order_id:
+        raise HTTPException(status_code=400, detail="This download link is invalid or has expired.")
+    return await _serve_blueprint(order_id)
+
+
+@api_router.get("/blueprint/download/{order_id}")
+async def blueprint_download(order_id: str):
+    # Legacy raw-id links (kept working); new links use the signed ?token= form.
+    return await _serve_blueprint(order_id)
 
 
 # ============================================================================
@@ -7197,6 +7268,14 @@ async def collateral_unlock(body: DownloadUnlock, request: Request, response: Re
             await db.subscribers.update_one({"email": email}, {"$setOnInsert": {
                 "email": email, "name": (body.name or "there")[:120], "source": (body.source or "gated-download")[:80],
                 "created_at": now_iso()}}, upsert=True)
+    # Log the unlock for the admin abuse dashboard (IP is now spoof-resistant via CF-Connecting-IP).
+    now_dt = datetime.now(timezone.utc)
+    em = (body.email or "").strip().lower()
+    masked = (em[:2] + "***@" + em.split("@", 1)[1]) if "@" in em else "—"
+    await db.gate_unlocks.insert_one({"ip": _client_ip(request), "email_masked": masked,
+                                      "source": (body.source or "gated-download")[:80],
+                                      "at": now_dt.isoformat(), "day": now_dt.strftime("%Y-%m-%d"),
+                                      "created": now_dt})
     token = pyjwt.encode({"purpose": "dl_gate", "exp": datetime.now(timezone.utc) + timedelta(days=30)},
                          get_jwt_secret(), algorithm="HS256")
     response.set_cookie("dl_gate", token, httponly=True, secure=True, samesite="none", max_age=30 * 24 * 3600, path="/")
@@ -7233,8 +7312,21 @@ async def admin_bulk_refresh(background: BackgroundTasks, admin: dict = Depends(
 @api_router.get("/admin/collateral/ai-refresh-status")
 async def admin_bulk_refresh_status(admin: dict = Depends(require_admin)):
     meta = await db.app_meta.find_one({"_id": "collateral_refresh"}, {"_id": 0}) or {}
+    sched = await db.app_meta.find_one({"_id": "collateral_refresh_schedule"}, {"_id": 0}) or {}
     return {"running": bool(meta.get("running")), "total": meta.get("total", 0),
-            "done": meta.get("done", 0), "finished_at": meta.get("finished_at")}
+            "done": meta.get("done", 0), "finished_at": meta.get("finished_at"),
+            "scheduled": bool(sched.get("enabled")), "last_auto_run": sched.get("last_auto_run")}
+
+
+class CollateralSchedule(BaseModel):
+    enabled: bool
+
+
+@api_router.post("/admin/collateral/ai-refresh-schedule")
+async def admin_bulk_refresh_schedule(body: CollateralSchedule, admin: dict = Depends(require_admin)):
+    await db.app_meta.update_one({"_id": "collateral_refresh_schedule"},
+                                 {"$set": {"enabled": bool(body.enabled), "updated_at": now_iso()}}, upsert=True)
+    return {"scheduled": bool(body.enabled)}
 
 
 app.include_router(api_router)
@@ -7267,6 +7359,7 @@ async def startup():
     await _ensure_index(db.collateral, "key", unique=True)
     await _ensure_index(db.collateral, "id", unique=True)
     await _ensure_index(db.collateral_dl_dedup, "at", expireAfterSeconds=172800)
+    await _ensure_index(db.gate_unlocks, "created", expireAfterSeconds=2592000)
     try:
         from storage_helper import init_storage
         await asyncio.to_thread(init_storage)

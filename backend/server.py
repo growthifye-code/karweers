@@ -3812,14 +3812,30 @@ def _magic_token(email: str, jti: str) -> str:
     }, get_jwt_secret(), algorithm="HS256")
 
 
+def _magic_allowed_hosts() -> set:
+    """Trusted hosts a magic link may point to. Never derived from attacker-controllable
+    request headers alone — this prevents host/origin-injection token exfiltration."""
+    from urllib.parse import urlparse
+    hosts = {"www.sudarshankarweer.com", "sudarshankarweer.com"}
+    for env in ("WEBAUTHN_ORIGIN", "GOOGLE_CALENDAR_REDIRECT_URI", "MAGIC_LINK_BASE"):
+        v = os.environ.get(env, "")
+        if v:
+            h = urlparse(v if "//" in v else "https://" + v).netloc.split(",")[0].strip().lower()
+            if h:
+                hosts.add(h)
+    return hosts
+
+
 def _site_base(request: Request) -> str:
-    """Best-effort public base URL for building same-domain links (works on preview + prod)."""
-    origin = request.headers.get("origin")
-    if origin:
-        return origin.rstrip("/")
-    host = request.headers.get("x-forwarded-host") or request.headers.get("host")
-    if host:
-        proto = request.headers.get("x-forwarded-proto", "https")
+    """Trusted public base URL for building magic links. Uses the request host ONLY when it
+    is on the allowlist (works on preview + prod); otherwise falls back to the canonical site.
+    A spoofed Origin/Host can never redirect the emailed link to an untrusted domain."""
+    base = os.environ.get("MAGIC_LINK_BASE", "").rstrip("/")
+    if base:
+        return base
+    host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(",")[0].strip().lower()
+    if host and host in _magic_allowed_hosts():
+        proto = (request.headers.get("x-forwarded-proto", "https") or "https").split(",")[0].strip()
         return f"{proto}://{host}"
     return PUBLIC_SITE
 
@@ -7465,6 +7481,8 @@ async def startup():
     await _ensure_index(db.collateral, "id", unique=True)
     await _ensure_index(db.collateral_dl_dedup, "at", expireAfterSeconds=172800)
     await _ensure_index(db.gate_unlocks, "created", expireAfterSeconds=2592000)
+    await _ensure_index(db.magic_links, "jti", unique=True)
+    await _ensure_index(db.magic_links, "expire_at", expireAfterSeconds=3600)
     try:
         from storage_helper import init_storage
         await asyncio.to_thread(init_storage)

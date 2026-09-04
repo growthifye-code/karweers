@@ -61,6 +61,9 @@ db = client[os.environ['DB_NAME']]
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
 HCAPTCHA_SECRET = os.environ.get('HCAPTCHA_SECRET', '')
 HCAPTCHA_SITEKEY = os.environ.get('HCAPTCHA_SITEKEY', '')
+# Diagnostic flag: force full server-side hCaptcha verification even on the preview host, so
+# a real key pair can be validated end-to-end before a production deploy. Off by default.
+CAPTCHA_FORCE_VERIFY = os.environ.get('CAPTCHA_FORCE_VERIFY', '') == '1'
 _HCAPTCHA_TEST_SECRET = "0x0000000000000000000000000000000000000000"
 
 # Strict admin allowlist — ONLY these emails may ever hold the admin role.
@@ -100,7 +103,7 @@ def verify_captcha(token, ip=None, request=None):
     # dashboard, so the widget cannot complete a challenge on the ephemeral preview
     # domain. There the frontend uses the always-pass hCaptcha TEST key; accept a
     # present token. Production (real domain) always runs full server-side verify.
-    if _is_preview_host(request):
+    if _is_preview_host(request) and not CAPTCHA_FORCE_VERIFY:
         return True
     # Lenient mode: real site key set but real secret not yet configured.
     if HCAPTCHA_SECRET == _HCAPTCHA_TEST_SECRET:

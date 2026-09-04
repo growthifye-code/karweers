@@ -14,6 +14,12 @@ const TEST_SITEKEY = "10000000-ffff-ffff-ffff-000000000001";
 const PRODUCTION_HOSTNAMES = new Set(["sudarshankarweer.com", "www.sudarshankarweer.com"]);
 
 function pickSitekey() {
+  // Diagnostic override: force the real sitekey everywhere (used to validate a real key
+  // pair on the preview domain before deploying). Requires the preview host to be added to
+  // the hCaptcha site's allowed hostnames.
+  if (process.env.REACT_APP_CAPTCHA_FORCE_REAL === "1") {
+    return getHcaptchaSitekey() || TEST_SITEKEY;
+  }
   const host = (typeof window !== "undefined" ? window.location.hostname : "").toLowerCase();
   if (PRODUCTION_HOSTNAMES.has(host)) {
     return getHcaptchaSitekey() || TEST_SITEKEY;

@@ -11,6 +11,7 @@ import MarketPulse from "@/components/sections/MarketPulse";
 import InsightsPreview from "@/components/sections/InsightsPreview";
 import AIInsights from "@/components/sections/AIInsights";
 import FeaturedInsight from "@/components/sections/FeaturedInsight";
+import FeaturedPodcast from "@/components/sections/FeaturedPodcast";
 import CaseStudies from "@/components/sections/CaseStudies";
 import Consultation from "@/components/sections/Consultation";
 import LearningStrip from "@/components/sections/LearningStrip";
@@ -46,6 +47,7 @@ export default function Home() {
         jsonLd={{ "@context": "https://schema.org", "@type": "ProfessionalService", name: "Sudarshan Karweer Advisory", description: "Business coaching & strategic advisory across the energy transition.", email: "sudarshan@karweers.com", areaServed: "Global" }} />
       <Navbar />
       <Hero content={homeContent} />
+      <FeaturedPodcast />
       <Stats stats={meta.stats} />
       <TestimonialsStrip testimonials={meta.testimonials} />
       <Sectors />

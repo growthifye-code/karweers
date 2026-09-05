@@ -87,7 +87,7 @@ export const PodcastAdmin = () => {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 className="flex items-center gap-2 font-display text-2xl font-bold"><Mic className="h-5 w-5 text-[hsl(var(--primary))]" /> The SK Strategy Brief</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Scripted by AI, narrated in <strong>Sudarshan's cloned voice</strong> (ElevenLabs). Every episode opens with a corporate music intro, then your voice.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Scripted in-house, narrated in <strong>Sudarshan's cloned voice</strong> (ElevenLabs). Every episode opens with a corporate music intro, then your voice.</p>
         </div>
         <label className="flex cursor-pointer select-none items-center gap-2 rounded-full border border-border px-4 py-2 text-sm" data-testid="podcast-schedule-toggle">
           <input type="checkbox" checked={!!data?.auto_weekly} onChange={toggleSchedule} className="accent-[hsl(var(--primary))]" />

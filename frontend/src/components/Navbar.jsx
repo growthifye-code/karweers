@@ -121,7 +121,7 @@ export default function Navbar() {
             </div>
             <div className="relative" onMouseEnter={() => setProgOpen(true)} onMouseLeave={() => setProgOpen(false)}>
               <Link to="/products" data-testid="nav-programs" className="inline-flex items-center gap-1 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">
-                Work with SK <ChevronDown className="h-3.5 w-3.5" />
+                Programs <ChevronDown className="h-3.5 w-3.5" />
               </Link>
               {progOpen && (
                 <div className="absolute left-1/2 top-full w-64 -translate-x-1/2 pt-3" data-testid="programs-dropdown">
@@ -170,7 +170,7 @@ export default function Navbar() {
               {MORE_LINKS.map((s) => (
                 <Link key={s.to} to={s.to} onClick={() => setOpen(false)} className="pl-3 text-sm text-muted-foreground">{s.label}</Link>
               ))}
-              <p className="pt-1 text-xs font-semibold uppercase tracking-wide text-[hsl(var(--primary))]">Work with SK</p>
+              <p className="pt-1 text-xs font-semibold uppercase tracking-wide text-[hsl(var(--primary))]">Programs</p>
               {PROGRAM_LINKS.map((s) => (
                 <Link key={s.to} to={s.to} onClick={() => setOpen(false)} className="pl-3 text-sm text-muted-foreground">{s.label}</Link>
               ))}

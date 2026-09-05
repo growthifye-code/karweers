@@ -45,6 +45,7 @@ import ClientDashboard from "@/pages/ClientDashboard";
 import BookingManage from "@/pages/BookingManage";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AIChatWidget from "@/components/AIChatWidget";
+import StickyBookCTA from "@/components/StickyBookCTA";
 import ConsentBanner from "@/components/ConsentBanner";
 import PageTracker from "@/components/PageTracker";
 import VpnGate from "@/components/VpnGate";
@@ -117,6 +118,7 @@ function App() {
           <PageTracker />
           <AppRoutes />
           <VpnGate />
+          <StickyBookCTA />
           <AIChatWidget />
           <ConsentBanner />
           <Toaster position="top-center" richColors />

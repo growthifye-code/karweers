@@ -578,3 +578,8 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - **Testimonials carousel** (new sections/TestimonialsStrip.jsx, rendered in Home.jsx right after Stats): auto-rotating (5.5s) social-proof band fed by meta.testimonials (3 real, confidentiality-anonymized quotes) with clickable dots — puts proof above the fold. data-testid testimonials-strip, testimonial-item, testimonial-dot-N.
 - **Verified trust band** (Stats.jsx): added credential line under the stats grid — Former EY (Big 4) consultant · $2B+ debt syndicated · India & global. data-testid stats-credential.
 - Verified via screenshot: CTA rotates, testimonials cycle with 3 dots, trust line renders. Frontend compiles clean.
+
+## 2026-09-05 — Captcha resilience (rate-limit/network note recovery)
+- The hCaptcha widget can show an INTERNAL red note ("Rate limited or network error / having trouble loading") when hCaptcha throttles an IP or a network blip hits — this does NOT reliably fire the React onError callback, so an error-conditional retry cannot catch it.
+- Fix (Captcha.jsx): always render a reload affordance ("Captcha not showing? Reload it", data-testid captcha-reload) that remounts the widget via a reloadKey bump + resetCaptcha(); it turns into a prominent "tap to retry" when onError/onChalExpired do fire. Parent ref still forwarded via a merged callback ref. Verified via screenshot.
+- Root cause of the note on preview was OUR repeated automated captcha loads from one IP (rate-limited); real visitors are unaffected. The reload gives universal recoverability.

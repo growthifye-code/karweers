@@ -2283,7 +2283,8 @@ async def _digest_scheduler():
                         await db.app_meta.update_one({"_id": "collateral_refresh_schedule"},
                                                      {"$set": {"last_auto_run": now_iso()}}, upsert=True)
                         asyncio.create_task(_bulk_ai_refresh())
-            # Weekly AI podcast — "The SK Strategy Brief" — Monday ~10:00 IST (opt-out via schedule).
+            # Weekly AI podcast — "The SK Strategy Brief" — drafts a script every Monday ~10:00 IST
+            # for admin review; nothing publishes until the script is approved (opt-out via schedule).
             if EMERGENT_LLM_KEY:
                 ist_pod = datetime.now(IST_TZ)
                 if ist_pod.weekday() == 0 and ist_pod.hour == 10:
@@ -4004,20 +4005,39 @@ def _pub_episode(doc: dict, full: bool = False) -> dict:
     return out
 
 
-async def _run_podcast_episode(eid: str, topic: str):
+async def _run_podcast_script(eid: str, topic: str):
+    """Stage 1: write the script only. Episode then waits for admin approval."""
     import podcast
     try:
         script = await podcast.generate_script(topic)
-        audio = await podcast.synthesize(script["script"])
-        path = await asyncio.to_thread(podcast.store_audio, eid, audio)
         await db.podcast_episodes.update_one({"id": eid}, {"$set": {
             "title": script["title"], "description": script["description"],
             "script": script["script"], "key_takeaways": script["key_takeaways"],
-            "audio_path": path, "duration_min": podcast.estimate_minutes(script["script"]),
-            "status": "published", "published_at": now_iso()}})
-        logger.info("podcast episode published: %s", eid)
+            "duration_min": podcast.estimate_minutes(script["script"]),
+            "status": "pending_review"}})
+        logger.info("podcast script ready for review: %s", eid)
     except Exception as e:
-        logger.exception("podcast generation failed")
+        logger.exception("podcast script generation failed")
+        await db.podcast_episodes.update_one({"id": eid}, {"$set": {
+            "status": "error", "error": str(e)[:200]}})
+
+
+async def _run_podcast_audio(eid: str):
+    """Stage 2 (after approval): narrate the approved script and publish."""
+    import podcast
+    doc = await db.podcast_episodes.find_one({"id": eid})
+    if not doc or not doc.get("script"):
+        return
+    try:
+        audio = await podcast.synthesize(doc["script"])
+        path = await asyncio.to_thread(podcast.store_audio, eid, audio)
+        await db.podcast_episodes.update_one({"id": eid}, {"$set": {
+            "audio_path": path, "duration_min": podcast.estimate_minutes(doc["script"]),
+            "status": "published", "published_at": doc.get("published_at") or now_iso(),
+            "error": None}})
+        logger.info("podcast episode approved & published: %s", eid)
+    except Exception as e:
+        logger.exception("podcast audio generation failed")
         await db.podcast_episodes.update_one({"id": eid}, {"$set": {
             "status": "error", "error": str(e)[:200]}})
 
@@ -4027,10 +4047,10 @@ async def _generate_podcast_episode(topic: str = "", by: str = "auto") -> str:
     topic = (topic or "").strip() or random.choice(podcast.TOPICS)
     eid = uuid.uuid4().hex
     await db.podcast_episodes.insert_one({
-        "id": eid, "topic": topic, "title": "Generating…", "description": "",
+        "id": eid, "topic": topic, "title": "Writing script…", "description": "",
         "status": "generating", "created_at": now_iso(), "generated_by": by,
         "week": datetime.now(timezone.utc).strftime("%G-W%V")})
-    asyncio.create_task(_run_podcast_episode(eid, topic))
+    asyncio.create_task(_run_podcast_script(eid, topic))
     return eid
 
 
@@ -4150,13 +4170,62 @@ async def admin_podcast_suggest_topics(admin: dict = Depends(require_admin)):
     return {"topics": topics}
 
 
+class PodcastEditIn(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    script: str | None = None
+    key_takeaways: list[str] | None = None
+
+
+@api_router.put("/admin/podcast/{eid}")
+async def admin_podcast_edit(eid: str, body: PodcastEditIn, admin: dict = Depends(require_admin)):
+    """Edit an episode's script/title/description before it is approved & published."""
+    import podcast
+    doc = await db.podcast_episodes.find_one({"id": eid})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Not found")
+    upd = {}
+    if body.title is not None:
+        upd["title"] = body.title.strip()[:120]
+    if body.description is not None:
+        upd["description"] = body.description.strip()
+    if body.script is not None:
+        upd["script"] = body.script.strip()
+        upd["duration_min"] = podcast.estimate_minutes(body.script)
+    if body.key_takeaways is not None:
+        upd["key_takeaways"] = [t for t in body.key_takeaways if isinstance(t, str) and t.strip()][:6]
+    if not upd:
+        return {"ok": True}
+    await db.podcast_episodes.update_one({"id": eid}, {"$set": upd})
+    return {"ok": True}
+
+
+@api_router.post("/admin/podcast/{eid}/approve")
+async def admin_podcast_approve(eid: str, admin: dict = Depends(require_admin)):
+    """Approve the script — this narrates it in SK's voice and publishes the episode."""
+    if not EMERGENT_LLM_KEY:
+        raise HTTPException(status_code=503, detail="AI key not configured")
+    doc = await db.podcast_episodes.find_one({"id": eid})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Not found")
+    if not (doc.get("script") or "").strip():
+        raise HTTPException(status_code=400, detail="No script to approve yet")
+    if doc.get("status") == "generating_audio":
+        raise HTTPException(status_code=409, detail="Already generating audio")
+    await db.podcast_episodes.update_one({"id": eid}, {"$set": {
+        "status": "generating_audio", "approved_by": admin.get("email", "admin"),
+        "approved_at": now_iso(), "error": None}})
+    asyncio.create_task(_run_podcast_audio(eid))
+    return {"ok": True, "status": "generating_audio"}
+
+
 @api_router.post("/admin/podcast/{eid}/publish")
 async def admin_podcast_publish(eid: str, admin: dict = Depends(require_admin)):
     doc = await db.podcast_episodes.find_one({"id": eid})
     if not doc:
         raise HTTPException(status_code=404, detail="Not found")
     if not doc.get("audio_path"):
-        raise HTTPException(status_code=400, detail="Episode has no audio yet")
+        raise HTTPException(status_code=400, detail="Episode has no audio yet — approve the script first")
     await db.podcast_episodes.update_one({"id": eid}, {"$set": {"status": "published", "published_at": doc.get("published_at") or now_iso()}})
     return {"ok": True}
 

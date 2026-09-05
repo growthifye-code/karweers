@@ -8,6 +8,15 @@ Admin CRM, client dashboards, and the "SK Strategy Brief" podcast (Hinglish scri
 cloned-voice narration + corporate music intro via ffmpeg).
 
 ## Recent changes (2026-06)
+- **Podcast approval workflow (NEW)**: episodes now generate in two gated stages —
+  (1) `POST /admin/podcast/generate` writes only the SCRIPT → status `pending_review` (hidden from
+  public); (2) admin reviews/edits via `PUT /admin/podcast/{eid}`, then `POST /admin/podcast/{eid}/approve`
+  narrates it in SK's ElevenLabs voice (`generating_audio`) and auto-publishes. Nothing reaches the
+  public feed until a script is approved. Weekly auto-scheduler now DRAFTS a script for approval
+  (no auto-publish). Files: backend/server.py (_run_podcast_script/_run_podcast_audio, approve/edit
+  endpoints), frontend/src/components/PodcastAdmin.jsx (review/edit/approve UI, "Needs approval" banner).
+  Verified end-to-end via curl: generate→pending_review→edit→approve→published; public feed excludes
+  drafts. UI compiles clean; live UI login blocked by reCAPTCHA in automation (humans pass).
 - Navbar optimized: slimmed to 5 primary links (About · Explore · Insights · Podcast · Cases),
   renamed "Sectors & Capital" → "Explore", "Case Studies" → "Cases". Added a **More** dropdown
   (Leadership Lab, Learning, Archive, Market, Deals). Renamed "Work with SK" dropdown → "Programs".
@@ -20,6 +29,8 @@ cloned-voice narration + corporate music intro via ffmpeg).
 - Podcast voice check: verified ElevenLabs cloned-voice (ID LS37n1cCTuLWrUIuYGQ1) synthesizes valid
   Hinglish audio via primary path (not OpenAI fallback). settings: stability 0.55, similarity 0.75,
   style 0.0, speaker_boost. Test: backend/tests/voice_check.py
+- Featured Episode banner on homepage (frontend/src/components/sections/FeaturedPodcast.jsx) — shows
+  latest published episode with emblem, play button, inline player (intro→episode) and All-episodes link.
 
 ## Integrations
 Claude Sonnet 4.6 (Emergent key), Gemini image gen, OpenAI TTS (fallback), ElevenLabs (user key,

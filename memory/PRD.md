@@ -648,3 +648,11 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - Note: the pre-existing "Climate Finance" episode is still in the old OpenAI onyx voice (generated before the clone) — can be regenerated in SK's voice if desired.
 - Topic generator "trending/economic sentiment" is currently AI-INFERRED from the model + site content (no live web search at runtime — would need a search API key). MOCKED-live-data note.
 
+
+## Podcast: HD voice clone + Hinglish + regen (2026-06-05)
+- Rebuilt SK's ElevenLabs voice from a 3-min sample → `ELEVENLABS_VOICE_ID=LS37n1cCTuLWrUIuYGQ1` (higher fidelity); deleted the old 18s clone.
+- Regenerated the Climate Finance episode in SK's cloned voice (feed consistent; no OpenAI fallback).
+- **Hinglish narration**: `_SYSTEM` + `generate_script` prompt in podcast.py now produce natural Hinglish — Hindi in DEVANAGARI (for correct TTS pronunciation) + English in Latin, ~30-40% Hindi, with 4-6 engaging rhetorical questions asked in BOTH Hindi and English back-to-back. clean_for_tts preserves Devanagari (emoji-strip ranges don't touch U+0900–097F). eleven_multilingual_v2 handles mixed scripts. Verified: episode "Stop Measuring Busy. Start Measuring Right." has Devanagari + English, narrated in SK HD voice, audio 200.
+- Security audit (podcast/ElevenLabs additions): CLEAN. ElevenLabs key only in backend/.env (not in code/frontend/public-config); dev scripts read key from env; new admin endpoints require_admin (suggest-topics unauth=401); prior hardening intact.
+- OPEN: the 2 older English episodes (Climate Finance, Stop Chasing Revenue) predate Hinglish — offer to regenerate them in Hinglish for full consistency.
+

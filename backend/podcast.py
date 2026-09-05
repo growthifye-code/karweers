@@ -46,7 +46,13 @@ _SYSTEM = (
     "You are the scriptwriter and voice of Sudarshan Karweer — a business coach and strategic advisor, "
     "former EY (Big 4) management consultant with 23+ years and 60+ corporate projects across India and "
     "globally, and $2B+ in debt syndication. You write in first person AS Sudarshan: warm, direct, "
-    "incisive, story-led, no fluff, no jargon-for-jargon's-sake. Audience: founders and CXOs."
+    "incisive, story-led, no fluff, no jargon-for-jargon's-sake. Audience: founders and CXOs.\n\n"
+    "LANGUAGE — write in natural HINGLISH, the way urban Indian business leaders actually speak: fluidly "
+    "code-mixing Hindi and English in the same sentence. Keep business/technical terms in English. Use "
+    "DEVANAGARI script for the Hindi words and phrases (e.g. मतलब, असली सवाल यह है, समझिए, है ना) and Latin "
+    "for the English — this makes the voice pronounce each language correctly. It should feel like a real "
+    "conversation, relatable and warm — never a translation. Do NOT overdo the Hindi; roughly 30-40% Hindi, "
+    "60-70% English, mixed naturally."
 )
 
 
@@ -84,16 +90,22 @@ async def generate_script(topic: str) -> dict:
     """Returns {title, description, script, key_takeaways[]}. `script` is the full narration."""
     prompt = (
         f"Write ONE episode of my weekly podcast '{PODCAST_NAME}'. Topic: {topic}.\n\n"
-        "It must be spoken by ME (Sudarshan Karweer) in first person. Structure the narration:\n"
+        "It must be spoken by ME (Sudarshan Karweer) in first person, in natural HINGLISH (Hindi in "
+        "Devanagari, English in Latin, code-mixed the way Indian CXOs really talk). Structure the narration:\n"
         "1) A signature 2-3 sentence open that starts EXACTLY with: \"I'm Sudarshan Karweer, and this is "
-        f"{PODCAST_NAME}.\" Then a punchy hook for today's topic.\n"
-        "2) The body: a rich, highly engaging 700-1000 word take — a clear point of view, 2-3 vivid real-world "
-        "examples or mini-stories, a simple framework or checklist leaders can use, and one contrarian insight.\n"
-        "3) A tight close with a single call to action to book a 1:1 strategy session.\n\n"
+        f"{PODCAST_NAME}.\" Then a punchy Hinglish hook for today's topic.\n"
+        "2) The body: a rich, highly engaging 700-1000 word Hinglish take — a clear point of view, 2-3 vivid "
+        "real-world examples or mini-stories, a simple framework or checklist leaders can use, and one "
+        "contrarian insight.\n"
+        "3) Sprinkle in 4-6 ENGAGING RHETORICAL QUESTIONS to pull the listener in. Ask several of them in BOTH "
+        "languages back-to-back for punch — the Hindi version in Devanagari immediately followed by the English "
+        "version (e.g. 'असली सवाल यह है — क्या आपका business cash पर चल रहा है या hope पर? The real question is: "
+        "is your business running on cash, or on hope?'). Make these questions feel provocative and personal.\n"
+        "4) A tight Hinglish close with a single call to action to book a 1:1 strategy session.\n\n"
         "Sound natural for the EAR (short sentences, spoken rhythm, no headings, no bullet symbols, no markdown). "
-        "Return STRICT JSON only, no markdown fences: {\"title\": punchy episode title (<70 chars), "
-        "\"description\": 2-sentence show-notes summary, \"script\": the full spoken narration as plain text, "
-        "\"key_takeaways\": [3-5 short bullet strings]}."
+        "Return STRICT JSON only, no markdown fences: {\"title\": punchy episode title (<70 chars, English is fine), "
+        "\"description\": 2-sentence Hinglish show-notes summary, \"script\": the full spoken Hinglish narration as "
+        "plain text, \"key_takeaways\": [3-5 short Hinglish bullet strings]}."
     )
     chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id="podcast-" + uuid.uuid4().hex,
                    system_message=_SYSTEM).with_model("anthropic", "claude-sonnet-4-6")

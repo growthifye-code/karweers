@@ -3804,6 +3804,161 @@ async def public_config():
     }
 
 
+# ---------------- Captcha health check (admin) ----------------
+@api_router.get("/admin/captcha/health")
+async def admin_captcha_health(admin: dict = Depends(require_admin)):
+    """Static diagnostics: is the sitekey/secret configured, and is the secret recognised by
+    hCaptcha? A definitive pairing check needs a real solved token (see verify-test)."""
+    sitekey = os.environ.get("HCAPTCHA_SITEKEY", "")
+    secret = os.environ.get("HCAPTCHA_SECRET", "")
+    out = {
+        "sitekey": sitekey,
+        "sitekey_configured": bool(sitekey),
+        "secret_configured": bool(secret),
+        "secret_is_test_key": secret == _HCAPTCHA_TEST_SECRET,
+        "secret_status": "unknown",
+        "secret_detail": "",
+    }
+    if secret and secret != _HCAPTCHA_TEST_SECRET:
+        try:
+            r = requests.post("https://api.hcaptcha.com/siteverify",
+                              data={"secret": secret, "response": "healthcheck-dummy"}, timeout=10)
+            codes = r.json().get("error-codes", []) or []
+            if "invalid-input-secret" in codes or "missing-input-secret" in codes:
+                out["secret_status"] = "invalid"
+                out["secret_detail"] = "hCaptcha does not recognise this secret key."
+            elif "invalid-input-response" in codes:
+                out["secret_status"] = "valid"
+                out["secret_detail"] = "Secret is recognised by hCaptcha. Run the live test to confirm it pairs with the sitekey."
+            else:
+                out["secret_status"] = "unknown"
+                out["secret_detail"] = f"Unexpected hCaptcha response: {codes}"
+        except Exception:
+            out["secret_status"] = "error"
+            out["secret_detail"] = "Could not reach hCaptcha to validate the secret."
+    elif out["secret_is_test_key"]:
+        out["secret_status"] = "test"
+        out["secret_detail"] = "Using hCaptcha's always-pass TEST secret (no real protection)."
+    return out
+
+
+class CaptchaTestIn(BaseModel):
+    token: str
+
+
+@api_router.post("/admin/captcha/verify-test")
+async def admin_captcha_verify_test(body: CaptchaTestIn, admin: dict = Depends(require_admin)):
+    """Definitive pairing test: verify a REAL solved token against the configured secret.
+    success => sitekey and secret match; sitekey-secret-mismatch => different accounts."""
+    secret = os.environ.get("HCAPTCHA_SECRET", "")
+    if not secret:
+        return {"success": False, "error_codes": ["no-secret-configured"],
+                "message": "No HCAPTCHA_SECRET is configured on the server."}
+    try:
+        r = requests.post("https://api.hcaptcha.com/siteverify",
+                          data={"secret": secret, "response": body.token}, timeout=10)
+        data = r.json()
+    except Exception:
+        return {"success": False, "error_codes": ["hcaptcha-unreachable"],
+                "message": "Could not reach hCaptcha to run the test."}
+    codes = data.get("error-codes", []) or []
+    ok = bool(data.get("success"))
+    if ok:
+        msg = "Pairing verified — the sitekey and secret match. Visitors can pass the captcha."
+    elif "sitekey-secret-mismatch" in codes:
+        msg = "MISMATCH — the sitekey and secret belong to different hCaptcha accounts/teams. Visitors will be blocked. Use a matching pair from the same team."
+    elif "invalid-or-already-seen-response" in codes:
+        msg = "Token expired or already used — solve the captcha again and retry the test."
+    elif "invalid-input-response" in codes:
+        msg = "The token was invalid — solve the captcha again."
+    elif "invalid-input-secret" in codes:
+        msg = "The configured secret key is not recognised by hCaptcha."
+    else:
+        msg = f"Verification failed: {', '.join(codes) or 'unknown error'}"
+    return {"success": ok, "error_codes": codes, "hostname": data.get("hostname"), "message": msg}
+
+
+# ---------------- Global best-practices benchmark (admin, AI-powered) ----------------
+BENCHMARK_SITE_PROFILE = (
+    "Website: personal thought-leadership & advisory platform for Sudarshan Karweer — a business coach and "
+    "strategic advisor, former EY (Big 4) management consultant (23+ yrs, 60+ corporate projects, $2B+ debt "
+    "syndication). Audience: founders and CXOs. Current features: hero/about, free & paid consultation booking "
+    "(Razorpay), Learning Hub (curated YouTube), SK Insights (AI news/blogs), digital products & cohorts, "
+    "lead-magnet funnels, gated downloads/collateral, client dashboard, newsletter. Premium dark theme with lime accents."
+)
+
+
+@api_router.get("/admin/benchmark")
+async def admin_benchmark_get(admin: dict = Depends(require_admin)):
+    doc = await db.site_benchmark.find_one({"_id": "latest"})
+    if not doc:
+        return {"generated_at": None, "summary": "", "recommendations": [], "status": "idle"}
+    doc.pop("_id", None)
+    doc.setdefault("status", "done" if doc.get("generated_at") else "idle")
+    return doc
+
+
+async def _run_benchmark(admin_email: str):
+    prompt = (
+        f"{BENCHMARK_SITE_PROFILE}\n\n"
+        "You are a world-class digital strategist. Benchmark THIS website against the best-in-class global "
+        "thought-leadership, advisory and executive-coaching websites (e.g. McKinsey Insights, BCG, a16z, "
+        "Naval Ravikant, Simon Sinek, Tony Robbins, Harvard Business Review, Stratechery). Identify concrete "
+        "improvements that would bring this site up to global best practice and improve credibility, lead "
+        "conversion and engagement.\n\n"
+        "Return STRICT JSON only (no markdown), shape:\n"
+        "{\"summary\": string (2-3 sentences overall assessment), \"recommendations\": ["
+        "{\"category\": one of [\"Conversion & Lead Gen\",\"Content & Thought Leadership\",\"UX & Design\","
+        "\"Trust & Credibility\",\"SEO & Discoverability\",\"Performance\",\"Monetization\",\"Community & Engagement\"], "
+        "\"title\": short string, \"recommendation\": 1-2 sentence actionable advice, "
+        "\"priority\": one of [\"P0\",\"P1\",\"P2\"], "
+        "\"benchmark\": which top site(s) do this well and how, "
+        "\"impact\": 1 short sentence on the expected business impact}]}. "
+        "Provide 10-14 recommendations spread across categories, ordered by priority (P0 first)."
+    )
+    try:
+        chat = new_chat("bench-" + str(uuid.uuid4())).with_model("anthropic", "claude-sonnet-4-6")
+        text = ""
+        async for ev in chat.stream_message(UserMessage(text=prompt)):
+            if isinstance(ev, TextDelta):
+                text += ev.content
+            elif isinstance(ev, StreamDone):
+                break
+        text = text.strip()
+        if text.startswith("```"):
+            text = text.strip("`")
+            if text.startswith("json"):
+                text = text[4:]
+        data = json.loads(text)
+        recs = data.get("recommendations", []) if isinstance(data, dict) else []
+        summary = data.get("summary", "") if isinstance(data, dict) else ""
+        order = {"P0": 0, "P1": 1, "P2": 2}
+        recs = sorted([r for r in recs if isinstance(r, dict)], key=lambda r: order.get(r.get("priority", "P2"), 3))
+        await db.site_benchmark.update_one({"_id": "latest"}, {"$set": {
+            "status": "done", "generated_at": now_iso(), "summary": summary,
+            "recommendations": recs, "generated_by": admin_email}}, upsert=True)
+    except Exception as e:
+        logger.warning("benchmark generation failed: %s", str(e)[:200])
+        await db.site_benchmark.update_one({"_id": "latest"}, {"$set": {
+            "status": "error", "error": "AI analysis failed — please try again."}}, upsert=True)
+
+
+@api_router.post("/admin/benchmark/generate")
+async def admin_benchmark_generate(admin: dict = Depends(require_admin)):
+    if not EMERGENT_LLM_KEY:
+        raise HTTPException(status_code=503, detail="AI key not configured")
+    doc = await db.site_benchmark.find_one({"_id": "latest"})
+    if doc and doc.get("status") == "running":
+        # Guard against a stuck run (>5 min) by allowing a restart.
+        started = doc.get("started_at", "")
+        if started and (datetime.now(timezone.utc) - datetime.fromisoformat(started)).total_seconds() < 300:
+            return {"status": "running"}
+    await db.site_benchmark.update_one({"_id": "latest"},
+        {"$set": {"status": "running", "started_at": datetime.now(timezone.utc).isoformat()}}, upsert=True)
+    asyncio.create_task(_run_benchmark(admin.get("email", "")))
+    return {"status": "running"}
+
+
 # ---------------- Admin Magic Link (emergency fallback login) ----------------
 MAGIC_LINK_TTL_MIN = int(os.environ.get("MAGIC_LINK_TTL_MIN", "15"))
 MAGIC_LINK_MAX_PER_WINDOW = int(os.environ.get("MAGIC_LINK_MAX_PER_WINDOW", "3"))

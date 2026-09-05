@@ -18,6 +18,9 @@ export default function Stats({ stats = [] }) {
           </motion.div>
         ))}
       </div>
+      <div className="mx-auto max-w-7xl border-t border-border px-6 py-4 text-center text-xs font-medium tracking-wide text-muted-foreground" data-testid="stats-credential">
+        Former <span className="text-foreground">EY (Big&nbsp;4)</span> management consultant · <span className="text-foreground">$2B+</span> debt syndicated · Advising founders &amp; CXOs across India &amp; globally
+      </div>
     </section>
   );
 }

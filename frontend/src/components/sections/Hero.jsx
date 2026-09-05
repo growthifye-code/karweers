@@ -1,4 +1,5 @@
-import { motion } from "framer-motion";
+import { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { ArrowUpRight, Sparkles } from "lucide-react";
 import EYBadge from "@/components/EYBadge";
 
@@ -22,9 +23,22 @@ function Headline({ text }) {
 const DEFAULT_HEADLINE = "Turning complexity into your *competitive advantage*.";
 const DEFAULT_SUBTEXT = "I'm Sudarshan Karweer — a business coach and strategic advisor, and a former EY (Big 4) management consultant. Across 60+ projects with leading corporates in India and globally, I help founders and CXOs win at strategy, transformation, financial management, fundraising and scaling — including renewable energy, BESS, green hydrogen and climate finance.";
 
+// One dominant CTA, rotating through outcome-led phrasings (global best-practice: singular CTA).
+const CTA_LABELS = [
+  "Book Your Strategy Session",
+  "Map Your Growth Strategy — Book a 1:1",
+  "Get a Custom Growth Plan — Book 45 Min",
+  "Book a Premium 1:1 Consultation",
+];
+
 export default function Hero({ content }) {
   const headline = content?.hero_headline || DEFAULT_HEADLINE;
   const subtext = content?.hero_subtext || DEFAULT_SUBTEXT;
+  const [ctaIdx, setCtaIdx] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setCtaIdx((i) => (i + 1) % CTA_LABELS.length), 3200);
+    return () => clearInterval(id);
+  }, []);
   return (
     <section className="grain relative overflow-hidden bg-background pt-40 lg:pt-48" data-testid="hero">
       <video autoPlay muted loop playsInline preload="auto" poster={COACH} aria-hidden="true"
@@ -57,13 +71,22 @@ export default function Hero({ content }) {
             {subtext}
           </motion.p>
           <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.3 }}
-            className="mt-9 flex flex-wrap items-center gap-4">
-            <a href="#consult" data-testid="hero-consult-cta" className="group inline-flex items-center gap-2 rounded-full bg-[hsl(var(--primary))] px-7 py-3.5 font-semibold text-[hsl(var(--primary-foreground))] transition-transform hover:-translate-y-1">
-              Book a Premium 1:1 Consultation
-              <ArrowUpRight className="h-5 w-5 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+            className="mt-9 flex flex-wrap items-center gap-x-6 gap-y-3">
+            <a href="#consult" data-testid="hero-consult-cta" aria-label="Book a consultation with Sudarshan Karweer"
+              className="group inline-flex min-w-[17rem] items-center justify-center gap-2 rounded-full bg-[hsl(var(--primary))] px-7 py-3.5 font-semibold text-[hsl(var(--primary-foreground))] transition-transform hover:-translate-y-1">
+              <span className="relative inline-block overflow-hidden text-center leading-none">
+                <AnimatePresence mode="wait">
+                  <motion.span key={ctaIdx} data-testid="hero-cta-rotating"
+                    initial={{ y: 16, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -16, opacity: 0 }}
+                    transition={{ duration: 0.35 }} className="block whitespace-nowrap">
+                    {CTA_LABELS[ctaIdx]}
+                  </motion.span>
+                </AnimatePresence>
+              </span>
+              <ArrowUpRight className="h-5 w-5 flex-shrink-0 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
             </a>
-            <a href="/services" data-testid="hero-services-cta" className="inline-flex items-center gap-2 rounded-full border border-border px-7 py-3.5 font-semibold text-foreground transition-colors hover:bg-secondary">
-              Explore Services
+            <a href="/services" data-testid="hero-services-cta" className="text-sm font-medium text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline">
+              or explore services →
             </a>
           </motion.div>
 

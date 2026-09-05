@@ -1,0 +1,30 @@
+{
+  "summary": "Frontend regression for Google reCAPTCHA v3 (invisible) replacement of Cloudflare Turnstile. Verified Login, Register, Newsletter, Consultation form render and Admin Captcha Health card. No captcha widgets visible anywhere, only 'Protected by reCAPTCHA' branding notices (data-testid recaptcha-notice). Zero CSP violations. No network requests to hcaptcha.com or challenges.cloudflare.com. reCAPTCHA script not loaded in preview because no sitekey configured — Captcha.jsx correctly emits bypass sentinel 'no-captcha-preview' as designed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Captcha.jsx: bypass sentinel path is fine for preview but ensure production sitekey injection via /api/public-config is verified pre-deploy (frontend logs no error if sitekey missing).",
+    "test_credentials.md still documents Turnstile/hCaptcha as active provider — update to reflect reCAPTCHA v3 for accurate next-agent context."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "100%"},
+  "test_credentials": "Admin sudarshan@karweers.com / Sudarshan@2026 (from /app/memory/test_credentials.md).",
+  "seed_data_creation": "Registered one throwaway client test_reg_<ts>@test.com via /register (redirected to /dashboard successfully).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "reCAPTCHA v3 (invisible) is the active captcha. Preview has no real sitekey so Captcha.jsx emits 'no-captcha-preview' and backend auto-passes. Do NOT expect a checkbox/widget. Verified pages: /login, /register (both submit successfully with consent-checkbox), Home footer newsletter (data-testid newsletter with newsletter-form), Home Consultation section (form data-testid consult-form) both showing recaptcha-notice. Admin dashboard /sk-control-92f4a7e1 → Overview → 'Captcha Health — reCAPTCHA v3' card shows Sitekey '— not set —', Secret 'Not configured (lenient)', threshold 0.5. Zero CSP violations, no hcaptcha or cloudflare-challenge network calls observed.",
+  "verified_testids": [
+    "recaptcha-notice (present on /login, /register, home newsletter, home consultation)",
+    "consent-checkbox",
+    "login-submit / register-submit (both flows redirected on success)",
+    "newsletter (present), consult-form (present)",
+    "captcha-health-card, captcha-sitekey ('— not set —'), captcha-secret-status ('Not configured (lenient)'), captcha-threshold ('0.5')"
+  ],
+  "rca of the issue": "n/a"
+}

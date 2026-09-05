@@ -60,22 +60,16 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
-HCAPTCHA_SECRET = os.environ.get('HCAPTCHA_SECRET', '')
-HCAPTCHA_SITEKEY = os.environ.get('HCAPTCHA_SITEKEY', '')
-# Cloudflare Turnstile (active captcha provider).
-TURNSTILE_SITEKEY = os.environ.get('TURNSTILE_SITEKEY', '')
-TURNSTILE_SECRET = os.environ.get('TURNSTILE_SECRET', '')
-# Turnstile official test secrets (always-pass / always-fail / duplicate) — treated as
-# "not yet configured for real" so preview/dev stays lenient until the real secret is set.
-_TURNSTILE_TEST_SECRETS = {
-    "1x0000000000000000000000000000000AA",
-    "2x0000000000000000000000000000000AA",
-    "3x0000000000000000000000000000000AA",
-}
+# Google reCAPTCHA v3 (invisible, score-based) — active captcha provider.
+RECAPTCHA_SITEKEY = os.environ.get('RECAPTCHA_SITEKEY', '')
+RECAPTCHA_SECRET = os.environ.get('RECAPTCHA_SECRET', '')
+try:
+    RECAPTCHA_SCORE_THRESHOLD = float(os.environ.get('RECAPTCHA_SCORE_THRESHOLD', '0.5'))
+except ValueError:
+    RECAPTCHA_SCORE_THRESHOLD = 0.5
 # Diagnostic flag: force full server-side captcha verification even on the preview host, so
 # a real key pair can be validated end-to-end before a production deploy. Off by default.
 CAPTCHA_FORCE_VERIFY = os.environ.get('CAPTCHA_FORCE_VERIFY', '') == '1'
-_HCAPTCHA_TEST_SECRET = "0x0000000000000000000000000000000000000000"
 
 # Strict admin allowlist — ONLY these emails may ever hold the admin role.
 ADMIN_ALLOWLIST = {e.strip().lower() for e in os.environ.get('ADMIN_ALLOWLIST', '').split(',') if e.strip()}
@@ -110,32 +104,38 @@ def _is_preview_host(request=None) -> bool:
 def verify_captcha(token, ip=None, request=None):
     if not token:
         raise HTTPException(status_code=400, detail="Captcha verification required")
-    # Preview/dev: the real Turnstile sitekey is hostname-locked in the Cloudflare
-    # dashboard, so the widget cannot complete a challenge on the ephemeral preview
-    # domain. There the frontend uses the always-pass Turnstile TEST key; accept a
-    # present token. Production (real domain) always runs full server-side verify.
+    # Preview/dev: reCAPTCHA v3 has no always-pass test key and the real key is domain-locked,
+    # so the invisible widget can't score the ephemeral preview domain. Accept a present token
+    # there (frontend sends a bypass sentinel). Production (real domain) runs full verify.
     if _is_preview_host(request) and not CAPTCHA_FORCE_VERIFY:
         return True
-    # Lenient mode: real sitekey set but real secret not yet configured (still a test secret).
-    if not TURNSTILE_SECRET or TURNSTILE_SECRET in _TURNSTILE_TEST_SECRETS:
+    # Lenient mode: secret not yet configured (mid-migration) — don't hard-block the site.
+    if not RECAPTCHA_SECRET:
         return True
     try:
-        form = {"secret": TURNSTILE_SECRET, "response": token}
+        form = {"secret": RECAPTCHA_SECRET, "response": token}
         if ip:
             form["remoteip"] = ip
-        r = requests.post("https://challenges.cloudflare.com/turnstile/v0/siteverify",
+        r = requests.post("https://www.google.com/recaptcha/api/siteverify",
                           data=form, timeout=10)
         data = r.json()
         ok = data.get("success", False)
+        score = data.get("score")
     except Exception:
         raise HTTPException(status_code=503, detail="Captcha service unavailable")
     if not ok:
         codes = data.get("error-codes") or []
-        # Diagnostic only: Turnstile error-codes + hostname (never the token/secret).
-        logger.warning("Turnstile verification failed: error-codes=%s hostname=%s",
+        # Diagnostic only: reCAPTCHA error-codes + hostname (never the token/secret).
+        logger.warning("reCAPTCHA verification failed: error-codes=%s hostname=%s",
                        codes, data.get("hostname"))
         suffix = f" [{', '.join(codes)}]" if codes else ""
         raise HTTPException(status_code=403, detail=f"Captcha verification failed{suffix}")
+    # v3 is score-based (0.0 bot .. 1.0 human). Reject low scores.
+    if score is not None and score < RECAPTCHA_SCORE_THRESHOLD:
+        logger.warning("reCAPTCHA low score: %.2f < %.2f action=%s",
+                       score, RECAPTCHA_SCORE_THRESHOLD, data.get("action"))
+        raise HTTPException(status_code=403,
+                            detail="Captcha verification failed — request flagged as automated. Please try again.")
     return True
 
 
@@ -3832,47 +3832,46 @@ async def public_config():
     NOTE: the admin console path is intentionally NOT exposed here — it stays a
     build-time constant in the frontend so the URL is not disclosed over the API."""
     return {
-        "hcaptcha_sitekey": os.environ.get("HCAPTCHA_SITEKEY", ""),
-        "turnstile_sitekey": os.environ.get("TURNSTILE_SITEKEY", ""),
-        "captcha_provider": "turnstile",
+        "recaptcha_sitekey": os.environ.get("RECAPTCHA_SITEKEY", ""),
+        "captcha_provider": "recaptcha_v3",
     }
 
 
 # ---------------- Captcha health check (admin) ----------------
 @api_router.get("/admin/captcha/health")
 async def admin_captcha_health(admin: dict = Depends(require_admin)):
-    """Static diagnostics: is the sitekey/secret configured, and is the secret recognised by
-    hCaptcha? A definitive pairing check needs a real solved token (see verify-test)."""
-    sitekey = os.environ.get("HCAPTCHA_SITEKEY", "")
-    secret = os.environ.get("HCAPTCHA_SECRET", "")
+    """reCAPTCHA v3 config diagnostics: are the sitekey/secret set, is the secret recognised
+    by Google, and what score threshold is in effect."""
+    sitekey = os.environ.get("RECAPTCHA_SITEKEY", "")
+    secret = os.environ.get("RECAPTCHA_SECRET", "")
     out = {
+        "provider": "recaptcha_v3",
         "sitekey": sitekey,
         "sitekey_configured": bool(sitekey),
         "secret_configured": bool(secret),
-        "secret_is_test_key": secret == _HCAPTCHA_TEST_SECRET,
+        "score_threshold": RECAPTCHA_SCORE_THRESHOLD,
         "secret_status": "unknown",
         "secret_detail": "",
     }
-    if secret and secret != _HCAPTCHA_TEST_SECRET:
-        try:
-            r = requests.post("https://api.hcaptcha.com/siteverify",
-                              data={"secret": secret, "response": "healthcheck-dummy"}, timeout=10)
-            codes = r.json().get("error-codes", []) or []
-            if "invalid-input-secret" in codes or "missing-input-secret" in codes:
-                out["secret_status"] = "invalid"
-                out["secret_detail"] = "hCaptcha does not recognise this secret key."
-            elif "invalid-input-response" in codes:
-                out["secret_status"] = "valid"
-                out["secret_detail"] = "Secret is recognised by hCaptcha. Run the live test to confirm it pairs with the sitekey."
-            else:
-                out["secret_status"] = "unknown"
-                out["secret_detail"] = f"Unexpected hCaptcha response: {codes}"
-        except Exception:
-            out["secret_status"] = "error"
-            out["secret_detail"] = "Could not reach hCaptcha to validate the secret."
-    elif out["secret_is_test_key"]:
+    if not secret:
         out["secret_status"] = "test"
-        out["secret_detail"] = "Using hCaptcha's always-pass TEST secret (no real protection)."
+        out["secret_detail"] = "No RECAPTCHA_SECRET set — captcha is lenient (no real protection) until you add your keys."
+        return out
+    # Probe Google with a dummy token: the error-codes reveal whether the secret is recognised.
+    try:
+        r = requests.post("https://www.google.com/recaptcha/api/siteverify",
+                          data={"secret": secret, "response": "healthcheck-dummy"}, timeout=10)
+        codes = r.json().get("error-codes", []) or []
+        if "invalid-input-secret" in codes or "missing-input-secret" in codes:
+            out["secret_status"] = "invalid"
+            out["secret_detail"] = "Google does not recognise this secret key. Check RECAPTCHA_SECRET."
+        else:
+            # invalid-input-response / timeout-or-duplicate => secret is valid, only the dummy token failed.
+            out["secret_status"] = "valid"
+            out["secret_detail"] = "Secret is recognised by Google. reCAPTCHA v3 is active on the live domain."
+    except Exception:
+        out["secret_status"] = "error"
+        out["secret_detail"] = "Could not reach Google to validate the secret."
     return out
 
 
@@ -3882,34 +3881,30 @@ class CaptchaTestIn(BaseModel):
 
 @api_router.post("/admin/captcha/verify-test")
 async def admin_captcha_verify_test(body: CaptchaTestIn, admin: dict = Depends(require_admin)):
-    """Definitive pairing test: verify a REAL solved token against the configured secret.
-    success => sitekey and secret match; sitekey-secret-mismatch => different accounts."""
-    secret = os.environ.get("HCAPTCHA_SECRET", "")
+    """Verify a real reCAPTCHA v3 token against the configured secret and report the score."""
+    secret = os.environ.get("RECAPTCHA_SECRET", "")
     if not secret:
         return {"success": False, "error_codes": ["no-secret-configured"],
-                "message": "No HCAPTCHA_SECRET is configured on the server."}
+                "message": "No RECAPTCHA_SECRET is configured on the server."}
     try:
-        r = requests.post("https://api.hcaptcha.com/siteverify",
+        r = requests.post("https://www.google.com/recaptcha/api/siteverify",
                           data={"secret": secret, "response": body.token}, timeout=10)
         data = r.json()
     except Exception:
-        return {"success": False, "error_codes": ["hcaptcha-unreachable"],
-                "message": "Could not reach hCaptcha to run the test."}
+        return {"success": False, "error_codes": ["recaptcha-unreachable"],
+                "message": "Could not reach Google to run the test."}
     codes = data.get("error-codes", []) or []
     ok = bool(data.get("success"))
+    score = data.get("score")
     if ok:
-        msg = "Pairing verified — the sitekey and secret match. Visitors can pass the captcha."
-    elif "sitekey-secret-mismatch" in codes:
-        msg = "MISMATCH — the sitekey and secret belong to different hCaptcha accounts/teams. Visitors will be blocked. Use a matching pair from the same team."
-    elif "invalid-or-already-seen-response" in codes:
-        msg = "Token expired or already used — solve the captcha again and retry the test."
-    elif "invalid-input-response" in codes:
-        msg = "The token was invalid — solve the captcha again."
+        msg = f"Verified — score {score} (threshold {RECAPTCHA_SCORE_THRESHOLD}). reCAPTCHA v3 is working."
     elif "invalid-input-secret" in codes:
-        msg = "The configured secret key is not recognised by hCaptcha."
+        msg = "The configured secret key is not recognised by Google."
+    elif "timeout-or-duplicate" in codes:
+        msg = "Token expired or already used — reload the page and retry."
     else:
         msg = f"Verification failed: {', '.join(codes) or 'unknown error'}"
-    return {"success": ok, "error_codes": codes, "hostname": data.get("hostname"), "message": msg}
+    return {"success": ok, "score": score, "error_codes": codes, "hostname": data.get("hostname"), "message": msg}
 
 
 # ---------------- Global best-practices benchmark (admin, AI-powered) ----------------
@@ -6564,13 +6559,13 @@ CSP_POLICY = (
     "default-src 'self'; "
     "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://assets.emergent.sh "
     "https://ap.emergent.sh https://static.cloudflareinsights.com "
-    "https://checkout.razorpay.com https://*.hcaptcha.com https://hcaptcha.com https://challenges.cloudflare.com https://www.youtube.com; "
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://*.hcaptcha.com; "
+    "https://checkout.razorpay.com https://www.google.com https://www.gstatic.com https://www.recaptcha.net https://www.youtube.com; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
     "font-src 'self' data: https://fonts.gstatic.com; "
     "img-src 'self' data: blob: https:; "
     "media-src 'self' blob: https:; "
     "connect-src 'self' https: wss: ws:; "
-    "frame-src 'self' https://*.hcaptcha.com https://hcaptcha.com https://challenges.cloudflare.com https://*.razorpay.com "
+    "frame-src 'self' https://www.google.com https://recaptcha.net https://*.razorpay.com "
     "https://www.youtube.com https://www.youtube-nocookie.com; "
     "worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; "
     "form-action 'self' https://checkout.razorpay.com"

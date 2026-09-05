@@ -627,3 +627,13 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - **USER ACTION**: create a Turnstile widget in the Cloudflare dashboard (add sudarshankarweer.com + www + preview host), then set real `TURNSTILE_SITEKEY`/`TURNSTILE_SECRET` (backend/.env) + `REACT_APP_TURNSTILE_SITEKEY` (frontend/.env) and Redeploy. hCaptcha env/package left in place but unused.
 - Non-blocking: benign Turnstile postMessage warning on widget teardown (StrictMode/cleanup) — cosmetic only.
 
+
+## Captcha migration #2: Turnstile → Google reCAPTCHA v3 (2026-06-05)
+- User's Cloudflare token attempts failed (wrong credential type) and asked to switch to **Google reCAPTCHA v3** and remove ALL old captcha. Done via verified integration playbook.
+- reCAPTCHA v3 is INVISIBLE + score-based (no widget). `Captcha.jsx` fetches a token silently via `grecaptcha.execute(action)` on form focus and passes it through the SAME `onVerify`/`ref.resetCaptcha()` interface → 12 forms untouched. Shows only the required "Protected by reCAPTCHA" notice (testid `recaptcha-notice`).
+- Backend `verify_captcha()` → Google siteverify with score check (`RECAPTCHA_SCORE_THRESHOLD`, default 0.5); preview auto-pass; lenient when secret unset. `/api/public-config` → `recaptcha_sitekey` + `captcha_provider:"recaptcha_v3"`. `/admin/captcha/health` + `/admin/captcha/verify-test` rewritten for v3 (CaptchaHealth.jsx shows provider/sitekey/secret-status/threshold + invisible live score test).
+- Removed hCaptcha + Turnstile entirely: constants/env/CSP scrubbed; `@hcaptcha/react-hcaptcha` uninstalled; ConsentBanner text updated. CSP now allows www.google.com / www.gstatic.com / www.recaptcha.net.
+- Env: `RECAPTCHA_SITEKEY`/`RECAPTCHA_SECRET`/`RECAPTCHA_SCORE_THRESHOLD` (backend/.env, empty) + `REACT_APP_RECAPTCHA_SITEKEY` (frontend/.env, empty). Currently lenient/preview-bypass until user adds real keys.
+- Verified: end-to-end admin login (no widget, 0 CSP violations, reached dashboard) + testing agent iteration_30: frontend 100%, 0 bugs; Login/Register/Newsletter/Consultation + Admin Captcha Health all pass, no hCaptcha/Cloudflare calls.
+- **USER ACTION**: create a reCAPTCHA **v3** key at google.com/recaptcha/admin/create (add prod + preview domains), set the 3 env vars, Redeploy.
+

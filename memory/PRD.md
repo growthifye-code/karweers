@@ -637,3 +637,14 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - Verified: end-to-end admin login (no widget, 0 CSP violations, reached dashboard) + testing agent iteration_30: frontend 100%, 0 bugs; Login/Register/Newsletter/Consultation + Admin Captcha Health all pass, no hCaptcha/Cloudflare calls.
 - **USER ACTION**: create a reCAPTCHA **v3** key at google.com/recaptcha/admin/create (add prod + preview domains), set the 3 env vars, Redeploy.
 
+
+## Podcast upgrade: ElevenLabs (SK cloned voice) + corporate music intro + AI topic generator (2026-06-05)
+- **ElevenLabs integration** (user's own key, NOT Emergent): `ELEVENLABS_API_KEY` + `ELEVENLABS_VOICE_ID` + `ELEVENLABS_MODEL` (eleven_multilingual_v2) in backend/.env. SDK `elevenlabs==2.66.0` installed.
+- **Instant Voice Clone of Sudarshan** created from his uploaded 18s sample via REST `/v1/voices/add` → `voice_id=vlhbVI8PBYzEAt87Bttc` (saved in .env). Clone script: `backend/clone_voice.py`.
+- **podcast.py `synthesize()`** now narrates with ElevenLabs (SK's cloned voice) primary, OpenAI TTS onyx as silent fallback only on failure. Chunks at 2400 chars.
+- **Corporate music intro**: `backend/make_corporate_intro.py` synthesizes an original instrumental corporate bed (Cadd9→G→Am7→Fadd9 pad + bright plucked arp + sub-bass, reverb) ~6.5s, uploaded as the podcast intro (played before every episode → music, then SK's voice). Replaces the old music+announcer intro. Admin can replace via upload.
+- **AI topic generator**: `podcast.suggest_topics()` (Claude) + endpoint `POST /api/admin/podcast/suggest-topics` — proposes 8 topics grounded in site content (services + recent insights) + social resonance + economic sentiment segmented small/MSME/large. Verified via curl (returns 8 segmented topics). UI: PodcastAdmin "Suggest topics (AI)" button → clickable suggestion cards that fill the topic input.
+- **BLOCKER (user)**: the ElevenLabs API key is missing the `text_to_speech` permission → TTS returns 401, so episode generation currently falls back to OpenAI onyx (NOT SK's voice). USER MUST enable Text-to-Speech permission on the key (or rotate & re-paste). Once fixed, generate a test episode to confirm SK's cloned voice. Everything else verified.
+- **NOT VERIFIED**: actual SK-voice narration end-to-end (blocked on the key permission above).
+- Topic generator "trending/economic sentiment" is currently AI-INFERRED from the model + site content (no live web search at runtime — would need a search API key). MOCKED-live-data note.
+

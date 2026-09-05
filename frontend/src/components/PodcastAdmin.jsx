@@ -15,6 +15,8 @@ export const PodcastAdmin = () => {
   const [topic, setTopic] = useState("");
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
   const fileRef = useRef(null);
   const pollRef = useRef(null);
 
@@ -38,6 +40,17 @@ export const PodcastAdmin = () => {
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Could not start generation.");
     } finally { setBusy(false); }
+  };
+
+  const suggest = async () => {
+    setSuggesting(true);
+    try {
+      const r = await api.post("/admin/podcast/suggest-topics");
+      setSuggestions(r.data?.topics || []);
+      if (!(r.data?.topics || []).length) toast.info("No topics returned — try again.");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not generate topics.");
+    } finally { setSuggesting(false); }
   };
 
   const act = async (id, path) => {
@@ -74,7 +87,7 @@ export const PodcastAdmin = () => {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 className="flex items-center gap-2 font-display text-2xl font-bold"><Mic className="h-5 w-5 text-[hsl(var(--primary))]" /> The SK Strategy Brief</h2>
-          <p className="mt-1 text-sm text-muted-foreground">AI-scripted, Onyx-narrated weekly podcast. Each episode opens in your voice, then delivers a rich take.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Scripted by AI, narrated in <strong>Sudarshan's cloned voice</strong> (ElevenLabs). Every episode opens with a corporate music intro, then your voice.</p>
         </div>
         <label className="flex cursor-pointer select-none items-center gap-2 rounded-full border border-border px-4 py-2 text-sm" data-testid="podcast-schedule-toggle">
           <input type="checkbox" checked={!!data?.auto_weekly} onChange={toggleSchedule} className="accent-[hsl(var(--primary))]" />
@@ -83,7 +96,32 @@ export const PodcastAdmin = () => {
       </div>
 
       <div className="mt-6 rounded-2xl border border-border bg-card p-6">
-        <p className="text-sm font-semibold">Generate a new episode</p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm font-semibold">Generate a new episode</p>
+          <button onClick={suggest} disabled={suggesting} data-testid="podcast-suggest-btn"
+            className="inline-flex items-center gap-1.5 rounded-full border border-[hsl(var(--primary))]/40 bg-[hsl(var(--primary))]/10 px-3.5 py-1.5 text-xs font-semibold text-[hsl(var(--primary))] transition-colors hover:bg-[hsl(var(--primary))]/20 disabled:opacity-60">
+            {suggesting ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Thinking…</> : <><Sparkles className="h-3.5 w-3.5" /> Suggest topics (AI)</>}
+          </button>
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">AI reads your site content, what's resonating socially, and the economic mood for small, MSME &amp; large orgs — then proposes episodes.</p>
+
+        {suggestions.length > 0 && (
+          <div className="mt-3 grid gap-2" data-testid="podcast-suggestions">
+            {suggestions.map((sug, i) => (
+              <button key={i} onClick={() => { setTopic(sug.topic); setSuggestions([]); }} data-testid={`podcast-suggestion-${i}`}
+                className="group rounded-xl border border-border bg-background p-3 text-left transition-colors hover:border-[hsl(var(--primary))]/50 hover:bg-secondary/40">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-sm font-semibold text-foreground">{sug.topic}</p>
+                  <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{sug.segment}</span>
+                </div>
+                {sug.angle && <p className="mt-1 text-xs text-muted-foreground">{sug.angle}</p>}
+                {sug.rationale && <p className="mt-0.5 text-[11px] italic text-muted-foreground/80">Why now: {sug.rationale}</p>}
+                <span className="mt-1 inline-block text-[11px] font-medium text-[hsl(var(--primary))] opacity-0 transition-opacity group-hover:opacity-100">Use this topic →</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="mt-3 flex flex-col gap-3 sm:flex-row">
           <input value={topic} onChange={(e) => setTopic(e.target.value)} data-testid="podcast-topic-input"
             placeholder="Optional topic (leave blank to auto-pick from your themes)…"
@@ -94,7 +132,7 @@ export const PodcastAdmin = () => {
           </button>
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-border pt-4">
-          <span className="text-xs text-muted-foreground">Optional: your recorded intro clip (played before every episode).</span>
+          <span className="text-xs text-muted-foreground">Intro music (plays before every episode). A corporate bed is set by default — replace with your own track anytime.</span>
           <input ref={fileRef} type="file" accept="audio/*" onChange={uploadIntro} className="hidden" data-testid="podcast-intro-input" />
           <button onClick={() => fileRef.current?.click()} disabled={uploading} data-testid="podcast-intro-upload" className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs font-medium hover:bg-secondary disabled:opacity-60">
             {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />} {data?.has_intro ? "Replace intro" : "Upload intro"}

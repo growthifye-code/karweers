@@ -4122,6 +4122,34 @@ async def admin_podcast_intro_delete(admin: dict = Depends(require_admin)):
     return {"ok": True}
 
 
+@api_router.post("/admin/podcast/suggest-topics")
+async def admin_podcast_suggest_topics(admin: dict = Depends(require_admin)):
+    if not EMERGENT_LLM_KEY:
+        raise HTTPException(status_code=503, detail="AI key not configured")
+    # Build lightweight site context from services + recent insights (best-effort).
+    ctx_bits = []
+    try:
+        svcs = await db.services.find({}, {"_id": 0, "title": 1}).to_list(30)
+        titles = [s.get("title") for s in svcs if s.get("title")]
+        if titles:
+            ctx_bits.append("Services offered: " + "; ".join(titles[:20]))
+    except Exception:
+        pass
+    try:
+        ins = await db.insights.find({}, {"_id": 0, "title": 1}).sort("created_at", -1).to_list(15)
+        ititles = [i.get("title") for i in ins if i.get("title")]
+        if ititles:
+            ctx_bits.append("Recent insights/articles: " + "; ".join(ititles[:15]))
+    except Exception:
+        pass
+    try:
+        topics = await __import__("podcast").suggest_topics(site_context="\n".join(ctx_bits), n=8)
+    except Exception as e:
+        logger.exception("suggest_topics failed")
+        raise HTTPException(status_code=502, detail=f"Could not generate topics: {e}")
+    return {"topics": topics}
+
+
 @api_router.post("/admin/podcast/{eid}/publish")
 async def admin_podcast_publish(eid: str, admin: dict = Depends(require_admin)):
     doc = await db.podcast_episodes.find_one({"id": eid})

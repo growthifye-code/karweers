@@ -19,7 +19,7 @@ function EpisodePlayer({ episodeId, introUrl }) {
   return (
     <div className="mt-4">
       <audio ref={audioRef} src={playlist[idx]} controls preload="none" onEnded={onEnded} className="w-full" data-testid="episode-audio" />
-      {introUrl && idx === 0 && <p className="mt-1 text-xs text-muted-foreground">Plays a short intro from Sudarshan, then the episode.</p>}
+      {introUrl && idx === 0 && <p className="mt-1 text-xs text-muted-foreground">Opens with a short music intro, then Sudarshan's episode.</p>}
     </div>
   );
 }

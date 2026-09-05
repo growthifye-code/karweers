@@ -1,9 +1,10 @@
-"""The SK Strategy Brief — AI-generated podcast: script (Claude) + narration (OpenAI TTS) + storage."""
+"""The SK Strategy Brief — podcast: script (Claude) + narration (ElevenLabs, SK's cloned voice; OpenAI TTS fallback) + storage."""
 import os
 import re
 import json
 import uuid
 import logging
+import requests
 from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
 from emergentintegrations.llm.openai import OpenAITextToSpeech
 import storage_helper
@@ -12,9 +13,15 @@ log = logging.getLogger(__name__)
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY")
 PODCAST_NAME = "The SK Strategy Brief"
+# ElevenLabs — Sudarshan Karweer's cloned voice (primary narration).
+ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
+ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "")
+ELEVENLABS_MODEL = os.environ.get("ELEVENLABS_MODEL", "eleven_multilingual_v2")
+EL_CHUNK = 2400  # keep each TTS request well under ElevenLabs limits
+# OpenAI TTS — silent fallback only if ElevenLabs is unavailable.
 VOICE = "onyx"
 TTS_MODEL = "tts-1-hd"
-TTS_CHUNK = 3600  # under the 4096-char per-request limit
+TTS_CHUNK = 3600
 
 TOPICS = [
     "The energy transition and what boards keep getting wrong",
@@ -110,11 +117,39 @@ async def generate_script(topic: str) -> dict:
     }
 
 
+def _elevenlabs_tts(text: str) -> bytes:
+    """Narrate with ElevenLabs using SK's cloned voice. Raises on any failure."""
+    if not (ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID):
+        raise RuntimeError("ElevenLabs not configured")
+    audio = b""
+    for c in chunk_text(clean_for_tts(text), EL_CHUNK):
+        r = requests.post(
+            f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}",
+            headers={"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json"},
+            json={
+                "text": c,
+                "model_id": ELEVENLABS_MODEL,
+                "voice_settings": {"stability": 0.5, "similarity_boost": 0.85,
+                                    "style": 0.0, "use_speaker_boost": True},
+            },
+            timeout=120,
+        )
+        if r.status_code != 200 or not r.content:
+            raise RuntimeError(f"ElevenLabs TTS {r.status_code}: {r.text[:200]}")
+        audio += r.content
+    return audio
+
+
 async def synthesize(script_text: str) -> bytes:
-    """Narrate the script with OpenAI TTS (onyx), concatenating chunk audio into one mp3."""
+    """Narrate the script in Sudarshan's cloned voice (ElevenLabs). Falls back to OpenAI TTS
+    only if ElevenLabs is unavailable, so episode generation never hard-fails."""
+    try:
+        return _elevenlabs_tts(script_text)
+    except Exception as e:
+        log.warning("ElevenLabs narration failed (%s) — falling back to OpenAI TTS.", e)
     tts = OpenAITextToSpeech(api_key=EMERGENT_LLM_KEY)
     audio = b""
-    for c in chunk_text(clean_for_tts(script_text)):
+    for c in chunk_text(clean_for_tts(script_text), TTS_CHUNK):
         audio += await tts.generate_speech(text=c, model=TTS_MODEL, voice=VOICE, response_format="mp3")
     return audio
 
@@ -128,3 +163,54 @@ def store_audio(episode_id: str, audio: bytes) -> str:
 def estimate_minutes(script_text: str) -> int:
     words = len(script_text.split())
     return max(1, round(words / 150))
+
+
+
+async def suggest_topics(site_context: str = "", n: int = 8) -> list:
+    """AI-generate fresh podcast topic ideas grounded in (i) the site's positioning/content,
+    (ii) themes currently resonating socially with business audiences, and (iii) the economic
+    sentiment facing organisations by size — small, MSME, and large. Returns a list of
+    {topic, segment, angle, rationale}."""
+    prompt = (
+        "Generate " + str(n) + " sharp, timely episode topics for my weekly podcast "
+        f"'{PODCAST_NAME}'. Ground them in THREE lenses:\n"
+        "1) MY WORK / SITE CONTENT — what I advise on: strategy, scaling, org design, people & "
+        "culture, fundraising & debt syndication, the energy transition (BESS, green hydrogen, "
+        "climate finance), KPIs, transition management.\n"
+        + (f"Extra context from my site:\n{site_context}\n" if site_context else "")
+        + "2) WHAT'S RESONATING SOCIALLY right now with founders and CXOs — the conversations "
+        "leaders are actually having (AI adoption, cost discipline, talent, capital access, etc.).\n"
+        "3) ECONOMIC SENTIMENT by ORGANISATION SIZE — what SMALL businesses, MSMEs, and LARGE "
+        "enterprises each most want to hear given the current economic climate (cashflow, credit, "
+        "demand, growth vs. survival). Spread the topics across these three segments.\n\n"
+        "Each topic must be specific and provocative (not generic), and something I (Sudarshan "
+        "Karweer) can deliver a strong, contrarian point of view on. Return STRICT JSON only, no "
+        "markdown fences: {\"topics\": [{\"topic\": short episode topic (<90 chars), "
+        "\"segment\": one of \"small\"|\"msme\"|\"large\"|\"all\", "
+        "\"angle\": one-line spoken hook/angle, "
+        "\"rationale\": one line on why it lands now}]}"
+    )
+    chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id="topics-" + uuid.uuid4().hex,
+                   system_message=_SYSTEM).with_model("anthropic", "claude-sonnet-4-6")
+    text = ""
+    async for ev in chat.stream_message(UserMessage(text=prompt)):
+        if isinstance(ev, TextDelta):
+            text += ev.content
+        elif isinstance(ev, StreamDone):
+            break
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text[:4].lower() == "json":
+            text = text[4:]
+    data = json.loads(text)
+    out = []
+    for t in (data.get("topics") or []):
+        if isinstance(t, dict) and t.get("topic"):
+            out.append({
+                "topic": str(t["topic"])[:140],
+                "segment": (t.get("segment") or "all").lower(),
+                "angle": str(t.get("angle", ""))[:200],
+                "rationale": str(t.get("rationale", ""))[:200],
+            })
+    return out[:n]

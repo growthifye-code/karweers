@@ -108,7 +108,7 @@ function AdminEpisode({ ep, onChange }) {
         </details>
       ) : null}
 
-      {ep.has_audio && !editing && <audio src={`${API}/api/podcast/episodes/${ep.id}/audio`} controls preload="none" className="mt-3 w-full" />}
+      {ep.has_audio && !editing && <audio src={`${API}/api/podcast/episodes/${ep.id}/audio${ep.status !== "published" ? `?token=${encodeURIComponent(localStorage.getItem("sk_token") || "")}` : ""}`} controls preload="none" className="mt-3 w-full" />}
     </div>
   );
 }

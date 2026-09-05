@@ -8,7 +8,11 @@ Admin CRM, client dashboards, and the "SK Strategy Brief" podcast (Hinglish scri
 cloned-voice narration + corporate music intro via ffmpeg).
 
 ## Recent changes (2026-06)
-- **Podcast approval workflow (NEW)**: episodes now generate in two gated stages —
+- **Security hardening (podcast)**: audio endpoint now serves unpublished episodes only to a valid
+  admin token (`?token=` or Bearer) — public gets 404, cache `private,no-store`; helper `_is_admin_request`.
+  Approve is now an atomic `update_one` guard (status != generating_audio) → concurrent approve = 409,
+  no duplicate audio task. Verified via curl. Files: backend/server.py, frontend PodcastAdmin.jsx.
+- **Podcast approval workflow**: episodes now generate in two gated stages —
   (1) `POST /admin/podcast/generate` writes only the SCRIPT → status `pending_review` (hidden from
   public); (2) admin reviews/edits via `PUT /admin/podcast/{eid}`, then `POST /admin/podcast/{eid}/approve`
   narrates it in SK's ElevenLabs voice (`generating_audio`) and auto-publishes. Nothing reaches the

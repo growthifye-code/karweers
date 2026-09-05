@@ -4070,14 +4070,37 @@ async def podcast_episode(eid: str):
     return _pub_episode(doc, full=True)
 
 
+async def _is_admin_request(request: Request) -> bool:
+    """True if the request carries a valid admin JWT via Authorization or ?token= (for <audio>)."""
+    token = request.query_params.get("token") or ""
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+    if not token:
+        return False
+    u = await _user_from_session(token)
+    if u:
+        return u.get("role") == "admin"
+    try:
+        payload = decode_token(token)
+    except Exception:
+        return False
+    u = await db.users.find_one({"id": payload.get("sub")}, {"_id": 0, "role": 1})
+    return bool(u and u.get("role") == "admin")
+
+
 @api_router.get("/podcast/episodes/{eid}/audio")
-async def podcast_episode_audio(eid: str):
+async def podcast_episode_audio(eid: str, request: Request):
     doc = await db.podcast_episodes.find_one({"id": eid})
     if not doc or not doc.get("audio_path"):
         raise HTTPException(status_code=404, detail="Audio not found")
+    # Only published episodes are public; unpublished audio requires an admin token (defence-in-depth).
+    if doc.get("status") != "published" and not await _is_admin_request(request):
+        raise HTTPException(status_code=404, detail="Audio not found")
+    cache = "public, max-age=31536000" if doc.get("status") == "published" else "private, no-store"
     audio, ctype = await asyncio.to_thread(storage_helper.get_object, doc["audio_path"])
     return Response(content=audio, media_type="audio/mpeg",
-                    headers={"Cache-Control": "public, max-age=31536000"})
+                    headers={"Cache-Control": cache})
 
 
 @api_router.get("/podcast/intro-audio")
@@ -4210,11 +4233,13 @@ async def admin_podcast_approve(eid: str, admin: dict = Depends(require_admin)):
         raise HTTPException(status_code=404, detail="Not found")
     if not (doc.get("script") or "").strip():
         raise HTTPException(status_code=400, detail="No script to approve yet")
-    if doc.get("status") == "generating_audio":
+    # Atomic guard: only one approve can flip the status → prevents a double-click spawning two tasks.
+    result = await db.podcast_episodes.update_one(
+        {"id": eid, "status": {"$ne": "generating_audio"}},
+        {"$set": {"status": "generating_audio", "approved_by": admin.get("email", "admin"),
+                  "approved_at": now_iso(), "error": None}})
+    if result.matched_count == 0:
         raise HTTPException(status_code=409, detail="Already generating audio")
-    await db.podcast_episodes.update_one({"id": eid}, {"$set": {
-        "status": "generating_audio", "approved_by": admin.get("email", "admin"),
-        "approved_at": now_iso(), "error": None}})
     asyncio.create_task(_run_podcast_audio(eid))
     return {"ok": True, "status": "generating_audio"}
 

@@ -51,7 +51,7 @@ import VpnGate from "@/components/VpnGate";
 
 function AppRoutes() {
   const location = useLocation();
-  // Load non-sensitive public config (hCaptcha sitekey) once at startup.
+  // Load non-sensitive public config (reCAPTCHA sitekey) once at startup.
   useEffect(() => { loadPublicConfig(); }, []);
   const adminPath = getAdminPath();
   // Process Google OAuth callback FIRST (session_id in URL fragment).

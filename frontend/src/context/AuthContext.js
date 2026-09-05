@@ -60,7 +60,7 @@ export function AuthProvider({ children }) {
 
   // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
   const loginWithGoogle = async (captchaToken, consent = false) => {
-    // hCaptcha + consent must be captured first; backend sets a short-lived gate cookie required by /auth/session.
+    // Captcha + consent must be captured first; backend sets a short-lived gate cookie required by /auth/session.
     await api.post("/auth/captcha-gate", { captcha_token: captchaToken, consent });
     const redirectUrl = window.location.origin + "/dashboard";
     window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;

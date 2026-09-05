@@ -760,7 +760,7 @@ class CaptchaGateIn(BaseModel):
 
 @api_router.post("/auth/captcha-gate")
 async def captcha_gate(body: CaptchaGateIn, request: Request, response: Response):
-    """Verify a solved hCaptcha + consent, then set a short-lived cookie that gates the Google OAuth redirect."""
+    """Verify a solved captcha + consent, then set a short-lived cookie that gates the Google OAuth redirect."""
     verify_captcha(body.captcha_token, _client_ip(request), request)
     if not body.consent:
         raise HTTPException(status_code=400, detail="You must read and agree to the Terms & Conditions and Privacy Policy to continue.")
@@ -771,7 +771,7 @@ async def captcha_gate(body: CaptchaGateIn, request: Request, response: Response
 
 @api_router.post("/auth/session")
 async def create_session(body: SessionIn, request: Request, response: Response):
-    # hCaptcha + consent must have been captured on the login/register page before the Google redirect.
+    # Captcha + consent must have been captured on the login/register page before the Google redirect.
     gate = read_captcha_gate(request.cookies.get("captcha_gate"))
     if not gate:
         raise HTTPException(status_code=403, detail="Captcha verification required")

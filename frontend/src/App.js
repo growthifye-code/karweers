@@ -38,6 +38,7 @@ import GamesLeaderboardPage from "@/pages/GamesLeaderboardPage";
 import AssessmentPage from "@/pages/AssessmentPage";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
+import PodcastPage from "@/pages/PodcastPage";
 import AuthCallback from "@/pages/AuthCallback";
 import AdminDashboard from "@/pages/AdminDashboard";
 import ClientDashboard from "@/pages/ClientDashboard";
@@ -81,6 +82,7 @@ function AppRoutes() {
       <Route path="/market" element={<MarketPage />} />
       <Route path="/deals" element={<DealsPage />} />
       <Route path="/learning" element={<LearningPage />} />
+      <Route path="/podcast" element={<PodcastPage />} />
       <Route path="/explore" element={<ExplorePage />} />
       <Route path="/sectors/:slug" element={<EntityPage kind="sector" />} />
       <Route path="/capital/:slug" element={<EntityPage kind="agency" />} />

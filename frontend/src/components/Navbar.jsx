@@ -30,6 +30,7 @@ const NAV = [
   { label: "Insights", to: "/insights-hub" },
   { label: "Case Studies", to: "/case-studies" },
   { label: "Learning", to: "/learning" },
+  { label: "Podcast", to: "/podcast" },
   { label: "Archive", to: "/archive" },
   { label: "Market", to: "/market" },
   { label: "Deals", to: "/deals" },

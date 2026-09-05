@@ -53,6 +53,7 @@ from urllib.parse import quote_plus
 from datetime import datetime as _dt
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
+import storage_helper
 
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
@@ -2261,6 +2262,16 @@ async def _digest_scheduler():
                         await db.app_meta.update_one({"_id": "collateral_refresh_schedule"},
                                                      {"$set": {"last_auto_run": now_iso()}}, upsert=True)
                         asyncio.create_task(_bulk_ai_refresh())
+            # Weekly AI podcast — "The SK Strategy Brief" — Monday ~10:00 IST (opt-out via schedule).
+            if EMERGENT_LLM_KEY:
+                ist_pod = datetime.now(IST_TZ)
+                if ist_pod.weekday() == 0 and ist_pod.hour == 10:
+                    psched = await db.app_meta.find_one({"_id": "podcast_schedule"}) or {}
+                    if psched.get("enabled", True):
+                        this_week = datetime.now(timezone.utc).strftime("%G-W%V")
+                        exists = await db.podcast_episodes.find_one({"week": this_week})
+                        if not exists:
+                            await _generate_podcast_episode(by="auto-weekly")
         except Exception:
             logger.exception("scheduler error")
         await asyncio.sleep(3600)
@@ -3957,6 +3968,161 @@ async def admin_benchmark_generate(admin: dict = Depends(require_admin)):
         {"$set": {"status": "running", "started_at": datetime.now(timezone.utc).isoformat()}}, upsert=True)
     asyncio.create_task(_run_benchmark(admin.get("email", "")))
     return {"status": "running"}
+
+
+# ---------------- The SK Strategy Brief — AI podcast ----------------
+def _pub_episode(doc: dict, full: bool = False) -> dict:
+    if not doc:
+        return {}
+    out = {
+        "id": doc.get("id"), "title": doc.get("title"), "description": doc.get("description"),
+        "topic": doc.get("topic"), "key_takeaways": doc.get("key_takeaways", []),
+        "duration_min": doc.get("duration_min"), "status": doc.get("status"),
+        "published_at": doc.get("published_at"), "created_at": doc.get("created_at"),
+        "has_audio": bool(doc.get("audio_path")),
+    }
+    if full:
+        out["script"] = doc.get("script", "")
+    return out
+
+
+async def _run_podcast_episode(eid: str, topic: str):
+    import podcast
+    try:
+        script = await podcast.generate_script(topic)
+        audio = await podcast.synthesize(script["script"])
+        path = await asyncio.to_thread(podcast.store_audio, eid, audio)
+        await db.podcast_episodes.update_one({"id": eid}, {"$set": {
+            "title": script["title"], "description": script["description"],
+            "script": script["script"], "key_takeaways": script["key_takeaways"],
+            "audio_path": path, "duration_min": podcast.estimate_minutes(script["script"]),
+            "status": "published", "published_at": now_iso()}})
+        logger.info("podcast episode published: %s", eid)
+    except Exception as e:
+        logger.exception("podcast generation failed")
+        await db.podcast_episodes.update_one({"id": eid}, {"$set": {
+            "status": "error", "error": str(e)[:200]}})
+
+
+async def _generate_podcast_episode(topic: str = "", by: str = "auto") -> str:
+    import podcast, random
+    topic = (topic or "").strip() or random.choice(podcast.TOPICS)
+    eid = uuid.uuid4().hex
+    await db.podcast_episodes.insert_one({
+        "id": eid, "topic": topic, "title": "Generating…", "description": "",
+        "status": "generating", "created_at": now_iso(), "generated_by": by,
+        "week": datetime.now(timezone.utc).strftime("%G-W%V")})
+    asyncio.create_task(_run_podcast_episode(eid, topic))
+    return eid
+
+
+@api_router.get("/podcast/episodes")
+async def podcast_episodes():
+    docs = await db.podcast_episodes.find({"status": "published"}).sort("published_at", -1).to_list(100)
+    intro = await db.app_meta.find_one({"_id": "podcast_intro"})
+    return {"name": "The SK Strategy Brief", "episodes": [_pub_episode(d) for d in docs],
+            "has_intro": bool(intro and intro.get("path"))}
+
+
+@api_router.get("/podcast/episodes/{eid}")
+async def podcast_episode(eid: str):
+    doc = await db.podcast_episodes.find_one({"id": eid, "status": "published"})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Episode not found")
+    return _pub_episode(doc, full=True)
+
+
+@api_router.get("/podcast/episodes/{eid}/audio")
+async def podcast_episode_audio(eid: str):
+    doc = await db.podcast_episodes.find_one({"id": eid})
+    if not doc or not doc.get("audio_path"):
+        raise HTTPException(status_code=404, detail="Audio not found")
+    audio, ctype = await asyncio.to_thread(storage_helper.get_object, doc["audio_path"])
+    return Response(content=audio, media_type="audio/mpeg",
+                    headers={"Cache-Control": "public, max-age=31536000"})
+
+
+@api_router.get("/podcast/intro-audio")
+async def podcast_intro_audio():
+    intro = await db.app_meta.find_one({"_id": "podcast_intro"})
+    if not intro or not intro.get("path"):
+        raise HTTPException(status_code=404, detail="No intro clip")
+    audio, ctype = await asyncio.to_thread(storage_helper.get_object, intro["path"])
+    return Response(content=audio, media_type=ctype or "audio/mpeg",
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
+@api_router.get("/admin/podcast/episodes")
+async def admin_podcast_episodes(admin: dict = Depends(require_admin)):
+    docs = await db.podcast_episodes.find({}).sort("created_at", -1).to_list(200)
+    sched = await db.app_meta.find_one({"_id": "podcast_schedule"}) or {}
+    intro = await db.app_meta.find_one({"_id": "podcast_intro"}) or {}
+    return {
+        "episodes": [{**_pub_episode(d, full=True), "error": d.get("error")} for d in docs],
+        "auto_weekly": bool(sched.get("enabled", True)),
+        "topics": __import__("podcast").TOPICS,
+        "has_intro": bool(intro.get("path")),
+    }
+
+
+class PodcastGenIn(BaseModel):
+    topic: str = ""
+
+
+@api_router.post("/admin/podcast/generate")
+async def admin_podcast_generate(body: PodcastGenIn, admin: dict = Depends(require_admin)):
+    if not EMERGENT_LLM_KEY:
+        raise HTTPException(status_code=503, detail="AI key not configured")
+    eid = await _generate_podcast_episode(body.topic, by=admin.get("email", "admin"))
+    return {"id": eid, "status": "generating"}
+
+
+@api_router.post("/admin/podcast/schedule")
+async def admin_podcast_schedule(body: dict, admin: dict = Depends(require_admin)):
+    await db.app_meta.update_one({"_id": "podcast_schedule"},
+                                 {"$set": {"enabled": bool(body.get("enabled"))}}, upsert=True)
+    return {"ok": True, "enabled": bool(body.get("enabled"))}
+
+
+@api_router.post("/admin/podcast/intro")
+async def admin_podcast_intro(file: UploadFile = File(...), admin: dict = Depends(require_admin)):
+    data = await file.read()
+    if len(data) > 15 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Intro clip must be under 15 MB")
+    ctype = file.content_type or "audio/mpeg"
+    await asyncio.to_thread(storage_helper.put_object, "podcast/sk-intro-clip", data, ctype)
+    await db.app_meta.update_one({"_id": "podcast_intro"},
+                                 {"$set": {"path": "podcast/sk-intro-clip", "content_type": ctype, "updated_at": now_iso()}}, upsert=True)
+    return {"ok": True}
+
+
+@api_router.delete("/admin/podcast/intro")
+async def admin_podcast_intro_delete(admin: dict = Depends(require_admin)):
+    await db.app_meta.delete_one({"_id": "podcast_intro"})
+    return {"ok": True}
+
+
+@api_router.post("/admin/podcast/{eid}/publish")
+async def admin_podcast_publish(eid: str, admin: dict = Depends(require_admin)):
+    doc = await db.podcast_episodes.find_one({"id": eid})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Not found")
+    if not doc.get("audio_path"):
+        raise HTTPException(status_code=400, detail="Episode has no audio yet")
+    await db.podcast_episodes.update_one({"id": eid}, {"$set": {"status": "published", "published_at": doc.get("published_at") or now_iso()}})
+    return {"ok": True}
+
+
+@api_router.post("/admin/podcast/{eid}/unpublish")
+async def admin_podcast_unpublish(eid: str, admin: dict = Depends(require_admin)):
+    await db.podcast_episodes.update_one({"id": eid}, {"$set": {"status": "draft"}})
+    return {"ok": True}
+
+
+@api_router.delete("/admin/podcast/{eid}")
+async def admin_podcast_delete(eid: str, admin: dict = Depends(require_admin)):
+    await db.podcast_episodes.delete_one({"id": eid})
+    return {"ok": True}
 
 
 # ---------------- Admin Magic Link (emergency fallback login) ----------------

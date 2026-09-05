@@ -1,0 +1,23 @@
+{
+  "summary": "Frontend-only regression of Cloudflare Turnstile widget across the shared Captcha component consumers (Register, Home Newsletter, Home Consultation). Widget lazy-mounts on focusin, loads the Turnstile TEST sitekey (1x00000000000000000000AA), auto-solves to the Cloudflare 'Success! For testing only' badge on all three pages, and the Newsletter form submits successfully. No Content-Security-Policy violations related to challenges.cloudflare.com were emitted in the console. data-testid hooks (captcha, turnstile-widget, captcha-activate, captcha-reload) are all present.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Benign console warning observed once: 'Failed to execute postMessage on DOMWindow: target origin https://challenges.cloudflare.com does not match recipient origin' — this is emitted by Turnstile itself when the widget iframe is being torn down/unmounted (StrictMode double-mount or cleanup). It is not a CSP violation and does not affect verification, but the Captcha cleanup in /app/frontend/src/components/Captcha.jsx could suppress it by calling window.turnstile.remove(widgetId) only when the iframe is still attached, or by delaying remove(). Non-blocking.",
+    "Captcha.jsx picks TEST_SITEKEY for every non-production hostname, which is correct for preview but means the production sitekey is never exercised in preview. Consider a documented smoke test on the real production domain after deploy."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "100%"},
+  "test_credentials": "Admin sudarshan@karweers.com / Sudarshan@2026 (not needed for this run — non-login forms only).",
+  "seed_data_creation": "None. Newsletter subscription submitted with disposable email test_nl@test.com; no admin data mutated.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Turnstile TEST sitekey renders and auto-solves on Register (/register), Newsletter (home footer, data-testid=newsletter), and Consultation (home #consult, data-testid=consultation). Cloudflare iframe URL confirmed: https://challenges.cloudflare.com/cdn-cgi/challenge-platform/.../1x00000000000000000000AA/dark/... . 0 CSP violations. Newsletter POST /api/newsletter returned success (toast contained 'subscribe'/'confirm'). Booking/consultation submit was NOT exercised end-to-end to avoid creating dummy leads and to avoid any Razorpay path; only widget presence + auto-solve verified for that form. If a future test needs to submit the booking form, use consent-checkbox where required and a TEST_ prefixed name/email so cleanup is easy. Admin login flow was already verified by main agent and skipped here.",
+  "rca of the issue": "No bugs found. Prior hCaptcha errors are resolved by the switch to Cloudflare Turnstile — the widget now renders and returns a token on all captcha-gated forms in the preview environment."
+}

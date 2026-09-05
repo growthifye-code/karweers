@@ -62,7 +62,17 @@ db = client[os.environ['DB_NAME']]
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
 HCAPTCHA_SECRET = os.environ.get('HCAPTCHA_SECRET', '')
 HCAPTCHA_SITEKEY = os.environ.get('HCAPTCHA_SITEKEY', '')
-# Diagnostic flag: force full server-side hCaptcha verification even on the preview host, so
+# Cloudflare Turnstile (active captcha provider).
+TURNSTILE_SITEKEY = os.environ.get('TURNSTILE_SITEKEY', '')
+TURNSTILE_SECRET = os.environ.get('TURNSTILE_SECRET', '')
+# Turnstile official test secrets (always-pass / always-fail / duplicate) — treated as
+# "not yet configured for real" so preview/dev stays lenient until the real secret is set.
+_TURNSTILE_TEST_SECRETS = {
+    "1x0000000000000000000000000000000AA",
+    "2x0000000000000000000000000000000AA",
+    "3x0000000000000000000000000000000AA",
+}
+# Diagnostic flag: force full server-side captcha verification even on the preview host, so
 # a real key pair can be validated end-to-end before a production deploy. Off by default.
 CAPTCHA_FORCE_VERIFY = os.environ.get('CAPTCHA_FORCE_VERIFY', '') == '1'
 _HCAPTCHA_TEST_SECRET = "0x0000000000000000000000000000000000000000"
@@ -100,31 +110,30 @@ def _is_preview_host(request=None) -> bool:
 def verify_captcha(token, ip=None, request=None):
     if not token:
         raise HTTPException(status_code=400, detail="Captcha verification required")
-    # Preview/dev: the real Enterprise sitekey is hostname-locked in the hCaptcha
+    # Preview/dev: the real Turnstile sitekey is hostname-locked in the Cloudflare
     # dashboard, so the widget cannot complete a challenge on the ephemeral preview
-    # domain. There the frontend uses the always-pass hCaptcha TEST key; accept a
+    # domain. There the frontend uses the always-pass Turnstile TEST key; accept a
     # present token. Production (real domain) always runs full server-side verify.
     if _is_preview_host(request) and not CAPTCHA_FORCE_VERIFY:
         return True
-    # Lenient mode: real site key set but real secret not yet configured.
-    if HCAPTCHA_SECRET == _HCAPTCHA_TEST_SECRET:
+    # Lenient mode: real sitekey set but real secret not yet configured (still a test secret).
+    if not TURNSTILE_SECRET or TURNSTILE_SECRET in _TURNSTILE_TEST_SECRETS:
         return True
     try:
-        # Only `secret` + `response` are required. The optional `sitekey`/`remoteip`
-        # params can only ADD failure modes (e.g. sitekey-secret-mismatch), so we omit
-        # them for a robust, standard verification.
-        form = {"secret": HCAPTCHA_SECRET, "response": token}
-        r = requests.post("https://api.hcaptcha.com/siteverify", data=form, timeout=10)
+        form = {"secret": TURNSTILE_SECRET, "response": token}
+        if ip:
+            form["remoteip"] = ip
+        r = requests.post("https://challenges.cloudflare.com/turnstile/v0/siteverify",
+                          data=form, timeout=10)
         data = r.json()
         ok = data.get("success", False)
     except Exception:
         raise HTTPException(status_code=503, detail="Captcha service unavailable")
     if not ok:
         codes = data.get("error-codes") or []
-        # Diagnostic only: hCaptcha error-codes + hostname (never the token/secret).
-        logger.warning("hCaptcha verification failed: error-codes=%s hostname=%s sitekey=%s",
-                       codes, data.get("hostname"), HCAPTCHA_SITEKEY)
-        # Surface the exact hCaptcha code so config issues are diagnosable without server logs.
+        # Diagnostic only: Turnstile error-codes + hostname (never the token/secret).
+        logger.warning("Turnstile verification failed: error-codes=%s hostname=%s",
+                       codes, data.get("hostname"))
         suffix = f" [{', '.join(codes)}]" if codes else ""
         raise HTTPException(status_code=403, detail=f"Captcha verification failed{suffix}")
     return True
@@ -3824,6 +3833,8 @@ async def public_config():
     build-time constant in the frontend so the URL is not disclosed over the API."""
     return {
         "hcaptcha_sitekey": os.environ.get("HCAPTCHA_SITEKEY", ""),
+        "turnstile_sitekey": os.environ.get("TURNSTILE_SITEKEY", ""),
+        "captcha_provider": "turnstile",
     }
 
 
@@ -6553,13 +6564,13 @@ CSP_POLICY = (
     "default-src 'self'; "
     "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://assets.emergent.sh "
     "https://ap.emergent.sh https://static.cloudflareinsights.com "
-    "https://checkout.razorpay.com https://*.hcaptcha.com https://hcaptcha.com https://www.youtube.com; "
+    "https://checkout.razorpay.com https://*.hcaptcha.com https://hcaptcha.com https://challenges.cloudflare.com https://www.youtube.com; "
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://*.hcaptcha.com; "
     "font-src 'self' data: https://fonts.gstatic.com; "
     "img-src 'self' data: blob: https:; "
     "media-src 'self' blob: https:; "
     "connect-src 'self' https: wss: ws:; "
-    "frame-src 'self' https://*.hcaptcha.com https://hcaptcha.com https://*.razorpay.com "
+    "frame-src 'self' https://*.hcaptcha.com https://hcaptcha.com https://challenges.cloudflare.com https://*.razorpay.com "
     "https://www.youtube.com https://www.youtube-nocookie.com; "
     "worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; "
     "form-action 'self' https://checkout.razorpay.com"

@@ -28,10 +28,23 @@ export function getHcaptchaSitekey() {
   }
 }
 
+export function getTurnstileSitekey() {
+  // Cloudflare Turnstile sitekey (public). Prefer build-time env, fall back to the
+  // backend-provided value cached at startup (rotatable via backend .env, no rebuild).
+  const envKey = process.env.REACT_APP_TURNSTILE_SITEKEY || "";
+  if (envKey) return envKey;
+  try {
+    return localStorage.getItem("sk_turnstile_sitekey") || "";
+  } catch {
+    return "";
+  }
+}
+
 export async function loadPublicConfig() {
   try {
     const { data } = await axios.get(`${process.env.REACT_APP_BACKEND_URL}/api/public-config`, { timeout: 8000 });
     if (data?.hcaptcha_sitekey) localStorage.setItem("sk_hcaptcha_sitekey", data.hcaptcha_sitekey);
+    if (data?.turnstile_sitekey) localStorage.setItem("sk_turnstile_sitekey", data.turnstile_sitekey);
     return data;
   } catch {
     return null;

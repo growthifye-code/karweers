@@ -1,37 +1,59 @@
-import { forwardRef, useRef, useState, useEffect, useCallback } from "react";
-import HCaptcha from "@hcaptcha/react-hcaptcha";
+import { forwardRef, useRef, useState, useEffect, useImperativeHandle, useCallback } from "react";
 import { RotateCw, ShieldCheck } from "lucide-react";
-import { getHcaptchaSitekey } from "@/config";
+import { getTurnstileSitekey } from "@/config";
 
-// hCaptcha's official always-pass TEST sitekey (works on ANY hostname, never challenges).
-const TEST_SITEKEY = "10000000-ffff-ffff-ffff-000000000001";
+// Cloudflare Turnstile — official always-pass TEST sitekey (works on ANY hostname).
+const TEST_SITEKEY = "1x00000000000000000000AA";
 
-// The real sitekey is hostname-locked to production in the hCaptcha dashboard, so it
+// The real sitekey is hostname-locked to production in the Cloudflare dashboard, so it
 // cannot complete a challenge on the ephemeral preview domain. Select by EXACT hostname:
 // real key only on production; the always-pass test key everywhere else (preview/localhost).
 // The backend already auto-passes captcha on preview hosts, so the test token is accepted
 // on preview and full siteverify runs only on production. The production sitekey is served
-// by the backend (/api/public-config → getHcaptchaSitekey) so it can be rotated via .env.
+// by the backend (/api/public-config → getTurnstileSitekey) so it can be rotated via .env.
 const PRODUCTION_HOSTNAMES = new Set(["sudarshankarweer.com", "www.sudarshankarweer.com"]);
 
 function pickSitekey() {
   // Diagnostic override: force the real sitekey everywhere (used to validate a real key
   // pair on the preview domain before deploying). Requires the preview host to be added to
-  // the hCaptcha site's allowed hostnames.
+  // the Turnstile widget's allowed hostnames.
   if (process.env.REACT_APP_CAPTCHA_FORCE_REAL === "1") {
-    return getHcaptchaSitekey() || TEST_SITEKEY;
+    return getTurnstileSitekey() || TEST_SITEKEY;
   }
   const host = (typeof window !== "undefined" ? window.location.hostname : "").toLowerCase();
   if (PRODUCTION_HOSTNAMES.has(host)) {
-    return getHcaptchaSitekey() || TEST_SITEKEY;
+    return getTurnstileSitekey() || TEST_SITEKEY;
   }
   return TEST_SITEKEY;
 }
 
-const SITEKEY = pickSitekey();
+const SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+let _scriptPromise = null;
+
+function loadTurnstileScript() {
+  if (typeof window !== "undefined" && window.turnstile) return Promise.resolve();
+  if (_scriptPromise) return _scriptPromise;
+  _scriptPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector("script[data-turnstile]");
+    if (existing) {
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener("error", () => reject(new Error("load failed")), { once: true });
+      return;
+    }
+    const s = document.createElement("script");
+    s.src = SCRIPT_SRC;
+    s.async = true;
+    s.defer = true;
+    s.dataset.turnstile = "true";
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("load failed"));
+    document.head.appendChild(s);
+  });
+  return _scriptPromise;
+}
 
 // Find the surrounding form (or nearest container that holds form fields) so we can mount
-// hCaptcha only once the visitor actually starts filling it in.
+// the widget only once the visitor actually starts filling it in.
 function findFieldContainer(el) {
   if (!el) return null;
   const form = el.closest("form");
@@ -46,20 +68,23 @@ function findFieldContainer(el) {
 
 const Captcha = forwardRef(function Captcha({ onVerify, onExpire, lazy = true }, ref) {
   const wrapRef = useRef(null);
-  const innerRef = useRef(null);
+  const boxRef = useRef(null);
+  const widgetId = useRef(null);
   const [active, setActive] = useState(!lazy);
   const [errored, setErrored] = useState(false);
-  const [reloadKey, setReloadKey] = useState(0);
 
-  // Forward the widget instance to both our internal ref and the parent's ref.
-  const setRefs = useCallback((node) => {
-    innerRef.current = node;
-    if (typeof ref === "function") ref(node);
-    else if (ref) ref.current = node;
-  }, [ref]);
+  const reset = useCallback(() => {
+    setErrored(false);
+    try {
+      if (widgetId.current !== null && window.turnstile) window.turnstile.reset(widgetId.current);
+    } catch (e) { /* widget not mounted */ }
+    onVerify && onVerify("");
+  }, [onVerify]);
 
-  // Lazy mount: load hCaptcha only when the visitor first interacts with the form. This
-  // avoids loading the hCaptcha script on every page view and sharply cuts rate-limit risk.
+  // Keep the same imperative API the forms already use (captchaRef.current.resetCaptcha()).
+  useImperativeHandle(ref, () => ({ resetCaptcha: reset, reset }), [reset]);
+
+  // Lazy mount: activate only when the visitor first interacts with the form.
   useEffect(() => {
     if (active) return;
     const container = findFieldContainer(wrapRef.current);
@@ -69,16 +94,55 @@ const Captcha = forwardRef(function Captcha({ onVerify, onExpire, lazy = true },
     return () => container.removeEventListener("focusin", activate);
   }, [active]);
 
-  // Recover from a "rate limited / network error" by remounting the widget (a full remount
-  // re-requests the hCaptcha script + a fresh challenge, clearing transient load failures).
+  // Explicit render once active.
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    let tries = 0;
+    const doRender = () => {
+      if (cancelled || widgetId.current !== null) return;
+      if (!window.turnstile || !window.turnstile.render || !boxRef.current) {
+        if (tries++ < 60) { setTimeout(doRender, 100); return; }
+        setErrored(true);
+        return;
+      }
+      try {
+        widgetId.current = window.turnstile.render(boxRef.current, {
+          sitekey: pickSitekey(),
+          theme: "dark",
+          callback: (token) => { setErrored(false); onVerify && onVerify(token); },
+          "expired-callback": () => { onVerify && onVerify(""); onExpire && onExpire(); },
+          "timeout-callback": () => { setErrored(true); onVerify && onVerify(""); },
+          "error-callback": () => { setErrored(true); onVerify && onVerify(""); },
+        });
+      } catch (e) { setErrored(true); }
+    };
+    loadTurnstileScript().then(() => { if (!cancelled) doRender(); }).catch(() => setErrored(true));
+    return () => {
+      cancelled = true;
+      try {
+        if (widgetId.current !== null && window.turnstile) window.turnstile.remove(widgetId.current);
+      } catch (e) { /* noop */ }
+      widgetId.current = null;
+    };
+  }, [active, onVerify, onExpire]);
+
   const reload = () => {
     setErrored(false);
-    try { innerRef.current?.resetCaptcha(); } catch (e) { /* widget not mounted */ }
-    setReloadKey((k) => k + 1);
+    try {
+      if (widgetId.current !== null && window.turnstile) {
+        window.turnstile.reset(widgetId.current);
+        return;
+      }
+    } catch (e) { /* fall through to remount */ }
+    // Force a remount by toggling active off/on.
+    widgetId.current = null;
+    setActive(false);
+    setTimeout(() => setActive(true), 20);
   };
 
   return (
-    <div data-testid="hcaptcha" className="my-2" ref={wrapRef}>
+    <div data-testid="captcha" className="my-2" ref={wrapRef}>
       {!active ? (
         <button
           type="button"
@@ -93,26 +157,14 @@ const Captcha = forwardRef(function Captcha({ onVerify, onExpire, lazy = true },
         </button>
       ) : (
         <>
-          <HCaptcha
-            key={`${SITEKEY}-${reloadKey}`}
-            ref={setRefs}
-            sitekey={SITEKEY}
-            theme="dark"
-            reCaptchaCompat={false}
-            onVerify={(t) => { setErrored(false); onVerify && onVerify(t); }}
-            onExpire={() => onExpire && onExpire()}
-            onChalExpired={() => setErrored(true)}
-            onError={(e) => { console.error("hCaptcha error", e); setErrored(true); }}
-          />
-          {/* hCaptcha sometimes shows a "rate limited / network error" note INSIDE its iframe
-              without firing onError, so we always expose a reload affordance to recover. */}
+          <div ref={boxRef} data-testid="turnstile-widget" aria-live="polite" />
           <button
             type="button"
             onClick={reload}
             data-testid="captcha-reload"
             className={`mt-2 inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-secondary ${errored ? "border-[hsl(var(--destructive))]/40 bg-[hsl(var(--destructive))]/5 text-foreground" : "border-border/60 text-muted-foreground"}`}
           >
-            <RotateCw className="h-3.5 w-3.5" /> {errored ? "Captcha didn't load — tap to retry" : "Captcha not showing? Reload it"}
+            <RotateCw className="h-3.5 w-3.5" /> {errored ? "Verification didn't load — tap to retry" : "Verification not showing? Reload it"}
           </button>
         </>
       )}

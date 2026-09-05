@@ -4102,6 +4102,8 @@ async def admin_podcast_intro(file: UploadFile = File(...), admin: dict = Depend
     if len(data) > 15 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Intro clip must be under 15 MB")
     ctype = file.content_type or "audio/mpeg"
+    if not ctype.lower().startswith("audio/"):
+        raise HTTPException(status_code=400, detail="Intro clip must be an audio file (mp3, m4a, wav, etc.)")
     await asyncio.to_thread(storage_helper.put_object, "podcast/sk-intro-clip", data, ctype)
     await db.app_meta.update_one({"_id": "podcast_intro"},
                                  {"$set": {"path": "podcast/sk-intro-clip", "content_type": ctype, "updated_at": now_iso()}}, upsert=True)

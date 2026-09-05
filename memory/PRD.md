@@ -611,3 +611,9 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - **ACTION FOR USER**: these are Emergent-platform dependency pins. To get the starlette/litellm patches, raise with support@emergent.sh to ship an `emergentintegrations` build compatible with patched starlette + litellm. Nothing actionable in app code.
 - Backend confirmed healthy on the original stack (fastapi 0.110.1 / starlette 0.37.2) after revert; CORS allowlist + CSP fixes from the prior audit remain intact.
 
+
+## Security Re-audit — Podcast Intro Upload (2026-06-05)
+- Reviewed all changes since prior audit (podcast intro produce/upload path; rest of app unchanged). Confirmed prior hardening intact: CORS allowlist, CSP (meta + header), CLIENT_IP_HEADER option, fastapi/starlette reverted to deploy-safe pins.
+- **FIXED (LOW, defense-in-depth) — stored-XSS via intro content-type**: `POST /api/admin/podcast/intro` stored and re-served the uploaded `content_type` verbatim, so a trusted/allowlisted admin could upload an HTML file as `text/html` and have it served as HTML from the API origin (same domain as the site in prod) → stored XSS. Added a guard: upload now rejects any non-`audio/*` content type (400), guaranteeing `/api/podcast/intro-audio` always serves audio. Verified: spoofed `text/html` → 400; valid mp3 → 200; serves `audio/mpeg`. (Episode audio was already hardcoded to `audio/mpeg`.)
+- Dev helper `backend/make_intro.py` (one-off intro producer: numpy pad synth + Onyx TTS + ffmpeg ducking mix) left in place for regeneration; not imported by server, no secrets, uses subprocess with list args (no shell). Harmless.
+

@@ -602,3 +602,12 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - **NOTED (not fixed, for user/deploy)**: (1) `_client_ip()` trusts CF-Connecting-IP first — safe ONLY if Cloudflare is the sole ingress; ensure direct origin access is blocked or CF headers are stripped at ingress. (2) `RAZORPAY_WEBHOOK_SECRET` is empty → server-side payment-confirmation backup is inert (reliability gap, not exploitable); set it in Razorpay dashboard + prod env. (3) JWT stored in localStorage — acceptable given no XSS sinks + CSP now in place.
 - NOTE: backend/.env changes only apply to the LIVE site after pressing Redeploy in the Emergent dashboard.
 
+
+## Dependency CVE Audit (2026-06-05)
+- Ran `pip-audit` on backend deps. Findings in 3 packages:
+  - **starlette 0.37.2** — several CVEs (multipart/form DoS + others). **PATCH BLOCKED at platform level**: fixes need starlette ≥0.40, which needs a FastAPI bump. Verified that ANY change to fastapi/starlette in requirements.txt makes `pip install -r requirements.txt` fail with ResolutionImpossible — the Emergent-managed `litellm 1.80.0` wheel (pinned by `emergentintegrations 0.2.0` via a customer-assets URL) locks the whole dependency tree. Confirmed the upgrade works functionally (tested fastapi 0.116.1→0.141.1 + starlette 0.47.3/0.49.1: backend healthy, 26/26 commerce tests pass, multipart upload + CORS + CSP all fine) BUT reverted because it breaks the deploy build. requirements.txt is byte-identical to the committed original (empty git diff) → deployment unaffected. Partial mitigation already in place: SecurityGuard middleware caps request bodies at 2MB.
+  - **litellm 1.80.0** — multiple CVEs (fixes in 1.82–1.84). Emergent-managed pinned wheel; cannot change without breaking emergentintegrations. Exposure limited (server-side, our key, admin-triggered).
+  - **ecdsa 0.19.2** — PYSEC-2026-1325 (Minerva timing, no upstream fix). Transitive via `python-jose`, which is NOT imported anywhere in the code; all signing is HS256/WebAuthn (no ECDSA). Not exploitable.
+- **ACTION FOR USER**: these are Emergent-platform dependency pins. To get the starlette/litellm patches, raise with support@emergent.sh to ship an `emergentintegrations` build compatible with patched starlette + litellm. Nothing actionable in app code.
+- Backend confirmed healthy on the original stack (fastapi 0.110.1 / starlette 0.37.2) after revert; CORS allowlist + CSP fixes from the prior audit remain intact.
+

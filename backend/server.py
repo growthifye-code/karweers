@@ -338,9 +338,21 @@ LOGIN_LOCKOUT_MINUTES = 15
 
 
 def _client_ip(request: Request) -> str:
-    """Authoritative client IP. Behind Cloudflare, CF-Connecting-IP is set by CF and
-    cannot be spoofed by the client, so it takes priority over the (client-forgeable)
-    left-most X-Forwarded-For value. Falls back to XFF/socket for non-CF (preview) env."""
+    """Authoritative client IP.
+
+    If CLIENT_IP_HEADER is set (e.g. "cf-connecting-ip"), that header is trusted
+    FIRST and exclusively when present — set this ONLY to a header your edge/ingress
+    guarantees and overwrites (so a client can't spoof it). Once Emergent confirms
+    which header their edge sets, point CLIENT_IP_HEADER at it — no code change needed.
+
+    When unset (default), falls back to the historical detection order
+    (CF-Connecting-IP → True-Client-IP → X-Forwarded-For → X-Real-IP → socket),
+    which preserves today's behaviour for preview + Cloudflare-fronted prod."""
+    trusted = os.environ.get("CLIENT_IP_HEADER", "").strip().lower()
+    if trusted:
+        val = request.headers.get(trusted)
+        if val:
+            return val.split(",")[0].strip()
     cf = request.headers.get("cf-connecting-ip")
     if cf:
         return cf.strip()

@@ -23,14 +23,19 @@ export const PROGRAM_LINKS = [
   { to: "/corporate", label: "Corporate & Enterprise" },
 ];
 
+const PODCAST_EMBLEM = "https://static.prod-images.emergentagent.com/jobs/69d54eb7-07e1-4ffd-ad08-8725f9f9829e/images/a09b8b2f1be637508ef78c38659a1ba5388d54e23e2c4150d7b98bf1a2775ce8.jpeg";
+
 const NAV = [
   { label: "About", to: "/about" },
-  { label: "Sectors & Capital", to: "/explore" },
-  { label: "Leadership Lab", to: "/leadership-lab" },
+  { label: "Explore", to: "/explore" },
   { label: "Insights", to: "/insights-hub" },
-  { label: "Case Studies", to: "/case-studies" },
-  { label: "Learning", to: "/learning" },
   { label: "Podcast", to: "/podcast" },
+  { label: "Cases", to: "/case-studies" },
+];
+
+export const MORE_LINKS = [
+  { label: "Leadership Lab", to: "/leadership-lab" },
+  { label: "Learning", to: "/learning" },
   { label: "Archive", to: "/archive" },
   { label: "Market", to: "/market" },
   { label: "Deals", to: "/deals" },
@@ -55,6 +60,7 @@ export default function Navbar() {
   const [open, setOpen] = useState(false);
   const [svcOpen, setSvcOpen] = useState(false);
   const [progOpen, setProgOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
@@ -92,8 +98,27 @@ export default function Navbar() {
               )}
             </div>
             {NAV.map((l) => (
-              <Link key={l.label} to={l.to} data-testid={`nav-${l.label.toLowerCase().replace(" ", "-")}`} className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">{l.label}</Link>
+              <Link key={l.label} to={l.to} data-testid={`nav-${l.label.toLowerCase().replace(" ", "-")}`} className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">
+                {l.label === "Podcast" && <img src={PODCAST_EMBLEM} alt="" data-testid="nav-podcast-emblem" className="h-5 w-5 rounded-full object-cover ring-1 ring-[hsl(var(--primary))]/40" />}
+                {l.label}
+              </Link>
             ))}
+            <div className="relative" onMouseEnter={() => setMoreOpen(true)} onMouseLeave={() => setMoreOpen(false)}>
+              <button type="button" data-testid="nav-more" className="inline-flex items-center gap-1 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">
+                More <ChevronDown className="h-3.5 w-3.5" />
+              </button>
+              {moreOpen && (
+                <div className="absolute left-1/2 top-full w-56 -translate-x-1/2 pt-3" data-testid="more-dropdown">
+                  <div className="overflow-hidden rounded-2xl border border-border bg-card p-2 shadow-2xl">
+                    {MORE_LINKS.map((s) => (
+                      <Link key={s.to} to={s.to} className="block rounded-xl px-4 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
+                        {s.label}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
             <div className="relative" onMouseEnter={() => setProgOpen(true)} onMouseLeave={() => setProgOpen(false)}>
               <Link to="/products" data-testid="nav-programs" className="inline-flex items-center gap-1 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">
                 Work with SK <ChevronDown className="h-3.5 w-3.5" />
@@ -140,7 +165,11 @@ export default function Navbar() {
               {SERVICE_LINKS.map((s) => (
                 <Link key={s.slug} to={`/services/${s.slug}`} onClick={() => setOpen(false)} className="pl-3 text-sm text-muted-foreground">{s.label}</Link>
               ))}
-              {NAV.map((l) => (<Link key={l.label} to={l.to} onClick={() => setOpen(false)} className="text-sm font-medium text-muted-foreground">{l.label}</Link>))}
+              {NAV.map((l) => (<Link key={l.label} to={l.to} onClick={() => setOpen(false)} className="inline-flex items-center gap-2 text-sm font-medium text-muted-foreground">{l.label === "Podcast" && <img src={PODCAST_EMBLEM} alt="" className="h-5 w-5 rounded-full object-cover ring-1 ring-[hsl(var(--primary))]/40" />}{l.label}</Link>))}
+              <p className="pt-1 text-xs font-semibold uppercase tracking-wide text-[hsl(var(--primary))]">More</p>
+              {MORE_LINKS.map((s) => (
+                <Link key={s.to} to={s.to} onClick={() => setOpen(false)} className="pl-3 text-sm text-muted-foreground">{s.label}</Link>
+              ))}
               <p className="pt-1 text-xs font-semibold uppercase tracking-wide text-[hsl(var(--primary))]">Work with SK</p>
               {PROGRAM_LINKS.map((s) => (
                 <Link key={s.to} to={s.to} onClick={() => setOpen(false)} className="pl-3 text-sm text-muted-foreground">{s.label}</Link>

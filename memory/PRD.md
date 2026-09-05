@@ -656,3 +656,7 @@ Build www.sudarshankarweer.com — a contemporary, rich, "colourful and classy" 
 - Security audit (podcast/ElevenLabs additions): CLEAN. ElevenLabs key only in backend/.env (not in code/frontend/public-config); dev scripts read key from env; new admin endpoints require_admin (suggest-topics unauth=401); prior hardening intact.
 - OPEN: the 2 older English episodes (Climate Finance, Stop Chasing Revenue) predate Hinglish — offer to regenerate them in Hinglish for full consistency.
 
+
+
+## Podcast header emblem (2026-06-05)
+- Added a unique brand emblem to the /podcast header (data-testid podcast-emblem): a generated circular badge — 'SK' monogram fused with soundwave/equalizer + mic, lime-green on charcoal. Displayed in a `rounded-full` clip + lime ring glow so the JPEG's square corners are masked. Verified via screenshot.

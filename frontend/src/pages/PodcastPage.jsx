@@ -74,7 +74,15 @@ export default function PodcastPage() {
       <Navbar />
       <header className="border-b border-border bg-card">
         <div className="mx-auto max-w-5xl px-6 py-20 lg:py-28">
-          <span className="inline-flex items-center gap-2 rounded-full border border-[hsl(var(--primary))]/30 bg-[hsl(var(--primary))]/10 px-3 py-1 text-xs font-semibold text-[hsl(var(--primary))]"><Mic className="h-3.5 w-3.5" /> Weekly podcast</span>
+          <div className="flex items-center gap-5">
+            <img
+              src="https://static.prod-images.emergentagent.com/jobs/69d54eb7-07e1-4ffd-ad08-8725f9f9829e/images/a09b8b2f1be637508ef78c38659a1ba5388d54e23e2c4150d7b98bf1a2775ce8.jpeg"
+              alt="The SK Strategy Brief emblem"
+              data-testid="podcast-emblem"
+              className="h-20 w-20 shrink-0 rounded-full object-cover ring-2 ring-[hsl(var(--primary))]/40 shadow-[0_0_40px_-8px_hsl(var(--primary)/0.5)] sm:h-24 sm:w-24"
+            />
+            <span className="inline-flex items-center gap-2 rounded-full border border-[hsl(var(--primary))]/30 bg-[hsl(var(--primary))]/10 px-3 py-1 text-xs font-semibold text-[hsl(var(--primary))]"><Mic className="h-3.5 w-3.5" /> Weekly podcast</span>
+          </div>
           <h1 className="mt-5 font-display text-4xl font-black leading-tight sm:text-5xl lg:text-6xl">The SK Strategy Brief</h1>
           <p className="mt-5 max-w-2xl text-base text-muted-foreground">Sharp, weekly insight for founders and CXOs — strategy, structure, people, KPIs, fundraising, and the energy transition. Hosted by Sudarshan Karweer.</p>
         </div>
